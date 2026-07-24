@@ -1110,6 +1110,19 @@ components:
           type: object
           description: Compact CRDT replica snapshot (present when available)
           additionalProperties: true
+        broker:
+          type: object
+          description: |
+            Owner's MQTT broker settings, present only when the owner is
+            configured. Lets a fresh joining head inherit Home Assistant / MQTT
+            config with no re-typing. friendly_name is intentionally omitted so
+            each head keeps its own MQTT node name.
+          properties:
+            host: { type: string }
+            port: { type: integer }
+            username: { type: string }
+            password: { type: string }
+            base_topic: { type: string }
     GroupJoinResult:
       type: object
       properties:
@@ -1117,6 +1130,12 @@ components:
         group_id: { type: string }
         group_label: { type: string }
         member_count: { type: integer }
+        broker_inherited:
+          type: boolean
+          description: true when the owner's broker settings were adopted (this head had none of its own).
+        rebooting:
+          type: boolean
+          description: true when the device is restarting to apply an inherited broker.
     GroupSyncResult:
       type: object
       properties:
