@@ -142,9 +142,13 @@ WiFi can be set at build time (`sdkconfig.defaults.local` / `menuconfig`) or at
 runtime (NVS, via the captive-portal SoftAP). On first boot with no credentials
 the device starts a `mitsubishi-heatpump-XXXX` SoftAP (captive portal at
 `http://192.168.4.1/`); pick a network and enter the passphrase, and it saves to
-NVS and reboots into STA mode. The **MQTT broker** is likewise configurable at
-build time *or* at runtime from the web UI (**System → MQTT / Home Assistant**),
-persisted to NVS; saving reboots the device. Each unit derives a short
+NVS and reboots into STA mode. The **MQTT broker** is **not baked into the
+firmware** by default (open-source builds ship with no broker), so on first boot
+a fresh unit comes up unconfigured and you enter the broker at runtime from the
+web UI (**System → MQTT / Home Assistant**), persisted to NVS; saving reboots the
+device. Additional units can instead **inherit** the broker by joining an
+existing group. (Personal builds may still bake a default broker via
+`CONFIG_MQTT_BROKER_URI` in `sdkconfig.defaults.local`.) Each unit derives a short
 hardware-unique id from its factory MAC (e.g. `E608`) that is reused everywhere
 so multiple units never collide: the SoftAP name (`mitsubishi-heatpump-<id>`),
 the **mDNS hostname** (`mitsubishi-heatpump-<id>.local`), and the default MQTT

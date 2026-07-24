@@ -27,10 +27,15 @@ menu "Mitsubishi Heat Pump Controller"
 
     menu "MQTT"
         config MQTT_BROKER_URI
-            string "Broker URI"
-            default "mqtt://192.168.1.10:1883"
+            string "Broker URI (optional default)"
+            default ""
             help
-                e.g. mqtt://host:1883 or mqtts://host:8883 for TLS.
+                Optional compile-time default broker, e.g.
+                mqtt://host:1883 or mqtts://host:8883 for TLS. Leave EMPTY
+                for a generic/open-source build: the device then boots
+                unconfigured and the user enters the broker in the on-device
+                setup wizard (or a new head inherits it by joining a group).
+                For personal builds, set this in sdkconfig.defaults.local.
 
         config MQTT_USERNAME
             string "Username"
