@@ -174,6 +174,12 @@ justify-content:center;padding:16px;z-index:100}
 .overlay h1{margin-bottom:14px}
 .wz-card{max-width:400px}
 .wz-card h1{margin-bottom:4px}
+.wz-eyebrow{font-size:.72em;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--fg-2);font-weight:600;margin-bottom:8px}
+.wz-product{font-size:.9em;color:var(--fg-2);margin-bottom:2px}
+.wz-name{margin:0 0 8px;font-size:1.6em;line-height:1.2;word-break:break-word}
+.wz-sub{margin:0 0 4px}
+.wz-check{font-size:2.4em;line-height:1;color:var(--accent);margin-bottom:6px}
 .wz-choice{display:block;width:100%;text-align:left;padding:14px 16px;margin-top:12px;height:auto;line-height:1.35}
 .wz-choice-t{display:block;font-weight:600;font-size:1em}
 .wz-choice-s{display:block;font-weight:400;font-size:.82em;opacity:.85;margin-top:4px}
@@ -296,6 +302,9 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
 .dlg-back.show .dlg{transform:none}
 .dlg-title{font-size:1.02em;font-weight:600;color:var(--fg);margin:0 0 8px}
 .dlg-body{font-size:.9em;color:var(--fg-2);line-height:1.45;margin:0 0 18px}
+.dlg-input{width:100%;box-sizing:border-box;background:var(--bg);color:var(--fg);border:1px solid var(--border-strong);border-radius:8px;padding:9px 11px;font-size:1em;margin:0 0 18px;text-transform:uppercase;letter-spacing:.05em}
+.dlg-input:focus{border-color:var(--accent);outline:none}
+.dlg-ok:disabled{opacity:.45;cursor:not-allowed}
 .dlg-btns{display:flex;gap:10px}
 .dlg-btns .btn{margin-top:0}
 .dlg-cancel{background:var(--chip);color:var(--fg-2);border:1px solid var(--border-strong)}
@@ -328,26 +337,25 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
   <div class="card wz-card">
     <!-- Step 1: choose a path -->
     <div id="wzChoose">
-      <h1>Set up this zone</h1>
-      <p class="sub" style="margin:-4px 0 16px">Let's connect this heat pump to Home Assistant.</p>
+      <div class="wz-eyebrow">Setup wizard</div>
+      <div class="wz-product">Mitsubishi Heat Pump Controller</div>
+      <h1 id="wzName" class="wz-name">New controller</h1>
+      <p class="sub wz-sub">Choose how to get this controller connected.</p>
       <button class="btn btn-accent wz-choice" onclick="wzGoJoin()">
-        <span class="wz-choice-t">Join an existing system</span>
-        <span class="wz-choice-s">Already have a zone set up? Copy its Home Assistant settings automatically — no typing.</span>
+        <span class="wz-choice-t">Join an existing multizone group</span>
       </button>
       <button class="btn wz-choice" onclick="wzGoFirst()">
-        <span class="wz-choice-t">This is my first zone</span>
-        <span class="wz-choice-s">Enter your MQTT broker / Home Assistant details.</span>
+        <span class="wz-choice-t">Manual setup</span>
       </button>
-      <p class="hint wz-note">Wide-vane support is detected automatically once the unit is connected — nothing to set up here.</p>
-      <button class="wz-skip" onclick="wzSkip()">Skip for now</button>
+      <button class="wz-skip" onclick="wzSkip()">Skip wizard</button>
     </div>
 
-    <!-- Step 2a: join an existing system -->
+    <!-- Step 2a: join an existing multizone group -->
     <div id="wzJoin" class="hidden">
-      <h1>Join a system</h1>
-      <p class="sub" style="margin:-4px 0 14px">On a zone that's already set up, open its <b>Zones</b> tab and tap
+      <h1>Join a group</h1>
+      <p class="sub" style="margin:-4px 0 14px">On a controller that's already in the group, open its <b>Zones</b> tab and tap
         <b>Add a zone</b>. Then scan below and pick it.</p>
-      <button class="btn btn-warn wz-full" onclick="wzScan()">Scan for systems</button>
+      <button class="btn btn-warn wz-full" onclick="wzScan()">Scan for groups</button>
       <div id="wzScanMsg" class="status hidden" style="margin-top:8px"></div>
       <div id="wzCandidates"></div>
       <div id="wzJoinCard" class="gjoincard hidden" style="margin-top:10px">
@@ -363,10 +371,10 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
       <button class="wz-skip" onclick="wzBack()">&larr; Back</button>
     </div>
 
-    <!-- Step 2b: first zone — enter broker -->
+    <!-- Step 2b: manual setup — enter broker -->
     <div id="wzFirst" class="hidden">
-      <h1>Home Assistant / MQTT</h1>
-      <p class="sub" style="margin:-4px 0 14px">Enter your MQTT broker. Additional zones can copy these from this one.</p>
+      <h1>Manual setup</h1>
+      <p class="sub" style="margin:-4px 0 14px">Enter your MQTT broker. Other zones can copy these when they join.</p>
       <div class="mqf"><label for="wzHost">Broker host</label>
         <input id="wzHost" type="text" placeholder="homeassistant.local" autocomplete="off"></div>
       <div class="mqf"><label for="wzPort">Port</label>
@@ -387,6 +395,15 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
       <h1>Almost there</h1>
       <div class="wz-spin"></div>
       <p class="sub" id="wzRebootMsg" style="margin-top:14px">Applying settings and restarting…</p>
+    </div>
+
+    <!-- Step 3b: joined, nothing to inherit -->
+    <div id="wzJoined" class="hidden" style="text-align:center">
+      <div class="wz-check">&#10003;</div>
+      <h1 style="margin-bottom:6px">Joined <span id="wzJoinedName">the group</span></h1>
+      <p class="sub" style="margin:0 0 16px">This group isn&rsquo;t sharing Home Assistant / MQTT
+        settings, so there&rsquo;s nothing else to copy. You can add MQTT anytime in Settings.</p>
+      <button class="btn btn-accent wz-full" onclick="wzJoinedDone()">Done</button>
     </div>
   </div>
 </div>
@@ -662,7 +679,7 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
     </div>
 
     <button class="btn" id="wfOtherBtn" onclick="joinOther()" style="margin-top:10px">Other network…</button>
-    <button class="btn btn-danger" onclick="sysPost('/api/system/factory_reset','Erase WiFi credentials and reboot into setup mode?',true)">Forget WiFi &amp; reset</button>
+    <button class="btn btn-danger" onclick="factoryReset()">Factory reset</button>
   </div>
 
   <div class="card" data-grp="settings">
@@ -829,6 +846,16 @@ function uiDialog(opts){
       const p=document.createElement('div'); p.className='dlg-body';
       p.textContent=opts.body; dlg.appendChild(p);
     }
+    // Optional type-to-confirm: OK stays disabled until the user types the word.
+    let confirmInput=null;
+    if(opts.confirmWord){
+      confirmInput=document.createElement('input');
+      confirmInput.type='text'; confirmInput.className='dlg-input';
+      confirmInput.autocomplete='off'; confirmInput.autocapitalize='characters';
+      confirmInput.setAttribute('aria-label','Type '+opts.confirmWord+' to confirm');
+      confirmInput.placeholder=opts.confirmWord;
+      dlg.appendChild(confirmInput);
+    }
     const btns=document.createElement('div'); btns.className='dlg-btns';
     let cancelBtn=null;
     if(showCancel){
@@ -840,6 +867,11 @@ function uiDialog(opts){
     okBtn.className='btn dlg-ok'+(opts.danger?' danger':''); okBtn.textContent=okText;
     btns.appendChild(okBtn); dlg.appendChild(btns);
     back.appendChild(dlg); document.body.appendChild(back);
+    const confirmOk=()=>!confirmInput||confirmInput.value.trim().toUpperCase()===opts.confirmWord.toUpperCase();
+    if(confirmInput){
+      okBtn.disabled=true;
+      confirmInput.addEventListener('input',()=>{ okBtn.disabled=!confirmOk(); });
+    }
     let done=false;
     function close(val){
       if(done)return; done=true;
@@ -850,13 +882,13 @@ function uiDialog(opts){
     }
     function onKey(e){
       if(e.key==='Escape'){ e.preventDefault(); close(false); }
-      else if(e.key==='Enter'){ e.preventDefault(); close(true); }
+      else if(e.key==='Enter'){ e.preventDefault(); if(confirmOk()) close(true); }
     }
-    okBtn.addEventListener('click',()=>close(true));
+    okBtn.addEventListener('click',()=>{ if(confirmOk()) close(true); });
     if(cancelBtn) cancelBtn.addEventListener('click',()=>close(false));
     back.addEventListener('click',e=>{ if(e.target===back) close(false); });
     document.addEventListener('keydown',onKey,true);
-    requestAnimationFrame(()=>{ back.classList.add('show'); okBtn.focus(); });
+    requestAnimationFrame(()=>{ back.classList.add('show'); (confirmInput||okBtn).focus(); });
   });
 }
 function uiConfirm(opts){ return uiDialog(opts); }
@@ -1234,6 +1266,14 @@ async function sysPost(url,msg,danger){
   if(!(await uiConfirm({body:msg,okText:'Continue',danger:!!danger})))return;
   try{await fetch(url,{method:'POST'})}catch(e){}
   $('subtitle').textContent='rebooting…';
+}
+async function factoryReset(){
+  const ok=await uiConfirm({title:'Factory reset',
+    body:'This erases everything on this controller \u2014 Wi\u2011Fi, MQTT broker, group membership, device name and passwords \u2014 and reboots into first\u2011time setup. Type RESET to confirm.',
+    okText:'Erase everything',danger:true,confirmWord:'RESET'});
+  if(!ok)return;
+  try{await fetch('/api/system/factory_reset',{method:'POST'})}catch(e){}
+  $('subtitle').textContent='resetting\u2026';
 }
 
 function otaMsg(m,cls){const el=$('otaState');el.className='status '+cls;el.textContent=m;el.classList.remove('hidden')}
@@ -1632,7 +1672,7 @@ function applyRole(){
   if(user) showTab('climate');
 }
 
-async function loadAuth(){
+async function loadAuth(deferReveal){
   try{
     const a=await (await fetch('/api/auth')).json();
     authState.web=!!a.web_auth_enabled;
@@ -1652,7 +1692,7 @@ async function loadAuth(){
       return false;
     }
     $('loginGate').classList.add('hidden');
-    $('appWrap').classList.remove('hidden');
+    if(!deferReveal) $('appWrap').classList.remove('hidden');
     applyRole();
     $('secWeb').checked=a.web_auth_enabled;
     $('secApi').checked=a.api_auth_enabled;
@@ -1661,7 +1701,7 @@ async function loadAuth(){
     $('logoutIcon').classList.toggle('hidden',!a.web_auth_enabled);
     updateWebAccessState();
     return true;
-  }catch(e){ $('appWrap').classList.remove('hidden'); return true }
+  }catch(e){ if(!deferReveal) $('appWrap').classList.remove('hidden'); return true }
 }
 
 async function doLogin(){
@@ -2307,16 +2347,23 @@ function maybeShowWizard(configured){
   if(configured || wizardDismissed || wizardOpen) return;
   if(authState.role!=='admin') return;   // only admins configure the broker
   if(groupInGroup) return;                // in a group → broker comes via join
+  const nm=(curName||curHost||'').trim();
+  $('wzName').textContent=nm||'New controller';
   wzShow('wzChoose');
 }
 function wzShow(step){
   wizardOpen=true;
   $('setupWizard').classList.remove('hidden');
-  ['wzChoose','wzJoin','wzFirst','wzReboot'].forEach(s=>$(s).classList.toggle('hidden',s!==step));
+  ['wzChoose','wzJoin','wzFirst','wzReboot','wzJoined'].forEach(s=>$(s).classList.toggle('hidden',s!==step));
 }
 function wzSkip(){
   wizardDismissed=true; wizardOpen=false;
   $('setupWizard').classList.add('hidden');
+}
+function wzJoinedDone(){
+  wizardDismissed=true; wizardOpen=false;
+  $('setupWizard').classList.add('hidden');
+  refreshGroup();   // reflect the new membership in the Zones tab
 }
 function wzBack(){ wzShow('wzChoose'); }
 function wzGoJoin(){ wzShow('wzJoin'); $('wzCandidates').innerHTML=''; setElMsg('wzScanMsg','',null,true); $('wzJoinCard').classList.add('hidden'); }
@@ -2332,14 +2379,14 @@ async function wzScan(){
     const j=await r.json().catch(()=>({candidates:[]}));
     const list=(j&&j.candidates)||[];
     if(!list.length){
-      setElMsg('wzScanMsg','No system is inviting a new zone right now. On a zone that\u2019s set up, tap \u201cAdd a zone\u201d, then scan again.','');
+      setElMsg('wzScanMsg','No group is inviting a new zone right now. On a controller already in the group, tap \u201cAdd a zone\u201d, then scan again.','');
       return;
     }
     setElMsg('wzScanMsg','',null,true);
     const box=$('wzCandidates'); box.innerHTML='';
     list.forEach(c=>{
-      const group=c.glabel&&c.glabel.trim()?c.glabel:'Unnamed system';
-      const via=c.name&&c.name.trim()?c.name:(c.uid||'a zone');
+      const group=c.glabel&&c.glabel.trim()?c.glabel:'Unnamed group';
+      const via=c.name&&c.name.trim()?c.name:(c.uid||'a controller');
       const b=document.createElement('button'); b.className='gcand';
       const x=document.createElement('div'); x.className='gcand-x';
       const t=document.createElement('div'); t.className='gcand-t'; t.textContent=group;
@@ -2362,8 +2409,8 @@ function wzSelectCand(host,group){
 function wzJoinCardCancel(){ wzSelHost=''; $('wzJoinCard').classList.add('hidden'); setElMsg('wzJoinMsg','',null,true); }
 async function wzJoinGo(){
   const code=($('wzCode').value||'').trim();
-  if(!wzSelHost){ setElMsg('wzJoinMsg','Pick a system first.','err'); return; }
-  if(!code){ setElMsg('wzJoinMsg','Enter the 6-digit code shown on the other zone.','err'); return; }
+  if(!wzSelHost){ setElMsg('wzJoinMsg','Pick a group first.','err'); return; }
+  if(!code){ setElMsg('wzJoinMsg','Enter the 6-digit code shown on the other controller.','err'); return; }
   setElMsg('wzJoinMsg','Joining\u2026','info');
   try{
     const r=await fetch('/api/group/pair/join',{method:'POST',
@@ -2371,11 +2418,14 @@ async function wzJoinGo(){
       body:JSON.stringify({owner_host:wzSelHost,code:code})});
     const j=await r.json().catch(()=>({}));
     if(!r.ok){ setElMsg('wzJoinMsg',(j&&j.error)||'Could not join. Please try again.','err'); return; }
-    if(j.rebooting){ wzWaitReboot('Joined \u2014 copying Home Assistant settings and restarting…'); }
+    if(j.rebooting){ wzWaitReboot('Joined \u2014 copying settings and restarting…'); }
     else{
-      // Joined but the other zone had no broker to share; finish in the first-zone form.
-      wzShow('wzFirst');
-      setElMsg('wzFirstMsg','Joined the system, but it had no Home Assistant settings to copy. Enter them here.','info');
+      // Joined successfully, but the group had no broker to share. Membership is
+      // already applied live (group coordination is separate from MQTT), so just
+      // confirm success — don't force the manual broker form.
+      $('wzJoinedName').textContent=(j&&j.group_label&&j.group_label.trim())
+        ?('\u201c'+j.group_label+'\u201d'):'the group';
+      wzShow('wzJoined');
     }
   }catch(e){ setElMsg('wzJoinMsg','Network error \u2014 could not reach this device.','err'); }
 }
@@ -2396,8 +2446,8 @@ async function wzFirstSave(){
     const r=await fetch('/api/mqtt',{method:'POST',
       headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
     if(!r.ok){ $('wzFirstBtn').disabled=false; setElMsg('wzFirstMsg','Save failed: '+r.status,'err'); return; }
-    wzWaitReboot('Saved \u2014 connecting to Home Assistant and restarting…');
-  }catch(e){ wzWaitReboot('Saved \u2014 connecting to Home Assistant and restarting…'); }
+    wzWaitReboot('Saved \u2014 restarting…');
+  }catch(e){ wzWaitReboot('Saved \u2014 restarting…'); }
 }
 
 // Show the reboot spinner, then poll until the device is back and reload so the
@@ -2421,9 +2471,11 @@ function wzWaitReboot(msg){
 
 // ── Startup (gated by auth) ────────────────────────────────────────────
 (async()=>{
-  const ok=await loadAuth();
+  const ok=await loadAuth(true);   // defer revealing the app until the wizard decision is made
   if(!ok) return;  // login gate shown; loops start after login + reload
-  schedule(0);
+  try{ await pollOnce(); }catch(e){/* jget already flagged offline */}
+  $('appWrap').classList.remove('hidden');   // wizard overlay (if any) is already covering the app
+  schedule(offline?8000:5000);
 })();
 </script>
 </body>

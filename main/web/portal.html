@@ -212,7 +212,7 @@ function finishSetup(silent){
   if(_finishing)return;
   _finishing=true;
   stopCountdown();
-  try{fetch('/api/finish',{method:'POST'});}catch(_){/* AP may drop mid-request */}
+  try{fetch('/api/finish',{method:'POST',keepalive:true});}catch(_){/* AP may drop mid-request */}
   if(silent)return;
   const el=$('status');
   el.className='status ok';

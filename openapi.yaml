@@ -284,7 +284,11 @@ paths:
   /api/system/factory_reset:
     post:
       tags: [System]
-      summary: Erase WiFi credentials and reboot into provisioning
+      summary: Factory reset — erase all stored config and reboot into provisioning
+      description: >-
+        Wipes the entire NVS partition (Wi-Fi credentials, MQTT broker settings,
+        group membership, device name, and web/API passwords) and reboots into
+        first-run provisioning (SoftAP). Admin only.
       security:
         - ApiKeyAuth: []
         - SessionCookie: []
