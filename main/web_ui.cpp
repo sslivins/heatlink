@@ -264,6 +264,8 @@ esp_err_t handle_status(httpd_req_t* req) {
                           s_hooks.unit_connected && s_hooks.unit_connected());
     cJSON_AddBoolToObject(root, "mqtt_connected",
                           s_hooks.mqtt_connected && s_hooks.mqtt_connected());
+    cJSON_AddBoolToObject(root, "mqtt_configured",
+                          !hvac_mqtt::get_settings().host.empty());
     cJSON_AddNumberToObject(root, "uptime_s", (double)(esp_timer_get_time() / 1000000));
     cJSON_AddNumberToObject(root, "free_heap", (double)esp_get_free_heap_size());
 

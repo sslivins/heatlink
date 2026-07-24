@@ -359,22 +359,32 @@ extern "C" void app_main() {
 
     std::string friendly = ms.friendly_name;
     if (friendly.empty()) friendly = wifi::mdns_hostname();
-    char uri[128];
-    std::snprintf(uri, sizeof(uri), "mqtt://%s:%d", ms.host.c_str(), ms.port);
-    ESP_LOGI(TAG, "device uid %s, broker %s, mqtt node '%s'",
-             uid.c_str(), uri, friendly.c_str());
 
-    hvac_mqtt::Config mcfg{
-        .broker_uri    = uri,
-        .username      = ms.username,
-        .password      = ms.password,
-        .base_topic    = ms.base_topic,
-        .friendly_name = friendly,
-        .device_uid    = uid,
-        .sw_version    = esp_app_get_description()->version,
-    };
-    if (hvac_mqtt::init(mcfg, on_mqtt_command_external) != ESP_OK) {
-        ESP_LOGE(TAG, "MQTT init failed");
+    // No broker configured (empty host) → this is a fresh/open-source flash with
+    // nothing baked in. Don't dial a placeholder; boot unconfigured and let the
+    // on-device setup wizard collect the broker (or a new head inherit it by
+    // joining a group). All publish_*/is_connected calls no-op without a client.
+    if (ms.host.empty()) {
+        ESP_LOGW(TAG, "device uid %s: MQTT not configured — awaiting setup wizard",
+                 uid.c_str());
+    } else {
+        char uri[128];
+        std::snprintf(uri, sizeof(uri), "mqtt://%s:%d", ms.host.c_str(), ms.port);
+        ESP_LOGI(TAG, "device uid %s, broker %s, mqtt node '%s'",
+                 uid.c_str(), uri, friendly.c_str());
+
+        hvac_mqtt::Config mcfg{
+            .broker_uri    = uri,
+            .username      = ms.username,
+            .password      = ms.password,
+            .base_topic    = ms.base_topic,
+            .friendly_name = friendly,
+            .device_uid    = uid,
+            .sw_version    = esp_app_get_description()->version,
+        };
+        if (hvac_mqtt::init(mcfg, on_mqtt_command_external) != ESP_OK) {
+            ESP_LOGE(TAG, "MQTT init failed");
+        }
     }
 
     // On every (re)connect, (re)publish the retained HA discovery configs and the

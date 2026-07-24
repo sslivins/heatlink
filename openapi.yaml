@@ -809,6 +809,7 @@ components:
         rssi: { type: integer, description: WiFi signal strength in dBm }
         unit_connected: { type: boolean }
         mqtt_connected: { type: boolean }
+        mqtt_configured: { type: boolean, description: true once a broker host is stored (false on a fresh unconfigured unit) }
         uptime_s: { type: integer }
         free_heap: { type: integer }
         power:
