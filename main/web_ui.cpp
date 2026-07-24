@@ -1648,6 +1648,24 @@ esp_err_t handle_group_pair_claim(httpd_req_t* req) {
         cJSON* rj = cJSON_Parse(oc.replica_json.c_str());
         if (rj) cJSON_AddItemToObject(root, "replica", rj);
     }
+    // Share the group's broker settings so a fresh joining head inherits the
+    // Home Assistant / MQTT config instead of re-typing it. Only sent when we
+    // are actually configured; the joiner adopts it only if it has none of its
+    // own. The 6-digit code already gated this exchange (same trust model as
+    // handing over group_secret above). friendly_name is intentionally omitted
+    // so each head keeps its own MQTT node name.
+    {
+        hvac_mqtt::StoredSettings bs = hvac_mqtt::get_settings();
+        if (!bs.host.empty()) {
+            cJSON* b = cJSON_CreateObject();
+            cJSON_AddStringToObject(b, "host", bs.host.c_str());
+            cJSON_AddNumberToObject(b, "port", bs.port);
+            cJSON_AddStringToObject(b, "username", bs.username.c_str());
+            cJSON_AddStringToObject(b, "password", bs.password.c_str());
+            cJSON_AddStringToObject(b, "base_topic", bs.base_topic.c_str());
+            cJSON_AddItemToObject(root, "broker", b);
+        }
+    }
     char* str = cJSON_PrintUnformatted(root);
     httpd_resp_set_type(req, "application/json");
     httpd_resp_sendstr(req, str);
@@ -1774,6 +1792,26 @@ esp_err_t handle_group_pair_join(httpd_req_t* req) {
         char* rs = cJSON_PrintUnformatted(jrep);
         if (rs) { replica_json = rs; cJSON_free(rs); }
     }
+    // Inherit the group's broker settings when we don't have our own yet — a
+    // fresh head gets Home Assistant / MQTT config with zero re-typing. An
+    // already-configured head keeps its own broker (never clobbered).
+    bool inherit_broker = false;
+    hvac_mqtt::StoredSettings inb;
+    if (const cJSON* jb = cJSON_GetObjectItem(rj, "broker")) {
+        const cJSON* bh = cJSON_GetObjectItem(jb, "host");
+        if (bh && cJSON_IsString(bh) && bh->valuestring[0] &&
+            hvac_mqtt::get_settings().host.empty()) {
+            inb = hvac_mqtt::get_settings();  // keep our own friendly_name
+            inb.host = bh->valuestring;
+            const cJSON* x;
+            if ((x = cJSON_GetObjectItem(jb, "port")) && cJSON_IsNumber(x)) inb.port = x->valueint;
+            if ((x = cJSON_GetObjectItem(jb, "username")) && cJSON_IsString(x)) inb.username = x->valuestring;
+            if ((x = cJSON_GetObjectItem(jb, "password")) && cJSON_IsString(x)) inb.password = x->valuestring;
+            if ((x = cJSON_GetObjectItem(jb, "base_topic")) && cJSON_IsString(x)) inb.base_topic = x->valuestring;
+            if (inb.port <= 0) inb.port = 1883;
+            inherit_broker = true;
+        }
+    }
     cJSON_Delete(rj);
 
     if (hvac_group::join_group(group_id, label, secret, members, replica_json) != ESP_OK) {
@@ -1783,12 +1821,19 @@ esp_err_t handle_group_pair_join(httpd_req_t* req) {
     // Record our own display name into the freshly-adopted replica so it propagates.
     hvac_group::note_self_name(wifi::device_display_name());
 
+    // Persist any inherited broker now; MQTT picks it up on the reboot below
+    // (same apply-on-boot model as POST /api/mqtt).
+    bool rebooting = false;
+    if (inherit_broker && hvac_mqtt::save_settings(inb) == ESP_OK) rebooting = true;
+
     hvac_group::GroupConfig g = hvac_group::get();
     cJSON* root = cJSON_CreateObject();
     cJSON_AddStringToObject(root, "status", "joined");
     cJSON_AddStringToObject(root, "group_id", g.group_id.c_str());
     cJSON_AddStringToObject(root, "group_label", g.group_label.c_str());
     cJSON_AddNumberToObject(root, "member_count", static_cast<int>(g.peers.size()) + 1);
+    cJSON_AddBoolToObject(root, "broker_inherited", rebooting);
+    cJSON_AddBoolToObject(root, "rebooting", rebooting);
     {
         std::string who = web_actor_name(req);
         std::string msg = g.group_label.empty()
@@ -1802,6 +1847,10 @@ esp_err_t handle_group_pair_join(httpd_req_t* req) {
     httpd_resp_sendstr(req, str);
     cJSON_free(str);
     cJSON_Delete(root);
+    if (rebooting) {
+        vTaskDelay(pdMS_TO_TICKS(800));
+        esp_restart();
+    }
     return ESP_OK;
 }
 

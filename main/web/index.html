@@ -172,6 +172,19 @@ cursor:pointer;user-select:none;transition:.15s}
 justify-content:center;padding:16px;z-index:100}
 .overlay .card{width:100%;max-width:360px;margin:0}
 .overlay h1{margin-bottom:14px}
+.wz-card{max-width:400px}
+.wz-card h1{margin-bottom:4px}
+.wz-choice{display:block;width:100%;text-align:left;padding:14px 16px;margin-top:12px;height:auto;line-height:1.35}
+.wz-choice-t{display:block;font-weight:600;font-size:1em}
+.wz-choice-s{display:block;font-weight:400;font-size:.82em;opacity:.85;margin-top:4px}
+.wz-note{margin:16px 0 4px;text-align:center}
+.wz-full{width:100%;margin-top:12px}
+.wz-skip{display:block;width:100%;background:none;border:none;color:var(--fg-2);
+  font-size:.86em;padding:12px 0 2px;margin-top:14px;cursor:pointer;text-align:center}
+.wz-skip:hover{color:var(--fg)}
+.wz-spin{width:36px;height:36px;margin:18px auto 0;border:3px solid var(--border-strong);
+  border-top-color:var(--accent);border-radius:50%;animation:wzspin 0.9s linear infinite}
+@keyframes wzspin{to{transform:rotate(360deg)}}
 .keyrow{display:flex;gap:8px;align-items:center}.keyrow input{flex:1;min-width:0;max-width:none;font-family:ui-monospace,monospace;font-size:.74em;
 background:var(--bg);color:var(--fg);border:1px solid var(--border-strong);border-radius:8px;padding:9px 10px;outline:none}
 .iconbtn{flex:0 0 auto;width:38px;height:38px;border-radius:8px;border:1px solid var(--border-strong);
@@ -309,6 +322,72 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
         onkeydown="if(event.key==='Enter')doLogin()"></div>
     <div id="lgMsg" class="status hidden" style="margin:10px 0"></div>
     <button class="btn btn-warn" id="lgBtn" onclick="doLogin()">Sign in</button>
+  </div>
+</div>
+<div class="overlay hidden" id="setupWizard">
+  <div class="card wz-card">
+    <!-- Step 1: choose a path -->
+    <div id="wzChoose">
+      <h1>Set up this zone</h1>
+      <p class="sub" style="margin:-4px 0 16px">Let's connect this heat pump to Home Assistant.</p>
+      <button class="btn btn-accent wz-choice" onclick="wzGoJoin()">
+        <span class="wz-choice-t">Join an existing system</span>
+        <span class="wz-choice-s">Already have a zone set up? Copy its Home Assistant settings automatically — no typing.</span>
+      </button>
+      <button class="btn wz-choice" onclick="wzGoFirst()">
+        <span class="wz-choice-t">This is my first zone</span>
+        <span class="wz-choice-s">Enter your MQTT broker / Home Assistant details.</span>
+      </button>
+      <p class="hint wz-note">Wide-vane support is detected automatically once the unit is connected — nothing to set up here.</p>
+      <button class="wz-skip" onclick="wzSkip()">Skip for now</button>
+    </div>
+
+    <!-- Step 2a: join an existing system -->
+    <div id="wzJoin" class="hidden">
+      <h1>Join a system</h1>
+      <p class="sub" style="margin:-4px 0 14px">On a zone that's already set up, open its <b>Zones</b> tab and tap
+        <b>Add a zone</b>. Then scan below and pick it.</p>
+      <button class="btn btn-warn wz-full" onclick="wzScan()">Scan for systems</button>
+      <div id="wzScanMsg" class="status hidden" style="margin-top:8px"></div>
+      <div id="wzCandidates"></div>
+      <div id="wzJoinCard" class="gjoincard hidden" style="margin-top:10px">
+        <div id="wzJoinTitle" class="gjoin-t"></div>
+        <div class="mqf"><label for="wzCode">6-digit code</label>
+          <input id="wzCode" type="text" inputmode="numeric" maxlength="6" placeholder="000000" autocomplete="off"></div>
+        <div class="gbtns">
+          <button class="btn btn-accent" onclick="wzJoinGo()">Join</button>
+          <button class="btn" onclick="wzJoinCardCancel()">Cancel</button>
+        </div>
+        <div id="wzJoinMsg" class="status hidden" style="margin-top:8px"></div>
+      </div>
+      <button class="wz-skip" onclick="wzBack()">&larr; Back</button>
+    </div>
+
+    <!-- Step 2b: first zone — enter broker -->
+    <div id="wzFirst" class="hidden">
+      <h1>Home Assistant / MQTT</h1>
+      <p class="sub" style="margin:-4px 0 14px">Enter your MQTT broker. Additional zones can copy these from this one.</p>
+      <div class="mqf"><label for="wzHost">Broker host</label>
+        <input id="wzHost" type="text" placeholder="homeassistant.local" autocomplete="off"></div>
+      <div class="mqf"><label for="wzPort">Port</label>
+        <input id="wzPort" type="number" value="1883" autocomplete="off"></div>
+      <div class="mqf"><label for="wzUser">Username</label>
+        <input id="wzUser" type="text" autocomplete="off"></div>
+      <div class="mqf"><label for="wzPass">Password</label>
+        <input id="wzPass" type="password" autocomplete="new-password"></div>
+      <div class="mqf"><label for="wzBase">Base topic</label>
+        <input id="wzBase" type="text" value="mitsubishi2mqtt" autocomplete="off"></div>
+      <div id="wzFirstMsg" class="status hidden" style="margin:10px 0"></div>
+      <button class="btn btn-accent wz-full" id="wzFirstBtn" onclick="wzFirstSave()">Save &amp; connect</button>
+      <button class="wz-skip" onclick="wzBack()">&larr; Back</button>
+    </div>
+
+    <!-- Step 3: rebooting -->
+    <div id="wzReboot" class="hidden" style="text-align:center">
+      <h1>Almost there</h1>
+      <div class="wz-spin"></div>
+      <p class="sub" id="wzRebootMsg" style="margin-top:14px">Applying settings and restarting…</p>
+    </div>
   </div>
 </div>
 <div class="wrap hidden" id="appWrap">
@@ -879,6 +958,7 @@ async function refresh(){
     badge($('bWifi'),true);
     badge($('bUnit'),s.unit_connected);
     badge($('bMqtt'),s.mqtt_connected);
+    maybeShowWizard(s.mqtt_configured);
     $('subtitle').textContent=s.hostname+' · '+s.ip;
     curHost=s.hostname||'';
     if(s.name!=null) curName=s.name;
@@ -1815,6 +1895,7 @@ function renderGroupBanner(g){
 }
 function renderGroupPanel(g){
   const inG=!!(g&&g.in_group);
+  groupInGroup=inG;
   $('gNeedsAdmin').classList.add('hidden');
   $('gNotInGroup').classList.toggle('hidden',inG);
   $('gInGroup').classList.toggle('hidden',!inG);
@@ -2214,6 +2295,129 @@ async function tick(){
 }
 document.addEventListener('visibilitychange',()=>{ if(!document.hidden) schedule(150); });
 window.addEventListener('focus',()=>schedule(150));
+
+// ── First-run setup wizard ─────────────────────────────────────────────
+// Shown once, full-screen, when this zone has no broker configured yet and
+// isn't already in a group. Offers "join an existing system" (which inherits
+// the broker with zero typing) or "first zone" (enter the broker). Admin only.
+let groupInGroup=false;      // last known group membership (set by renderGroupPanel)
+let wizardDismissed=false;   // user tapped "Skip for now" this session
+let wizardOpen=false;
+function maybeShowWizard(configured){
+  if(configured || wizardDismissed || wizardOpen) return;
+  if(authState.role!=='admin') return;   // only admins configure the broker
+  if(groupInGroup) return;                // in a group → broker comes via join
+  wzShow('wzChoose');
+}
+function wzShow(step){
+  wizardOpen=true;
+  $('setupWizard').classList.remove('hidden');
+  ['wzChoose','wzJoin','wzFirst','wzReboot'].forEach(s=>$(s).classList.toggle('hidden',s!==step));
+}
+function wzSkip(){
+  wizardDismissed=true; wizardOpen=false;
+  $('setupWizard').classList.add('hidden');
+}
+function wzBack(){ wzShow('wzChoose'); }
+function wzGoJoin(){ wzShow('wzJoin'); $('wzCandidates').innerHTML=''; setElMsg('wzScanMsg','',null,true); $('wzJoinCard').classList.add('hidden'); }
+function wzGoFirst(){ wzShow('wzFirst'); }
+
+// Join path — reuses /api/group/pair/discover + /api/group/pair/join.
+let wzSelHost='';
+async function wzScan(){
+  setElMsg('wzScanMsg','Scanning\u2026','info');
+  $('wzCandidates').innerHTML=''; $('wzJoinCard').classList.add('hidden');
+  try{
+    const r=await jget('/api/group/pair/discover');
+    const j=await r.json().catch(()=>({candidates:[]}));
+    const list=(j&&j.candidates)||[];
+    if(!list.length){
+      setElMsg('wzScanMsg','No system is inviting a new zone right now. On a zone that\u2019s set up, tap \u201cAdd a zone\u201d, then scan again.','');
+      return;
+    }
+    setElMsg('wzScanMsg','',null,true);
+    const box=$('wzCandidates'); box.innerHTML='';
+    list.forEach(c=>{
+      const group=c.glabel&&c.glabel.trim()?c.glabel:'Unnamed system';
+      const via=c.name&&c.name.trim()?c.name:(c.uid||'a zone');
+      const b=document.createElement('button'); b.className='gcand';
+      const x=document.createElement('div'); x.className='gcand-x';
+      const t=document.createElement('div'); t.className='gcand-t'; t.textContent=group;
+      const s=document.createElement('div'); s.className='gcand-s'; s.textContent='offered by '+via;
+      x.appendChild(t); x.appendChild(s);
+      const a=document.createElement('div'); a.className='gcand-arrow'; a.textContent='\u203a';
+      b.appendChild(x); b.appendChild(a);
+      b.addEventListener('click',()=>wzSelectCand(c.host,group));
+      box.appendChild(b);
+    });
+  }catch(e){ setElMsg('wzScanMsg','Scan failed \u2014 network error.','err'); }
+}
+function wzSelectCand(host,group){
+  wzSelHost=host;
+  $('wzJoinTitle').textContent='Join \u201c'+group+'\u201d';
+  $('wzCode').value='';
+  $('wzJoinCard').classList.remove('hidden');
+  $('wzCode').focus();
+}
+function wzJoinCardCancel(){ wzSelHost=''; $('wzJoinCard').classList.add('hidden'); setElMsg('wzJoinMsg','',null,true); }
+async function wzJoinGo(){
+  const code=($('wzCode').value||'').trim();
+  if(!wzSelHost){ setElMsg('wzJoinMsg','Pick a system first.','err'); return; }
+  if(!code){ setElMsg('wzJoinMsg','Enter the 6-digit code shown on the other zone.','err'); return; }
+  setElMsg('wzJoinMsg','Joining\u2026','info');
+  try{
+    const r=await fetch('/api/group/pair/join',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({owner_host:wzSelHost,code:code})});
+    const j=await r.json().catch(()=>({}));
+    if(!r.ok){ setElMsg('wzJoinMsg',(j&&j.error)||'Could not join. Please try again.','err'); return; }
+    if(j.rebooting){ wzWaitReboot('Joined \u2014 copying Home Assistant settings and restarting…'); }
+    else{
+      // Joined but the other zone had no broker to share; finish in the first-zone form.
+      wzShow('wzFirst');
+      setElMsg('wzFirstMsg','Joined the system, but it had no Home Assistant settings to copy. Enter them here.','info');
+    }
+  }catch(e){ setElMsg('wzJoinMsg','Network error \u2014 could not reach this device.','err'); }
+}
+
+// First-zone path — reuses POST /api/mqtt (saves + reboots).
+async function wzFirstSave(){
+  const body={
+    host:$('wzHost').value.trim(),
+    port:parseInt($('wzPort').value,10)||1883,
+    username:$('wzUser').value.trim(),
+    base_topic:$('wzBase').value.trim()||'mitsubishi2mqtt'
+  };
+  const pw=$('wzPass').value; if(pw) body.password=pw;
+  if(!body.host){ setElMsg('wzFirstMsg','Broker host is required.','err'); return; }
+  $('wzFirstBtn').disabled=true;
+  setElMsg('wzFirstMsg','Saving\u2026','info');
+  try{
+    const r=await fetch('/api/mqtt',{method:'POST',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    if(!r.ok){ $('wzFirstBtn').disabled=false; setElMsg('wzFirstMsg','Save failed: '+r.status,'err'); return; }
+    wzWaitReboot('Saved \u2014 connecting to Home Assistant and restarting…');
+  }catch(e){ wzWaitReboot('Saved \u2014 connecting to Home Assistant and restarting…'); }
+}
+
+// Show the reboot spinner, then poll until the device is back and reload so the
+// app comes up fully configured (and the wizard no longer triggers).
+function wzWaitReboot(msg){
+  wzShow('wzReboot');
+  $('wzRebootMsg').textContent=msg||'Restarting…';
+  clearTimeout(pollTimer);   // stop the normal poll while we wait for the reboot
+  setTimeout(()=>{
+    let tries=0;
+    const iv=setInterval(async()=>{
+      tries++;
+      try{
+        const r=await fetch('/api/status',{cache:'no-store'});
+        if(r.ok){ clearInterval(iv); location.reload(); return; }
+      }catch(e){}
+      if(tries>40){ clearInterval(iv); location.reload(); }  // give up after ~80s
+    },2000);
+  },4000);   // let the device actually drop before polling
+}
 
 // ── Startup (gated by auth) ────────────────────────────────────────────
 (async()=>{
