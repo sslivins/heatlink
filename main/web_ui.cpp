@@ -10,6 +10,7 @@
 #include "status_led.h"
 #include "events.h"
 #include "capability.h"
+#include "factory_reset.h"
 
 #include <cstdlib>
 #include <cstring>
@@ -528,14 +529,15 @@ esp_err_t handle_restart(httpd_req_t* req) {
 }
 
 // ── POST /api/system/factory_reset ─────────────────────────────────────
+// Full reset: wipe ALL persisted config (Wi-Fi, MQTT, group, name, passwords)
+// and reboot into first-run provisioning. See factory_reset::perform().
 esp_err_t handle_factory_reset(httpd_req_t* req) {
     set_cors(req);
     REQUIRE_ADMIN(req);
-    wifi::erase_credentials();
     httpd_resp_set_type(req, "application/json");
     httpd_resp_sendstr(req, "{\"status\":\"reset\"}");
-    vTaskDelay(pdMS_TO_TICKS(500));
-    esp_restart();
+    vTaskDelay(pdMS_TO_TICKS(500));  // flush the response before we wipe + reboot
+    factory_reset::perform();        // erases all NVS and restarts; never returns
     return ESP_OK;  // unreachable
 }
 

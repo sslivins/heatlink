@@ -22,6 +22,7 @@ idf_component_register(
          "events.cpp"
          "capability.cpp"
          "status_led.cpp"
+         "factory_reset.cpp"
     INCLUDE_DIRS "."
     EMBED_FILES "web/index.html.gz"
                 "web/portal.html.gz"
