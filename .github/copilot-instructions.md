@@ -1,4 +1,4 @@
-# Copilot Instructions — mitsubishi-heatpump
+# Copilot Instructions — heatlink
 
 ## Conversation Preferences
 

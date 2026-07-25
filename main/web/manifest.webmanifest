@@ -1,6 +1,6 @@
 {
-  "name": "Mitsubishi Heat Pump",
-  "short_name": "Heat Pump",
+  "name": "HeatLink",
+  "short_name": "HeatLink",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

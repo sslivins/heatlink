@@ -14,7 +14,7 @@ namespace hvac_mqtt {
 /// *silently drop* the discovery message, so the entity never appears even
 /// though the broker connection is healthy. Disallowed characters are mapped to
 /// '_', consecutive separators collapse, and leading/trailing '_' are trimmed.
-/// Empty or otherwise unusable input falls back to "heatpump".
+/// Empty or otherwise unusable input falls back to "heatlink".
 std::string slugify(const std::string& in);
 
 /// Stable Home Assistant discovery object_id for a device. Keyed on the

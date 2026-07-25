@@ -61,9 +61,9 @@ static void test_slugify() {
     CHECK_EQ(slugify("__weird__"), "weird");
 
     // Empty / all-invalid input falls back to the safe default.
-    CHECK_EQ(slugify(""), "heatpump");
-    CHECK_EQ(slugify("   "), "heatpump");
-    CHECK_EQ(slugify("!!!"), "heatpump");
+    CHECK_EQ(slugify(""), "heatlink");
+    CHECK_EQ(slugify("   "), "heatlink");
+    CHECK_EQ(slugify("!!!"), "heatlink");
 
     // Output only ever contains HA-legal characters.
     const std::string s = slugify("Eric's Room #1");
@@ -76,8 +76,8 @@ static void test_slugify() {
 
 static void test_discovery_object_id() {
     // Stable id is hostname-shaped and derived from the hardware uid.
-    CHECK_EQ(discovery_object_id("6dac"), "mitsubishi-heatpump-6dac");
-    CHECK_EQ(discovery_object_id("e6c8"), "mitsubishi-heatpump-e6c8");
+    CHECK_EQ(discovery_object_id("6dac"), "heatlink-6dac");
+    CHECK_EQ(discovery_object_id("e6c8"), "heatlink-e6c8");
 
     // Regression guard: the discovery id depends ONLY on device_uid. It must be
     // identical regardless of friendly_name, so renaming never orphans the old

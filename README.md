@@ -1,4 +1,4 @@
-# mitsubishi-heatpump
+# heatlink
 
 ESP-IDF firmware for an **M5Stack Stamp-S3Bat** (ESP32-S3) that controls a
 **Mitsubishi Electric** indoor unit over its **CN105** serial port and bridges
@@ -44,7 +44,7 @@ directly off CN105 5 V with the LiPo absorbing transients. See
 
 [stampdocs]: https://docs.m5stack.com/en/core/Stamp-S3Bat
 
-### Default pin map (override in `menuconfig` → *Component config → mitsubishi-heatpump*)
+### Default pin map (override in `menuconfig` → *Component config → HeatLink Controller*)
 
 | Function | GPIO | Notes |
 |----------|------|-------|
@@ -140,7 +140,7 @@ idf.py -p <PORT> flash monitor
 
 WiFi can be set at build time (`sdkconfig.defaults.local` / `menuconfig`) or at
 runtime (NVS, via the captive-portal SoftAP). On first boot with no credentials
-the device starts a `mitsubishi-heatpump-XXXX` SoftAP (captive portal at
+the device starts a `heatlink-XXXX` SoftAP (captive portal at
 `http://192.168.4.1/`); pick a network and enter the passphrase, and it saves to
 NVS and reboots into STA mode. The **MQTT broker** is **not baked into the
 firmware** by default (open-source builds ship with no broker), so on first boot
@@ -150,9 +150,9 @@ device. Additional units can instead **inherit** the broker by joining an
 existing group. (Personal builds may still bake a default broker via
 `CONFIG_MQTT_BROKER_URI` in `sdkconfig.defaults.local`.) Each unit derives a short
 hardware-unique id from its factory MAC (e.g. `E608`) that is reused everywhere
-so multiple units never collide: the SoftAP name (`mitsubishi-heatpump-<id>`),
-the **mDNS hostname** (`mitsubishi-heatpump-<id>.local`), and the default MQTT
-node (leaving `friendly_name` blank yields `heatpump-<id>`). The same id is the
+so multiple units never collide: the SoftAP name (`heatlink-<id>`),
+the **mDNS hostname** (`heatlink-<id>.local`), and the default MQTT
+node (leaving `friendly_name` blank yields `heatlink-<id>`). The same id is the
 HA `unique_id`/device identity. Units are also **self-discoverable** via DNS-SD:
 each advertises an `_http._tcp` service with TXT records (`id`, `fw`, `model`,
 `path`), so `avahi-browse -rt _http._tcp` / Bonjour / a controller can list every
@@ -161,7 +161,7 @@ unit without knowing the hostname.
 ## Web UI / REST API
 
 Once connected to WiFi the device serves a small diagnostics/control dashboard
-at `http://<ip>/` (or `http://mitsubishi-heatpump-<id>.local/` via mDNS, where
+at `http://<ip>/` (or `http://heatlink-<id>.local/` via mDNS, where
 `<id>` is the unit's MAC suffix shown on the System tab). It is for
 provisioning and diagnostics — MQTT/Home Assistant remains the primary control
 path. The same JSON API backs it:
@@ -201,13 +201,13 @@ pipeline (`main/ota.cpp`):
 ### GitHub release auto-update
 
 A background poller (`ota::start_update_checker`) hits
-`https://api.github.com/repos/sslivins/mitsubishi-heatpump/releases/latest`
+`https://api.github.com/repos/sslivins/heatlink/releases/latest`
 every 6 h (and on demand via `POST /api/update/check`), compares the latest
 release tag against the running version, and exposes the result two ways:
 
 - **Web UI** — the System tab's *Software update* card shows installed/latest
   versions, a **Check for updates** button, and a one-click **Install update**
-  button (which downloads the release's `mitsubishi-heatpump*.bin` asset through
+  button (which downloads the release's `heatlink*.bin` asset through
   GitHub's CDN redirect — see the enlarged HTTP buffers in `ota.cpp`).
 - **Home Assistant** — a native MQTT `update` entity
   (`homeassistant/update/<friendly_name>/config`) reports installed/latest

@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Mitsubishi Heat Pump</title>
+<title>HeatLink</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="apple-touch-icon" sizes="180x180" href="/icon-180.png">
 <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png">
@@ -11,7 +11,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="Heat Pump">
+<meta name="apple-mobile-web-app-title" content="HeatLink">
 <style>
 :root{
   color-scheme:light dark;
@@ -323,7 +323,7 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
 </button>
 <div class="overlay hidden" id="loginGate">
   <div class="card">
-    <h1 id="lgName">Mitsubishi Heat Pump</h1>
+    <h1 id="lgName">HeatLink</h1>
     <p class="sub" id="lgHost" style="margin:-6px 0 12px"></p>
     <h2>Sign in</h2>
     <div class="mqf"><label>Password</label>
@@ -338,7 +338,7 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
     <!-- Step 1: choose a path -->
     <div id="wzChoose">
       <div class="wz-eyebrow">Setup wizard</div>
-      <div class="wz-product">Mitsubishi Heat Pump Controller</div>
+      <div class="wz-product">Mitsubishi mini-split controller</div>
       <h1 id="wzName" class="wz-name">New controller</h1>
       <p class="sub wz-sub">Choose how to get this controller connected.</p>
       <button class="btn btn-accent wz-choice" onclick="wzGoJoin()">
@@ -384,7 +384,7 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
       <div class="mqf"><label for="wzPass">Password</label>
         <input id="wzPass" type="password" autocomplete="new-password"></div>
       <div class="mqf"><label for="wzBase">Base topic</label>
-        <input id="wzBase" type="text" value="mitsubishi2mqtt" autocomplete="off"></div>
+        <input id="wzBase" type="text" value="heatlink2mqtt" autocomplete="off"></div>
       <div id="wzFirstMsg" class="status hidden" style="margin:10px 0"></div>
       <button class="btn btn-accent wz-full" id="wzFirstBtn" onclick="wzFirstSave()">Save &amp; connect</button>
       <button class="wz-skip" onclick="wzBack()">&larr; Back</button>
@@ -409,7 +409,7 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
 </div>
 <div class="wrap hidden" id="appWrap">
   <div class="name-row" id="nameRow">
-    <h1 id="hdrName">Mitsubishi Heat Pump</h1>
+    <h1 id="hdrName">HeatLink</h1>
     <button id="nameEditBtn" class="name-edit-btn hidden" aria-label="Edit device name"
       title="Edit device name" onclick="startNameEdit()">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -541,7 +541,7 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
       <details class="gadv">
         <summary>Can't find it? Enter the head's address manually</summary>
         <div class="mqf"><label for="gJoinHost">Owner host</label>
-          <input id="gJoinHost" type="text" placeholder="mitsubishi-heatpump-xxxx.local" autocomplete="off"></div>
+          <input id="gJoinHost" type="text" placeholder="heatlink-xxxx.local" autocomplete="off"></div>
         <div class="mqf"><label for="gJoinCodeM">6-digit code</label>
           <input id="gJoinCodeM" type="text" inputmode="numeric" maxlength="6" placeholder="000000" autocomplete="off"></div>
         <button class="btn btn-warn" onclick="groupPairJoinManual()">Join by address</button>
@@ -603,6 +603,16 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
     <button onclick="jumpTo('sec-heatpump')">Heat pump</button>
     <button onclick="jumpTo('sec-activity')">Activity</button>
   </div>
+  <div class="secnav" data-grp="settings">
+    <button onclick="jumpTo('sec-display')">Display</button>
+    <button onclick="jumpTo('sec-widevane')">Wide vane</button>
+    <button onclick="jumpTo('sec-wifi')">WiFi</button>
+    <button onclick="jumpTo('sec-mqtt')">MQTT</button>
+    <button onclick="jumpTo('sec-firmware')">Firmware</button>
+    <button onclick="jumpTo('sec-webaccess')">Web access</button>
+    <button onclick="jumpTo('sec-api')">API</button>
+    <button onclick="jumpTo('sec-device')">Device</button>
+  </div>
   <div class="card" data-grp="status" id="sec-controller">
     <h2>Controller</h2>
     <div class="grid">
@@ -629,17 +639,16 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
     </div>
   </div>
 
-  <div class="card" data-grp="settings">
+  <div class="card" data-grp="settings" id="sec-display">
     <h2>Display</h2>
     <div class="row">
       <label>Show temperatures in &deg;F</label>
       <div class="toggle"><input type="checkbox" id="dispF" onchange="saveDisplayUnit()"><span class="slider" onclick="document.getElementById('dispF').click()"></span></div>
     </div>
-    <div class="sub" style="margin:-4px 0 4px">Applies to this web UI only. Home Assistant and MQTT always use &deg;C; the head is always commanded in &deg;C.</div>
     <div id="dispMsg" class="status hidden" style="margin:10px 0"></div>
   </div>
 
-  <div class="card" data-grp="settings">
+  <div class="card" data-grp="settings" id="sec-widevane">
     <h2>Wide vane</h2>
     <div class="sub" style="margin:-4px 0 8px">Some units have a manual
       wide-vane louver with no motor. The control is hidden automatically when
@@ -659,7 +668,7 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
     <button class="btn" id="wvDetectBtn" onclick="detectWideVane()">Detect now</button>
   </div>
 
-  <div class="card" data-grp="settings">
+  <div class="card" data-grp="settings" id="sec-wifi">
     <h2>WiFi</h2>
     <div id="wfCurrent"></div>
     <div class="wf-head">
@@ -679,10 +688,9 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
     </div>
 
     <button class="btn" id="wfOtherBtn" onclick="joinOther()" style="margin-top:10px">Other network…</button>
-    <button class="btn btn-danger" onclick="factoryReset()">Factory reset</button>
   </div>
 
-  <div class="card" data-grp="settings">
+  <div class="card" data-grp="settings" id="sec-mqtt">
     <h2>MQTT / Home Assistant</h2>
     <div class="grid">
       <div class="stat"><div class="k">Status</div><div class="v" id="mqttStat">--</div></div>
@@ -697,14 +705,14 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
     <div class="mqf"><label>Password</label>
       <input type="password" id="mqPass" autocomplete="new-password" placeholder=""></div>
     <div class="mqf"><label>Base topic</label>
-      <input type="text" id="mqBase" placeholder="mitsubishi2mqtt"></div>
+      <input type="text" id="mqBase" placeholder="heatlink2mqtt"></div>
     <div class="mqf"><label>Friendly name</label>
-      <input type="text" id="mqFriendly" placeholder="(blank → heatpump-&lt;id&gt;)"></div>
+      <input type="text" id="mqFriendly" placeholder="(blank → heatlink-&lt;id&gt;)"></div>
     <div id="mqMsg" class="status hidden" style="margin:10px 0"></div>
     <button class="btn btn-warn" id="mqSaveBtn" onclick="saveMqtt()">Save &amp; reboot</button>
   </div>
 
-  <div class="card" data-grp="settings">
+  <div class="card" data-grp="settings" id="sec-firmware">
     <h2>Firmware</h2>
     <div class="grid">
       <div class="stat"><div class="k">Installed</div><div class="v" id="updCur">--</div></div>
@@ -724,7 +732,7 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
       <div class="row" style="margin-top:14px">
         <label>From URL</label>
       </div>
-      <input type="text" id="fwurl" placeholder="https://…/mitsubishi-heatpump.bin"
+      <input type="text" id="fwurl" placeholder="https://…/heatlink.bin"
         style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border-strong);background:var(--bg);color:var(--fg);font-size:16px">
       <button class="btn btn-warn" onclick="urlFw()">Pull &amp; flash</button>
       <div id="otaState" class="status hidden" style="margin-top:12px"></div>
@@ -732,7 +740,7 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
     </details>
   </div>
 
-  <div class="card" data-grp="settings">
+  <div class="card" data-grp="settings" id="sec-webaccess">
     <h2>Web Access</h2>
     <div class="row">
       <label>Require login to open the web UI</label>
@@ -766,7 +774,7 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
     <div id="secSaveNote" class="hint" style="margin:8px 0 0;text-align:center"></div>
   </div>
 
-  <div class="card" data-grp="settings">
+  <div class="card" data-grp="settings" id="sec-api">
     <h2>API Access</h2>
     <div class="row">
       <label>Require API key for /api</label>
@@ -782,7 +790,7 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
     </div>
     <div id="secApiMsg" class="status hidden" style="margin:10px 0"></div>
     <p style="font-size:.8em;color:var(--fg-3);margin:10px 0 0">
-      <a href="https://petstore.swagger.io/?url=https://raw.githubusercontent.com/sslivins/mitsubishi-heatpump/main/openapi.yaml"
+      <a href="https://petstore.swagger.io/?url=https://raw.githubusercontent.com/sslivins/heatlink/main/openapi.yaml"
          target="_blank" rel="noopener" style="color:var(--blue)">View the API reference &#8599;</a>
       &mdash; interactive OpenAPI docs for every <code>/api</code> endpoint.
     </p>
@@ -816,10 +824,13 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
     <button class="btn btn-danger" style="margin-top:10px" onclick="clearActivity()">Clear activity log</button>
   </div>
 
-  <div class="card" data-grp="settings">
+  <div class="card" data-grp="settings" id="sec-device">
     <h2>Device</h2>
     <div class="sub" style="margin:-4px 0 14px">Restart the controller. Settings and WiFi are preserved.</div>
     <button class="btn btn-warn" onclick="sysPost('/api/system/restart','Restart device?')">Restart</button>
+    <div class="sub" style="margin:20px 0 14px">Factory reset erases <b>everything</b> — WiFi,
+      MQTT, group membership, device name, and passwords — and reboots into first-run setup.</div>
+    <button class="btn btn-danger" onclick="factoryReset()">Factory reset</button>
   </div>
   </div><!-- /panel-system -->
 </div>
@@ -1420,7 +1431,7 @@ async function loadMqtt(){
       $('mqPass').placeholder=m.password_set?'••••••••':'None set';
     }
     $('mqttStat').textContent=m.connected?'connected':'disconnected';
-    $('mqttNode').textContent=m.friendly_name||'heatpump-<id>';
+    $('mqttNode').textContent=m.friendly_name||'heatlink-<id>';
   }catch(e){}
 }
 
@@ -1725,7 +1736,7 @@ async function doLogout(){
 // ── Device display name (inline header editor) ─────────────────────────
 // The effective display name: custom name → hostname → product default.
 function headerName(){
-  return (curName&&curName.trim())?curName.trim():(curHost||'Mitsubishi Heat Pump');
+  return (curName&&curName.trim())?curName.trim():(curHost||'HeatLink');
 }
 // Render the current name everywhere it appears. textContent only (the name is
 // admin-settable and shown pre-login, so never route it through innerHTML).
@@ -2436,7 +2447,7 @@ async function wzFirstSave(){
     host:$('wzHost').value.trim(),
     port:parseInt($('wzPort').value,10)||1883,
     username:$('wzUser').value.trim(),
-    base_topic:$('wzBase').value.trim()||'mitsubishi2mqtt'
+    base_topic:$('wzBase').value.trim()||'heatlink2mqtt'
   };
   const pw=$('wzPass').value; if(pw) body.password=pw;
   if(!body.host){ setElMsg('wzFirstMsg','Broker host is required.','err'); return; }

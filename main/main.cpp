@@ -1,5 +1,5 @@
 /// @file main.cpp
-/// @brief mitsubishi-heatpump entry point.
+/// @brief heatlink entry point.
 ///
 /// Wiring:  NVS -> M5PM1 PMIC -> WiFi -> MQTT -> CN105.
 ///
@@ -503,6 +503,6 @@ extern "C" void app_main() {
         capability::init(caps);
     }
 
-    ESP_LOGI(TAG, "mitsubishi-heatpump %s running",
+    ESP_LOGI(TAG, "heatlink %s running",
              esp_app_get_description()->version);
 }

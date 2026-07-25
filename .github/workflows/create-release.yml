@@ -86,7 +86,7 @@ jobs:
           FEATURES=$(git log ${RANGE} --oneline --no-merges --grep="^feat" | sed 's/^[a-f0-9]* feat[^:]*: //' || true)
           FIXES=$(git log ${RANGE} --oneline --no-merges --grep="^fix" | sed 's/^[a-f0-9]* fix[^:]*: //' || true)
           {
-            echo "## mitsubishi-heatpump ${TAG}"
+            echo "## heatlink ${TAG}"
             echo ""
             if [ -n "$FEATURES" ]; then echo "### ✨ Features"; echo "$FEATURES" | while IFS= read -r l; do echo "- $l"; done; echo ""; fi
             if [ -n "$FIXES" ]; then echo "### 🐛 Fixes"; echo "$FIXES" | while IFS= read -r l; do echo "- $l"; done; echo ""; fi
@@ -98,20 +98,25 @@ jobs:
             echo "  0x0 bootloader.bin \\"
             echo "  0x8000 partition-table.bin \\"
             echo "  0xf000 ota_data_initial.bin \\"
-            echo "  0x20000 mitsubishi-heatpump.bin"
+            echo "  0x20000 heatlink.bin"
             echo '```'
           } > /tmp/release_body.md
           cat /tmp/release_body.md
+
+      - name: Create legacy-named asset alias (transition: pre-rename firmware self-updates on the old asset name)
+        if: ${{ !inputs.dry_run && steps.checktag.outputs.release == 'true' }}
+        run: cp build/heatlink.bin build/mitsubishi-heatpump.bin
 
       - name: Create GitHub Release
         if: ${{ !inputs.dry_run && steps.checktag.outputs.release == 'true' }}
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.tag }}
-          name: mitsubishi-heatpump ${{ steps.version.outputs.tag }}
+          name: heatlink ${{ steps.version.outputs.tag }}
           body_path: /tmp/release_body.md
           draft: false
           files: |
+            build/heatlink.bin
             build/mitsubishi-heatpump.bin
             build/bootloader/bootloader.bin
             build/partition_table/partition-table.bin
