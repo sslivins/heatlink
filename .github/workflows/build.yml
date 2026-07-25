@@ -42,4 +42,4 @@ jobs:
             build/bootloader/bootloader.bin
             build/partition_table/partition-table.bin
             build/ota_data_initial.bin
-            build/mitsubishi-heatpump.bin
+            build/heatlink.bin

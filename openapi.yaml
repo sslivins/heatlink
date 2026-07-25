@@ -1,9 +1,9 @@
 openapi: 3.0.3
 info:
-  title: Mitsubishi Heat Pump Controller API
+  title: HeatLink Controller API
   description: |
     HTTP API exposed by the on-device web server of the
-    [mitsubishi-heatpump](https://github.com/sslivins/mitsubishi-heatpump)
+    [heatlink](https://github.com/sslivins/heatlink)
     ESP32-S3 firmware. The device bridges a Mitsubishi heat pump to Home
     Assistant over MQTT and serves a configuration dashboard plus this JSON API.
 
@@ -16,13 +16,13 @@ info:
   version: 0.2.98
   license:
     name: See repository
-    url: https://github.com/sslivins/mitsubishi-heatpump
+    url: https://github.com/sslivins/heatlink
 servers:
   - url: http://{host}
     description: The device on your local network
     variables:
       host:
-        default: mitsubishi-heatpump.local
+        default: heatlink.local
         description: Device mDNS hostname or IP address
 tags:
   - name: Climate

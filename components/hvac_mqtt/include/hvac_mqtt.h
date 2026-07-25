@@ -36,7 +36,7 @@ struct Config {
     std::string broker_uri;     ///< "mqtt://host:1883" or "mqtts://host:8883"
     std::string username;
     std::string password;
-    std::string base_topic;     ///< e.g. "mitsubishi2mqtt"
+    std::string base_topic;     ///< e.g. "heatlink2mqtt"
     std::string friendly_name;  ///< e.g. "living_room_hp" (the MQTT node name)
     std::string device_uid;     ///< hardware-unique id (from the ESP32 MAC). Used
                                 ///< for HA unique_id/device.identifiers so 4 units
@@ -62,7 +62,7 @@ struct StoredSettings {
     std::string username;
     std::string password;
     std::string base_topic;
-    std::string friendly_name;  ///< blank → firmware derives "heatpump-<uid>"
+    std::string friendly_name;  ///< blank → firmware derives "heatlink-<uid>"
 };
 
 /// Read the persisted broker settings from NVS, falling back per-field to

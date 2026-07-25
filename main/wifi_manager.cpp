@@ -145,7 +145,7 @@ void start_mdns() {
 
     std::string uid      = device_uid();
     std::string host     = mdns_hostname();
-    std::string instance = std::string("Mitsubishi Heat Pump ") + uid;
+    std::string instance = std::string("HeatLink ") + uid;
     const char* fw       = esp_app_get_description()->version;
 
     mdns_hostname_set(host.c_str());
@@ -164,7 +164,7 @@ void start_mdns() {
     // sibling head) can browse for shared-compressor group candidates and read
     // their uid / protocol-version without guessing the hostname suffix. The
     // group-id is intentionally omitted — it changes at runtime after pairing;
-    // enrolled peers are resolved by hostname (mitsubishi-heatpump-<uid>) and
+    // enrolled peers are resolved by hostname (heatlink-<uid>) and
     // authenticated by HMAC, not discovered by group-id TXT.
     char pv[8];
     snprintf(pv, sizeof(pv), "%d", hvac_group::kProtocolVersion);

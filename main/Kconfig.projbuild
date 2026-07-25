@@ -1,4 +1,4 @@
-menu "Mitsubishi Heat Pump Controller"
+menu "HeatLink Controller"
 
     menu "WiFi"
         config WIFI_SSID
@@ -20,7 +20,7 @@ menu "Mitsubishi Heat Pump Controller"
 
         config MDNS_HOSTNAME
             string "mDNS hostname"
-            default "mitsubishi-heatpump"
+            default "heatlink"
             help
                 Reachable as <hostname>.local for the diagnostics web UI.
     endmenu
@@ -47,9 +47,9 @@ menu "Mitsubishi Heat Pump Controller"
 
         config MQTT_BASE_TOPIC
             string "Base topic"
-            default "mitsubishi2mqtt"
+            default "heatlink2mqtt"
             help
-                Topics are <base>/<friendly_name>/... matching mitsubishi2MQTT.
+                Topics are <base>/<friendly_name>/... (mitsubishi2MQTT-compatible layout).
 
         config MQTT_FRIENDLY_NAME
             string "Friendly name"
@@ -57,8 +57,8 @@ menu "Mitsubishi Heat Pump Controller"
             help
                 MQTT node name and Home Assistant device label. Give each unit a
                 distinct name (e.g. "living_room_hp"). If left blank, the
-                firmware uses "heatpump-<MAC suffix>" so multiple units never
-                collide on topics or HA entities out of the box.
+                firmware uses the mDNS hostname "heatlink-<MAC suffix>" so multiple
+                units never collide on topics or HA entities out of the box.
     endmenu
 
     menu "CN105 (Mitsubishi serial)"

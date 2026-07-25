@@ -30,7 +30,7 @@ esp_mqtt_client_handle_t g_client = nullptr;
 bool               g_connected = false;
 std::string        g_base;  ///< "<base_topic>/<slug>"
 std::string        g_slug;  ///< friendly_name reduced to a safe topic segment
-std::string        g_did;   ///< stable HA discovery object_id ("mitsubishi-heatpump-<uid>")
+std::string        g_did;   ///< stable HA discovery object_id ("heatlink-<uid>")
 StoredSettings     g_settings;          ///< settings the client was started with
 constexpr char     kNvsNs[] = "mqtt";   ///< NVS namespace for persisted settings
 
@@ -56,12 +56,12 @@ std::string t(const char* suffix) { return g_base + suffix; }
 cJSON* make_device_block() {
     cJSON* dev = cJSON_CreateObject();
     cJSON* ids = cJSON_CreateArray();
-    std::string ident = "mitsubishi-heatpump-" + g_cfg.device_uid;
+    std::string ident = "heatlink-" + g_cfg.device_uid;
     cJSON_AddItemToArray(ids, cJSON_CreateString(ident.c_str()));
     cJSON_AddItemToObject(dev, "identifiers", ids);
     cJSON_AddStringToObject(dev, "name", g_cfg.friendly_name.c_str());
-    cJSON_AddStringToObject(dev, "manufacturer", "Mitsubishi");
-    cJSON_AddStringToObject(dev, "model", "CN105 heat-pump bridge");
+    cJSON_AddStringToObject(dev, "manufacturer", "HeatLink");
+    cJSON_AddStringToObject(dev, "model", "Mitsubishi CN105 bridge");
     if (!g_cfg.sw_version.empty())
         cJSON_AddStringToObject(dev, "sw_version", g_cfg.sw_version.c_str());
     return dev;

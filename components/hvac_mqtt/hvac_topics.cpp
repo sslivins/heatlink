@@ -17,13 +17,13 @@ std::string slugify(const std::string& in) {
         else if (!prev_sep) { out.push_back('_'); prev_sep = true; }
     }
     const size_t b = out.find_first_not_of('_');
-    if (b == std::string::npos) return "heatpump";  // nothing usable -> safe default
+    if (b == std::string::npos) return "heatlink";  // nothing usable -> safe default
     const size_t e = out.find_last_not_of('_');
     return out.substr(b, e - b + 1);
 }
 
 std::string discovery_object_id(const std::string& device_uid) {
-    return "mitsubishi-heatpump-" + device_uid;
+    return "heatlink-" + device_uid;
 }
 
 namespace {

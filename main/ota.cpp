@@ -260,9 +260,9 @@ bool busy() {
 namespace {
 
 constexpr char kReleasesLatestUrl[] =
-    "https://github.com/sslivins/mitsubishi-heatpump/releases/latest";
+    "https://github.com/sslivins/heatlink/releases/latest";
 constexpr char kReleaseDownloadFmt[] =
-    "https://github.com/sslivins/mitsubishi-heatpump/releases/download/%s/mitsubishi-heatpump.bin";
+    "https://github.com/sslivins/heatlink/releases/download/%s/heatlink.bin";
 
 std::mutex            s_upd_mtx;
 UpdateInfo            s_upd;
@@ -332,7 +332,7 @@ void perform_check() {
 
     esp_http_client_handle_t cli = esp_http_client_init(&cfg);
     if (cli) {
-        esp_http_client_set_header(cli, "User-Agent", "mitsubishi-heatpump");
+        esp_http_client_set_header(cli, "User-Agent", "heatlink");
         esp_err_t e = esp_http_client_perform(cli);
         int sc = esp_http_client_get_status_code(cli);
         if (e == ESP_OK && (sc == 301 || sc == 302 || sc == 307 || sc == 308)) {
