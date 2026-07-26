@@ -1013,12 +1013,12 @@ async function refresh(){
     $('uptime').textContent=fmtUptime(s.uptime_s);
     $('heap').textContent=(s.free_heap/1024|0)+' KB';
     const p=s.power||{};
-    $('vbat').textContent=p.present?(p.vbat_mv/1000).toFixed(2)+' V':'n/a';
-    $('vin').textContent=p.present?((p.input_mv!=null?p.input_mv:p.vin_mv)/1000).toFixed(2)+' V':'n/a';
-    $('vinPin').textContent=p.present?(p.vin_mv/1000).toFixed(2)+' V':'n/a';
-    $('vinOut').textContent=p.present?((p.vinout_mv||0)/1000).toFixed(2)+' V':'n/a';
-    $('psrc').textContent=p.present?(p.source||'--'):'n/a';
-    $('chg').textContent=p.present?(p.charging?'yes':'no'):'n/a';
+    $('vbat').textContent=p.present?(p.vbat_mv/1000).toFixed(2)+' V':'N/A';
+    $('vin').textContent=p.present?((p.input_mv!=null?p.input_mv:p.vin_mv)/1000).toFixed(2)+' V':'N/A';
+    $('vinPin').textContent=p.present?(p.vin_mv/1000).toFixed(2)+' V':'N/A';
+    $('vinOut').textContent=p.present?((p.vinout_mv||0)/1000).toFixed(2)+' V':'N/A';
+    $('psrc').textContent=p.present?(p.source||'--'):'N/A';
+    $('chg').textContent=p.present?(p.charging?'Yes':'No'):'N/A';
     const d=s.diag||{};
     $('vinMin').textContent=(d.vin_min_mv?((d.vin_min_mv/1000).toFixed(2)+' V'):'--');
     $('vinSags').textContent=(d.vin_sag_count!=null?d.vin_sag_count:'--');
@@ -1027,7 +1027,7 @@ async function refresh(){
     $('bo').textContent=(d.brownout_count!=null?d.brownout_count:'--');
     $('bo').style.color=(d.brownout_count>0)?'#ff5252':'';
     $('stubNote').style.display=s.unit_connected?'none':'block';
-    $('dgLink').textContent=s.unit_connected?'connected':'not connected';
+    $('dgLink').textContent=s.unit_connected?'Connected':'Not connected';
 
     if(!userEditing){
       const c=await (await fetch('/api/settings')).json();
@@ -1044,7 +1044,7 @@ async function refresh(){
       renderClimate();
       // Diagnostics tab — live serial telemetry.
       const conn=!!c.connected;
-      $('dgOp').textContent=conn?(c.operating?'yes':'no'):'--';
+      $('dgOp').textContent=conn?(c.operating?'Yes':'No'):'--';
       $('dgComp').textContent=(conn&&c.compressorFrequency!=null)?(c.compressorFrequency+' Hz'):'--';
       $('dgRoom').textContent=(conn&&c.roomTemperature!=null&&c.roomTemperature>0)?(fmtTemp(c.roomTemperature)+' '+unitSym()):'--';
       // Extended telemetry — each field only present in the payload when the
@@ -1060,7 +1060,7 @@ async function refresh(){
     }
   }catch(e){
     badge($('bWifi'),false);
-    $('subtitle').textContent='disconnected';
+    $('subtitle').textContent='Disconnected';
   }
 }
 
@@ -1177,21 +1177,21 @@ function renderClimate(){
   $('dialWrap').classList.toggle('off',!climate.power);
   const op=$('opState');
   let opTxt;
-  if(!climate.power){ opTxt='off'; }
-  else if(!climate.operating){ opTxt='idle'; }
+  if(!climate.power){ opTxt='Off'; }
+  else if(!climate.operating){ opTxt='Idle'; }
   else {
     switch(climate.mode){
-      case 'HEAT': opTxt='heating'; break;
-      case 'COOL': opTxt='cooling'; break;
-      case 'DRY':  opTxt='drying'; break;
-      case 'FAN':  opTxt='fan running'; break;
+      case 'HEAT': opTxt='Heating'; break;
+      case 'COOL': opTxt='Cooling'; break;
+      case 'DRY':  opTxt='Drying'; break;
+      case 'FAN':  opTxt='Fan running'; break;
       case 'AUTO':
         // AUTO doesn't report its direction, so infer from room vs setpoint.
         if(climate.room!=null && climate.temp!=null && Math.abs(climate.room-climate.temp)>=0.5)
-          opTxt=(climate.room>climate.temp)?'cooling':'heating';
-        else opTxt='active';
+          opTxt=(climate.room>climate.temp)?'Cooling':'Heating';
+        else opTxt='Active';
         break;
-      default: opTxt='active';
+      default: opTxt='Active';
     }
   }
   op.textContent=opTxt;
@@ -1276,7 +1276,7 @@ initDial();
 async function sysPost(url,msg,danger){
   if(!(await uiConfirm({body:msg,okText:'Continue',danger:!!danger})))return;
   try{await fetch(url,{method:'POST'})}catch(e){}
-  $('subtitle').textContent='rebooting…';
+  $('subtitle').textContent='Rebooting…';
 }
 async function factoryReset(){
   const ok=await uiConfirm({title:'Factory reset',
@@ -1284,7 +1284,7 @@ async function factoryReset(){
     okText:'Erase everything',danger:true,confirmWord:'RESET'});
   if(!ok)return;
   try{await fetch('/api/system/factory_reset',{method:'POST'})}catch(e){}
-  $('subtitle').textContent='resetting\u2026';
+  $('subtitle').textContent='Resetting\u2026';
 }
 
 function otaMsg(m,cls){const el=$('otaState');el.className='status '+cls;el.textContent=m;el.classList.remove('hidden')}
@@ -1376,7 +1376,7 @@ async function refreshUpdate(){
   try{
     const u=await (await jget('/api/update')).json();
     $('updCur').textContent=u.current||'--';
-    $('updLatest').textContent=u.checked?(u.latest||'--'):(u.checking?'checking…':'—');
+    $('updLatest').textContent=u.checked?(u.latest||'--'):(u.checking?'Checking…':'—');
     $('updCheckBtn').disabled=u.checking;
     $('updCheckBtn').textContent=u.checking?'Checking…':'Check for updates';
     // While a check is in flight, keep showing "Checking…" and don't render a
@@ -1430,7 +1430,7 @@ async function loadMqtt(){
       $('mqFriendly').value=m.friendly_name||'';
       $('mqPass').placeholder=m.password_set?'••••••••':'None set';
     }
-    $('mqttStat').textContent=m.connected?'connected':'disconnected';
+    $('mqttStat').textContent=m.connected?'Connected':'Disconnected';
     $('mqttNode').textContent=m.friendly_name||'heatlink-<id>';
   }catch(e){}
 }
@@ -1964,7 +1964,7 @@ function renderGroupPanel(g){
   const inConflict=(g.status==='conflict'||g.status==='pending_conflict');
   const lockMatch=(nm,uid)=>inConflict&&g.locked_by&&(g.locked_by===nm||g.locked_by===uid);
   const rows=[ memberRow({
-      name:self.name||self.uid, dotcls:'selfdot', tag:'This Device',
+      name:self.name||self.uid, dotcls:'selfdot', tag:'This device',
       isLock:lockMatch(self.name,self.uid), uid:self.uid, isPeer:false,
       mode:self.mode, room:self.roomTemp, target:self.targetTemp, url:null }) ];
   (g.members||[]).forEach(m=>{
@@ -1972,7 +1972,7 @@ function renderGroupPanel(g){
     // An unreachable peer (no fresh signed poll within ~45s) comes back as
     // state!=='known' — surface that plainly as "offline" so it's obvious a
     // zone dropped off, rather than the ambiguous "unknown".
-    const tag=known?'':(m.state==='incompatible'?'incompatible':'offline');
+    const tag=known?'':(m.state==='incompatible'?'Incompatible':'Offline');
     rows.push(memberRow({
       name:m.name||m.uid, dotcls:known?'known':'unknown', tag:tag,
       isLock:lockMatch(m.name,m.uid), uid:m.uid, isPeer:true,

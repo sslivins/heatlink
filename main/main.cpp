@@ -357,7 +357,12 @@ extern "C" void app_main() {
     fallback.friendly_name = CONFIG_MQTT_FRIENDLY_NAME;
     hvac_mqtt::StoredSettings ms = hvac_mqtt::load_settings(fallback);
 
+    // The HA device label follows the user-chosen name: an explicit MQTT
+    // friendly_name override wins, else the web-UI display name (set in OOBE /
+    // Settings), else the immutable "heatlink-<uid>" hostname. The unique id and
+    // MQTT topics are keyed on the uid regardless, so this only affects the label.
     std::string friendly = ms.friendly_name;
+    if (friendly.empty()) friendly = wifi::device_display_name();
     if (friendly.empty()) friendly = wifi::mdns_hostname();
 
     // No broker configured (empty host) → this is a fresh/open-source flash with
