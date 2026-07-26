@@ -699,9 +699,9 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
     <div id="wfCurrent"></div>
     <div class="wf-head">
       <span class="wf-head-t">Other networks</span>
-      <button class="btn-link" id="wfScanBtn" onclick="scanWifi(true)">Rescan</button>
+      <button class="btn-link" id="wfScanBtn" onclick="scanWifi()">Scan</button>
     </div>
-    <div id="wfList" class="wf-list"><div class="wf-empty">Scanning…</div></div>
+    <div id="wfList" class="wf-list"><div class="wf-empty">Tap Scan to search for networks</div></div>
 
     <div id="wfJoin" class="wf-join hidden">
       <div class="mqf"><label>Network (SSID)</label>
@@ -976,12 +976,13 @@ function showTab(name){
       c.style.display=(c.dataset.grp===name)?'':'none';
     });
   }
-  // Scan WiFi on entering Settings; the poll loop keeps it fresh while shown.
+  // WiFi scanning is manual only (Scan button) — an active scan is a big radio
+  // current spike and these units have no LiPo buffer, so we never auto-scan.
   netTabActive=(name==='settings');
   statusTabActive=(name==='status');
   if(statusTabActive && authState.role==='admin'){ refreshActivity(true); }
   mqEditing=false;   // switching tabs commits/abandons any in-progress MQTT edit
-  if(netTabActive && authState.role==='admin'){ closeJoin(); scanWifi(true); }
+  if(netTabActive && authState.role==='admin'){ closeJoin(); }
   // Re-sync stored auth state when opening Settings so the pending-change gate
   // and the toggle reflect the current server state, not a stale snapshot.
   if(name==='settings'){ loadAuth(); }
@@ -1562,16 +1563,16 @@ function renderCurrent(){
   el.innerHTML=''; el.appendChild(row);
 }
 
-async function scanWifi(manual){
-  const btn=$('wfScanBtn'); if(btn) btn.disabled=true;
-  if(manual) $('wfList').innerHTML='<div class="wf-empty">Scanning…</div>';
+async function scanWifi(){
+  const btn=$('wfScanBtn'); if(btn){ btn.disabled=true; btn.textContent='Scanning…'; }
+  $('wfList').innerHTML='<div class="wf-empty">Scanning…</div>';
   try{
     const r=await jget('/api/scan');
     if(r.status===401){ $('loginGate').classList.remove('hidden'); return; }
     renderWifiList(await r.json());
   }catch(e){
-    $('wfList').innerHTML='<div class="wf-empty">Scan failed — tap Rescan</div>';
-  }finally{ if(btn) btn.disabled=false; }
+    $('wfList').innerHTML='<div class="wf-empty">Scan failed — tap Scan</div>';
+  }finally{ if(btn){ btn.disabled=false; btn.textContent='Rescan'; } }
 }
 
 function renderWifiList(nets){
@@ -2380,7 +2381,6 @@ async function pollOnce(){
   await refresh();
   if(authState.role!=='admin'){ tickN++; return; }  // user role: climate only
   if(tickN%3===0) await loadWifi();
-  if(netTabActive && tickN%6===0 && $('wfJoin').classList.contains('hidden')) await scanWifi(false);
   if(tickN%6===0){ await refreshUpdate(); await loadMqtt(); }
   if(tickN%2===0) await refreshGroup();
   if(statusTabActive && tickN%2===0) await refreshActivity(false);
