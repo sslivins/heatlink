@@ -1,13 +1,64 @@
-# heatlink
+# HeatLink
 
-ESP-IDF firmware for an **M5Stack Stamp-S3Bat** (ESP32-S3) that controls a
-**Mitsubishi Electric** indoor unit over its **CN105** serial port and bridges
-it to **Home Assistant over MQTT**.
+**A tiny, 100 %-local WiFi controller for Mitsubishi Electric mini-splits — with
+a full touch web UI, a documented REST API, and native Home Assistant
+integration. No cloud, no subscription, no proprietary hub.**
+
+HeatLink is ESP-IDF firmware for an **M5Stack Stamp-S3Bat** (ESP32-S3) that talks
+to a **Mitsubishi Electric** indoor unit over its **CN105** service port and
+bridges it to **Home Assistant over MQTT** — while also serving a polished,
+phone-friendly control panel and a clean JSON API directly from the device.
+
+Solder five wires to a CN105 pigtail, flash the board, and you get a thermostat
+you fully own: it runs on your LAN, survives internet outages, and exposes every
+capability over an open API so you can build whatever front-end you like — a
+custom WiFi remote, a wall-mounted tablet dashboard, a physical knob, or a Node/
+Python automation.
 
 It is the ground-up ESP-IDF successor to
 [`mitsubishi2MQTT`](https://github.com/gysmo38/mitsubishi2MQTT) (Arduino/ESP8266)
 and preserves that project's MQTT topic contract, so existing Home Assistant
 entities keep working.
+
+<p align="center">
+  <img src="docs/images/climate-dark.png" alt="HeatLink climate control — dark" width="270">
+  <img src="docs/images/status-dark.png" alt="HeatLink status &amp; diagnostics" width="270">
+  <img src="docs/images/settings-dark.png" alt="HeatLink settings" width="270">
+</p>
+
+## Why HeatLink?
+
+Most Mitsubishi WiFi options are either a cloud adapter (Kumo Cloud / MELCloud —
+your thermostat stops working when their servers do) or a bare protocol bridge
+with no UI of its own. HeatLink is different:
+
+- 🌐 **100 % local, no cloud, no account.** Everything runs on the device and
+  your LAN. Nothing phones home.
+- 📱 **A real web UI, not just a bridge.** A responsive touch dashboard —
+  temperature dial, mode/fan/vane controls, live status, and settings — served
+  straight off the ESP32 at `http://heatlink-<id>.local/`. Light & dark themes,
+  iOS-PWA-ready (installable, safe-area aware for notch/Dynamic-Island phones).
+- 🔌 **An open, documented REST API + OpenAPI spec.** Every capability the UI
+  has is a plain JSON endpoint ([`openapi.yaml`](openapi.yaml), browsable in-app
+  via Swagger UI). Build a **custom WiFi remote, a wall controller, a kiosk
+  dashboard, or a scripted automation** without touching the firmware.
+- 🏠 **First-class Home Assistant.** MQTT auto-discovery publishes a climate
+  entity, a firmware **update** entity, and diagnostic sensors/buttons — no YAML.
+- ⚡ **Power-integrity diagnostics you won't find elsewhere.** The board runs off
+  the CN105 5 V rail, so HeatLink actively monitors and *counts* **brownouts**,
+  **input-voltage sags**, and **WiFi drops**, surfaces min-input-voltage and
+  battery state, and lets you reset those counters from the UI or Home Assistant.
+  A closed-loop **PMIC charge governor** buffers the rail with a small LiPo so the
+  module rides through power blips a naked bridge would crash on.
+- 🧊 **Multi-head zone coordination.** Heads that share one outdoor compressor
+  negotiate over the LAN so they never fight over HEAT vs COOL — a failure mode
+  unique to multi-zone Mitsubishi systems.
+- 🔎 **Capability auto-detection.** Probes the unit (e.g. powered vs. manual
+  wide-vane louver) and hides controls the hardware doesn't actually support.
+- 🚀 **Painless updates.** OTA via drag-and-drop, HTTPS URL, MQTT, or one-click
+  **GitHub self-update**, all with A/B partitions and automatic rollback.
+- 📡 **Self-provisioning & self-discovery.** Captive-portal WiFi setup on first
+  boot, mDNS hostname, and DNS-SD advertisement so tools can find every unit.
 
 > **Status: working.** Architecture, threading, WiFi (incl. captive-portal
 > provisioning + mDNS), the on-device web UI / REST API, the MQTT client +
@@ -119,9 +170,15 @@ Base: `<base_topic>/<friendly_name>`
 
 | Direction | Topic suffix |
 |-----------|--------------|
-| subscribe | `/mode/set` `/temp/set` `/remote_temp/set` `/fan/set` `/vane/set` `/wideVane/set` `/system/set` `/ota/set` `/update/install` |
-| publish | `/state` (retained) `/settings` `/availability` (LWT) `/update/state` (retained) `/debug/packets` `/debug/logs` |
-| discovery | `homeassistant/climate/<friendly_name>/config` (retained) `homeassistant/update/<friendly_name>/config` (retained) |
+| subscribe | `/mode/set` `/temp/set` `/remote_temp/set` `/fan/set` `/vane/set` `/wideVane/set` `/system/set` `/ota/set` `/update/install` `/diag/reset_brownout` `/diag/reset_wifi_drops` |
+| publish | `/state` (retained) `/settings` `/availability` (LWT) `/update/state` (retained) `/diag/state` (retained) `/group/state` (retained) `/debug/packets` `/debug/logs` |
+| discovery | `homeassistant/climate/<friendly_name>/config` · `homeassistant/update/<friendly_name>/config` · diagnostic `sensor`/`button`/`binary_sensor` entities (brownout & WiFi-drop counts + reset buttons, group/conflict state) — all retained |
+
+Beyond the climate entity, Home Assistant auto-discovers **diagnostic sensors**
+(brownout count, WiFi-drop count, group/compressor-conflict state) and **reset
+buttons** (reset brownout count, reset WiFi drops), so the same diagnostics the
+web UI shows are available as native HA entities you can chart, alert, or
+automate on.
 
 ## Build / flash
 
@@ -145,7 +202,7 @@ the device starts a `heatlink-XXXX` SoftAP (captive portal at
 NVS and reboots into STA mode. The **MQTT broker** is **not baked into the
 firmware** by default (open-source builds ship with no broker), so on first boot
 a fresh unit comes up unconfigured and you enter the broker at runtime from the
-web UI (**System → MQTT / Home Assistant**), persisted to NVS; saving reboots the
+web UI (**Settings → MQTT / Home Assistant**), persisted to NVS; saving reboots the
 device. Additional units can instead **inherit** the broker by joining an
 existing group. (Personal builds may still bake a default broker via
 `CONFIG_MQTT_BROKER_URI` in `sdkconfig.defaults.local`.) Each unit derives a short
@@ -160,27 +217,81 @@ unit without knowing the hostname.
 
 ## Web UI / REST API
 
-Once connected to WiFi the device serves a small diagnostics/control dashboard
-at `http://<ip>/` (or `http://heatlink-<id>.local/` via mDNS, where
-`<id>` is the unit's MAC suffix shown on the System tab). It is for
-provisioning and diagnostics — MQTT/Home Assistant remains the primary control
-path. The same JSON API backs it:
+Once connected to WiFi the device serves a responsive touch dashboard at
+`http://<ip>/` (or `http://heatlink-<id>.local/` via mDNS, where `<id>` is the
+unit's MAC suffix shown on the Status tab). It has four tabs — **Climate**
+(temperature dial, mode, fan & vanes), **Zones** (multi-head pairing &
+coordination), **Status** (live diagnostics — WiFi, controller power, heat-pump
+sensors, activity log), and **Settings** (display, wide-vane, WiFi, MQTT/HA,
+firmware, web/API access, device reset). It works standalone as a thermostat, or
+alongside MQTT/Home Assistant.
+
+<p align="center">
+  <img src="docs/images/climate-light.png" alt="Climate — light theme" width="240">
+  <img src="docs/images/climate-dark.png" alt="Climate — dark theme" width="240">
+  <img src="docs/images/settings-dark.png" alt="Settings" width="240">
+</p>
+
+Everything the UI does is backed by the same JSON API — so you can drive the unit
+from a script, a wall panel, or your own front-end. The full contract lives in
+[`openapi.yaml`](openapi.yaml) and is browsable in-app (Swagger UI, linked from
+**Settings → API access**). Optional per-endpoint API-key auth can be enabled
+there.
+
+### Control & status
 
 | Method | Path | Purpose |
 |--------|------|---------|
 | `GET`  | `/` | gzip'd dashboard |
-| `GET`  | `/api/status` | version, ip, uptime, free heap, unit/MQTT link, PMIC power telemetry |
+| `GET`  | `/api/status` | version, ip, ssid, uptime, free heap, unit/MQTT link, PMIC power telemetry, diagnostics (brownout/WiFi-drop counts, sags, min VIN) |
 | `GET`  | `/api/settings` | current heat-pump settings + status |
 | `POST` | `/api/settings` | apply any subset of `{power,mode,temperature,fan,vane,wideVane,remoteTemp}` |
-| `POST` | `/api/system/restart` | reboot |
-| `POST` | `/api/system/factory_reset` | erase WiFi creds + reboot into setup |
-| `GET`  | `/api/mqtt` | current broker settings `{host,port,username,base_topic,friendly_name,password_set,connected}` (password never returned) |
-| `POST` | `/api/mqtt` | save broker settings to NVS + reboot (`{host,port,username,password?,base_topic,friendly_name}`; omit `password` to keep the stored one) |
-| `GET`  | `/api/wifi` | current network `{ssid,mode,connected,ip,ap_name,password_set}` (password never returned) |
-| `POST` | `/api/wifi` | save credentials to NVS + reboot (`{ssid,password?}`; omit `password` to keep the stored one) |
-| `GET`  | `/api/update` | cached GitHub release check `{current,latest,update_available,checking,checked,release_url,error}` |
-| `POST` | `/api/update/check` | trigger an immediate GitHub `/releases/latest` poll (background) |
+| `GET`  | `/api/capabilities` | detected unit capabilities (e.g. wide-vane) + override |
+| `POST` | `/api/capabilities` | trigger a capability probe / set an override |
+| `GET`  | `/api/events` | activity log (who changed what, paginated) |
+| `DELETE` | `/api/events` | clear the activity log |
+
+### Diagnostics
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `POST` | `/api/diag/reset-brownout` | reset the persisted brownout counter |
+| `POST` | `/api/diag/reset-wifi-drops` | reset the WiFi-drop counter |
+
+### Provisioning & configuration
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `GET`/`POST` | `/api/mqtt` | broker settings `{host,port,username,base_topic,friendly_name,…}` (password never returned; POST saves to NVS + reboots) |
+| `GET`/`POST` | `/api/wifi` | network settings `{ssid,mode,connected,ip,…}` (POST saves to NVS + reboots) |
+| `GET`  | `/api/scan` | scan for nearby WiFi networks |
+| `POST` | `/api/device` | set the unit's friendly name / device identity |
+| `GET`/`POST` | `/api/auth` | web/API access-control settings (login & API-key gating) |
+| `POST` | `/api/login` · `/api/logout` | web-UI session auth (when enabled) |
+
+### Zone coordination (multi-head)
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `GET`  | `/api/group` · `/api/group/state` | group membership + coordination state |
+| `POST` | `/api/group/pair/start` · `/stop` | open / close the 6-digit pairing window |
+| `GET`  | `/api/group/pair/status` · `/discover` | pairing status · mDNS-browse for pairable groups |
+| `POST` | `/api/group/pair/claim` · `/join` | claim a code · join a group |
+| `POST` | `/api/group/leave` · `/label` · `/member/remove` | leave · relabel · remove a member |
+| `POST` | `/api/group/sync` · `/resolve` | signed peer sync · coordinator HEAT/COOL resolve |
+
+### Updates & system
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `GET`  | `/api/update` | cached GitHub release check `{current,latest,update_available,checking,…}` |
+| `POST` | `/api/update/check` | trigger an immediate GitHub release poll (background) |
 | `POST` | `/api/update/install` | download + flash the latest release (if newer) |
+| `POST` | `/api/ota` | flash a raw `.bin` posted as the request body |
+| `POST` | `/api/ota/url` | download + flash from an HTTPS URL |
+| `GET`  | `/api/ota/status` | OTA progress `{state,progress,message}` |
+| `POST` | `/api/system/restart` | reboot |
+| `POST` | `/api/system/factory_reset` | erase config + reboot into setup |
 
 Web commands reuse `hvac_mqtt::Command`, so the web and MQTT control paths
 funnel through identical apply logic in `main.cpp`.
@@ -205,7 +316,7 @@ A background poller (`ota::start_update_checker`) hits
 every 6 h (and on demand via `POST /api/update/check`), compares the latest
 release tag against the running version, and exposes the result two ways:
 
-- **Web UI** — the System tab's *Software update* card shows installed/latest
+- **Web UI** — the Settings tab's *Firmware* card shows installed/latest
   versions, a **Check for updates** button, and a one-click **Install update**
   button (which downloads the release's `heatlink*.bin` asset through
   GitHub's CDN redirect — see the enlarged HTTP buffers in `ota.cpp`).

@@ -80,6 +80,8 @@ bool topic_to_kind(const std::string& topic, Command::Kind& kind) {
         {"/system/set",      Command::Kind::System},
         {"/ota/set",         Command::Kind::Ota},
         {"/update/install",  Command::Kind::UpdateInstall},
+        {"/diag/reset_brownout", Command::Kind::ResetBrownout},
+        {"/diag/reset_wifi_drops", Command::Kind::ResetWifiDrops},
     };
     for (const auto& m : kMap) {
         if (topic == g_base + m.suffix) { kind = m.kind; return true; }
@@ -91,7 +93,7 @@ void subscribe_all() {
     const char* suffixes[] = {
         "/mode/set", "/temp/set", "/remote_temp/set", "/fan/set",
         "/vane/set", "/wideVane/set", "/system/set", "/ota/set",
-        "/update/install",
+        "/update/install", "/diag/reset_brownout", "/diag/reset_wifi_drops",
     };
     for (const char* s : suffixes) {
         std::string topic = g_base + s;
@@ -309,6 +311,31 @@ static esp_err_t publish_diag_sensor(const char* name, const char* id_suffix,
     return id < 0 ? ESP_FAIL : ESP_OK;
 }
 
+esp_err_t publish_diag_button(const char* name, const char* id_suffix,
+                              const std::string& cmd_suffix, const char* icon) {
+    std::string command_topic = t(cmd_suffix.c_str());
+    std::string avail_topic   = t("/availability");
+    std::string unique_id     = g_did + "_" + id_suffix;
+    cJSON* b = cJSON_CreateObject();
+    cJSON_AddStringToObject(b, "name", name);
+    cJSON_AddStringToObject(b, "unique_id", unique_id.c_str());
+    cJSON_AddStringToObject(b, "object_id", unique_id.c_str());
+    cJSON_AddStringToObject(b, "command_topic", command_topic.c_str());
+    cJSON_AddStringToObject(b, "payload_press", "press");
+    cJSON_AddStringToObject(b, "entity_category", "config");
+    cJSON_AddStringToObject(b, "icon", icon);
+    cJSON_AddStringToObject(b, "availability_topic", avail_topic.c_str());
+    cJSON_AddStringToObject(b, "payload_available", "online");
+    cJSON_AddStringToObject(b, "payload_not_available", "offline");
+    cJSON_AddItemToObject(b, "device", make_device_block());
+    char* payload = cJSON_PrintUnformatted(b);
+    std::string topic = "homeassistant/button/" + g_did + "_" + id_suffix + "/config";
+    int id = payload ? esp_mqtt_client_publish(g_client, topic.c_str(), payload, 0, 1, true) : -1;
+    if (payload) cJSON_free(payload);
+    cJSON_Delete(b);
+    return id < 0 ? ESP_FAIL : ESP_OK;
+}
+
 esp_err_t publish_diag_discovery() {
     if (!g_client) return ESP_ERR_INVALID_STATE;
     esp_err_t rc = ESP_OK;
@@ -327,6 +354,17 @@ esp_err_t publish_diag_discovery() {
     if (publish_diag_sensor("WiFi signal", "rssi",
                             "{{ value_json.rssi_dbm }}",
                             "signal_strength", "dBm", nullptr) != ESP_OK) rc = ESP_FAIL;
+    if (publish_diag_sensor("WiFi drops", "wifi_drops",
+                            "{{ value_json.wifi_drop_count }}",
+                            nullptr, nullptr, "mdi:wifi-alert") != ESP_OK) rc = ESP_FAIL;
+
+    // Buttons to zero the diagnostic counters (mirror the web UI's inline
+    // resets). HA "button" platform: press -> command_topic.
+    if (publish_diag_button("Reset brownout count", "reset_brownout",
+                            "/diag/reset_brownout", "mdi:flash-alert") != ESP_OK) rc = ESP_FAIL;
+    if (publish_diag_button("Reset WiFi drops", "reset_wifi_drops",
+                            "/diag/reset_wifi_drops", "mdi:wifi-alert") != ESP_OK) rc = ESP_FAIL;
+
     ESP_LOGI(TAG, "publish_diag_discovery");
     return rc;
 }
@@ -339,6 +377,7 @@ esp_err_t publish_diag_state(const DiagState& d) {
     cJSON_AddNumberToObject(root, "vin_sag_count", d.vin_sag_count);
     cJSON_AddNumberToObject(root, "vin_min_mv", d.vin_min_mv);
     cJSON_AddNumberToObject(root, "rssi_dbm", d.rssi_dbm);
+    cJSON_AddNumberToObject(root, "wifi_drop_count", d.wifi_drop_count);
 
     char* payload = cJSON_PrintUnformatted(root);
     std::string topic = t("/diag/state");

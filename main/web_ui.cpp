@@ -11,6 +11,7 @@
 #include "events.h"
 #include "capability.h"
 #include "factory_reset.h"
+#include "diag.h"
 
 #include <cstdlib>
 #include <cstring>
@@ -260,6 +261,7 @@ esp_err_t handle_status(httpd_req_t* req) {
     cJSON_AddStringToObject(root, "hostname", wifi::mdns_hostname().c_str());
     cJSON_AddStringToObject(root, "name", wifi::device_display_name().c_str());
     cJSON_AddStringToObject(root, "ip", wifi::get_ip());
+    cJSON_AddStringToObject(root, "ssid", wifi::get_ssid());
     cJSON_AddNumberToObject(root, "rssi", wifi::get_rssi());
     cJSON_AddBoolToObject(root, "unit_connected",
                           s_hooks.unit_connected && s_hooks.unit_connected());
@@ -289,6 +291,7 @@ esp_err_t handle_status(httpd_req_t* req) {
     cJSON_AddNumberToObject(d, "vin_min_mv", dg.vin_min_mv);
     cJSON_AddNumberToObject(d, "vin_min_ever_mv", dg.vin_min_ever_mv);
     cJSON_AddNumberToObject(d, "vin_sag_count", dg.vin_sag_count);
+    cJSON_AddNumberToObject(d, "wifi_drop_count", dg.wifi_drop_count);
     cJSON_AddItemToObject(root, "diag", d);
 
     char* str = cJSON_PrintUnformatted(root);
@@ -707,6 +710,38 @@ esp_err_t handle_update_install(httpd_req_t* req) {
         return httpd_resp_sendstr(req, "{\"status\":\"unavailable\"}");
     }
     return httpd_resp_sendstr(req, "{\"status\":\"started\"}");
+}
+
+// ── POST /api/diag/reset-brownout — zero the cumulative brownout count ─
+esp_err_t handle_diag_reset_brownout(httpd_req_t* req) {
+    set_cors(req);
+    REQUIRE_ADMIN(req);
+    ESP_LOGI(TAG, "/api/diag/reset-brownout from %s", requester_str(req).c_str());
+    diag::reset_brownout_count();
+    if (s_hooks.get_diag) {
+        DiagTelemetry dg = s_hooks.get_diag();
+        hvac_mqtt::publish_diag_state({dg.reset_reason, dg.brownout_count,
+                                       dg.vin_sag_count, dg.vin_min_mv,
+                                       wifi::get_rssi(), wifi::disconnect_count()});
+    }
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_sendstr(req, "{\"status\":\"ok\"}");
+}
+
+// ── POST /api/diag/reset-wifi-drops — zero the session WiFi-drop count ─
+esp_err_t handle_diag_reset_wifi_drops(httpd_req_t* req) {
+    set_cors(req);
+    REQUIRE_ADMIN(req);
+    ESP_LOGI(TAG, "/api/diag/reset-wifi-drops from %s", requester_str(req).c_str());
+    wifi::reset_disconnect_count();
+    if (s_hooks.get_diag) {
+        DiagTelemetry dg = s_hooks.get_diag();
+        hvac_mqtt::publish_diag_state({dg.reset_reason, dg.brownout_count,
+                                       dg.vin_sag_count, dg.vin_min_mv,
+                                       wifi::get_rssi(), wifi::disconnect_count()});
+    }
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_sendstr(req, "{\"status\":\"ok\"}");
 }
 
 // ── GET /api/mqtt — current broker settings (password masked) ──────────
@@ -2567,6 +2602,8 @@ esp_err_t init(const Hooks& hooks) {
         {"/api/update",              HTTP_GET,     handle_update_get,     nullptr},
         {"/api/update/check",        HTTP_POST,    handle_update_check,   nullptr},
         {"/api/update/install",      HTTP_POST,    handle_update_install, nullptr},
+        {"/api/diag/reset-brownout", HTTP_POST,    handle_diag_reset_brownout, nullptr},
+        {"/api/diag/reset-wifi-drops", HTTP_POST,  handle_diag_reset_wifi_drops, nullptr},
         {"/api/mqtt",                HTTP_GET,      handle_mqtt_get,       nullptr},
         {"/api/mqtt",                HTTP_POST,     handle_mqtt_post,      nullptr},
         {"/api/device",              HTTP_POST,     handle_device_post,    nullptr},

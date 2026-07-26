@@ -47,6 +47,8 @@ char  s_ap_name[33] = {0};
 char  s_ssid[33] = {0};
 char  s_pass[65] = {0};
 int   s_retries = 0;
+uint32_t s_wifi_drops = 0;   // outages (established assoc lost) this session
+bool  s_established  = false; // true once we've obtained an IP at least once
 
 httpd_handle_t s_portal = nullptr;
 wifi_ap_record_t s_scan[20];
@@ -120,6 +122,9 @@ void on_event(void*, esp_event_base_t base, int32_t id, void* data) {
     if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) {
         esp_wifi_connect();
     } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
+        // Count a genuine outage only on the established->lost transition, not
+        // on the retry storm that follows or on initial connect attempts.
+        if (s_established) { s_wifi_drops++; s_established = false; }
         if (s_retries++ < 5) {
             esp_wifi_connect();
             ESP_LOGW(TAG, "retry STA connect (%d)", s_retries);
@@ -130,6 +135,7 @@ void on_event(void*, esp_event_base_t base, int32_t id, void* data) {
         auto* e = static_cast<ip_event_got_ip_t*>(data);
         esp_ip4addr_ntoa(&e->ip_info.ip, s_ip, sizeof(s_ip));
         s_retries = 0;
+        s_established = true;
         xEventGroupSetBits(s_events, kConnectedBit);
     }
 }
@@ -549,6 +555,9 @@ const char* get_ap_name() { return s_ap_name; }
 const char* get_ssid() { return s_ssid; }
 bool has_password() { return s_pass[0] != '\0'; }
 const char* get_password() { return s_pass; }
+
+uint32_t disconnect_count() { return s_wifi_drops; }
+void reset_disconnect_count() { s_wifi_drops = 0; }
 
 // Live RSSI (dBm) of the current STA association, or 0 when not connected.
 // Queries the driver each call so callers see the current signal, not the

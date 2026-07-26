@@ -105,6 +105,13 @@ background:#fff;border-radius:50%;transition:.2s}
 .stat{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px}
 .stat .k{font-size:.72em;color:var(--fg-3)}
 .stat .v{font-size:1.05em;margin-top:2px}
+.v-row{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:2px}
+.v-row .v{margin-top:0}
+.icon-btn{display:none;flex:0 0 auto;width:34px;height:34px;border-radius:50%;
+  border:1px solid var(--border-strong);background:var(--chip);color:var(--fg);
+  font-size:1.15em;line-height:1;cursor:pointer;align-items:center;justify-content:center;
+  padding:0;-webkit-tap-highlight-color:transparent}
+.icon-btn:active{background:var(--hover)}
 .btn{cursor:pointer;border:none;border-radius:8px;padding:9px 14px;font-size:.88em;width:100%}
 .btn-warn{background:var(--chip);color:var(--orange);border:1px solid var(--border-strong);margin-top:8px}
 .btn-warn:hover{background:var(--hover)}
@@ -608,6 +615,7 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
   <div class="panel" id="panel-system">
   <div class="secnav" data-grp="status">
     <button onclick="jumpTo('sec-controller')">Controller</button>
+    <button onclick="jumpTo('sec-wifi-status')">WiFi</button>
     <button onclick="jumpTo('sec-power')">Power</button>
     <button onclick="jumpTo('sec-heatpump')">Heat pump</button>
     <button onclick="jumpTo('sec-activity')">Activity</button>
@@ -630,7 +638,16 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
       <div class="stat"><div class="k">Uptime</div><div class="v" id="uptime">--</div></div>
       <div class="stat"><div class="k">Free heap</div><div class="v" id="heap">--</div></div>
       <div class="stat"><div class="k">Last reset</div><div class="v" id="rst">--</div></div>
-      <div class="stat"><div class="k">Brownouts</div><div class="v" id="bo">--</div></div>
+      <div class="stat"><div class="k">Brownouts</div><div class="v-row"><div class="v" id="bo">--</div><button type="button" class="icon-btn" id="boReset" onclick="resetBrownouts(event)" title="Reset count" aria-label="Reset brownout count">&#x21BB;</button></div></div>
+    </div>
+  </div>
+
+  <div class="card" data-grp="status" id="sec-wifi-status">
+    <h2>WiFi</h2>
+    <div class="grid">
+      <div class="stat"><div class="k">Network</div><div class="v" id="wsNet">--</div></div>
+      <div class="stat"><div class="k">Signal</div><div class="v" id="wsSig">--</div></div>
+      <div class="stat"><div class="k">Drops</div><div class="v-row"><div class="v" id="wsDrops">--</div><button type="button" class="icon-btn" id="wdReset" onclick="resetWifiDrops(event)" title="Reset count" aria-label="Reset WiFi drop count">&#x21BB;</button></div></div>
     </div>
   </div>
 
@@ -1019,6 +1036,8 @@ async function refresh(){
     $('ver').textContent=s.version;
     $('ip').textContent=s.ip;
     curRssi=s.rssi; renderCurrent();
+    $('wsNet').textContent=s.ssid||'--';
+    $('wsSig').innerHTML=(s.rssi?((s.rssi+' dBm')+' '+barsHtml(s.rssi)):'--');
     $('uptime').textContent=fmtUptime(s.uptime_s);
     $('heap').textContent=(s.free_heap/1024|0)+' KB';
     const p=s.power||{};
@@ -1035,6 +1054,10 @@ async function refresh(){
     $('rst').style.color=d.last_was_brownout?'#ff5252':'';
     $('bo').textContent=(d.brownout_count!=null?d.brownout_count:'--');
     $('bo').style.color=(d.brownout_count>0)?'#ff5252':'';
+    $('boReset').style.display=(d.brownout_count>0)?'inline-flex':'none';
+    $('wsDrops').textContent=(d.wifi_drop_count!=null?d.wifi_drop_count:'--');
+    $('wsDrops').style.color=(d.wifi_drop_count>0)?'#ff5252':'';
+    $('wdReset').style.display=(d.wifi_drop_count>0)?'inline-flex':'none';
     $('stubNote').style.display=s.unit_connected?'none':'block';
     $('dgLink').textContent=s.unit_connected?'Connected':'Not connected';
 
@@ -2261,7 +2284,7 @@ function onGroupNameKey(e){
 // cat: 0 Mode,1 Power,2 Setpoint,3 Fan,4 Group,5 Membership,6 Ota,7 Net,8 Unit,9 Fault,10 System
 const ACT_ICONS=['\u{1F504}','\u23FB','\u{1F321}\uFE0F','\u{1F4A8}','\u{1F465}',
                  '\u{1F517}','\u2B07\uFE0F','\u{1F4F6}','\u{1F50C}','\u26A0\uFE0F','\u2139\uFE0F'];
-let actLimit=25, actData=null;
+let actLimit=20, actData=null;
 function actAgo(secs){
   if(secs<0)secs=0;
   if(secs<45)return'just now';
@@ -2315,10 +2338,10 @@ function renderActivity(){
     row.appendChild(ico); row.appendChild(main); list.appendChild(row);
   });
   const more=$('actMore');
-  if(more) more.style.display=(evs.length>=actLimit && actLimit<96)?'':'none';
+  if(more) more.style.display=(evs.length>=actLimit && actLimit<100)?'':'none';
 }
 async function refreshActivity(reset){
-  if(reset) actLimit=25;
+  if(reset) actLimit=20;
   try{
     const r=await jget('/api/events?limit='+actLimit);
     if(!r.ok) return;                          // 403 for non-admin: leave as-is
@@ -2327,7 +2350,7 @@ async function refreshActivity(reset){
   }catch(e){}
 }
 async function loadMoreActivity(){
-  actLimit=Math.min(96,actLimit+25);
+  actLimit=Math.min(100,actLimit+20);
   await refreshActivity(false);
 }
 async function clearActivity(){
@@ -2335,6 +2358,22 @@ async function clearActivity(){
                         okText:'Clear',danger:true}))) return;
   try{ await fetch('/api/events',{method:'DELETE'}); }catch(e){}
   await refreshActivity(true);
+}
+
+async function resetBrownouts(ev){
+  if(ev) ev.preventDefault();
+  if(!(await uiConfirm({body:'Reset the brownout counter to zero?',
+                        okText:'Reset',danger:true}))) return;
+  try{ await fetch('/api/diag/reset-brownout',{method:'POST'}); }catch(e){}
+  refresh();
+}
+
+async function resetWifiDrops(ev){
+  if(ev) ev.preventDefault();
+  if(!(await uiConfirm({body:'Reset the WiFi drop counter to zero?',
+                        okText:'Reset',danger:true}))) return;
+  try{ await fetch('/api/diag/reset-wifi-drops',{method:'POST'}); }catch(e){}
+  refresh();
 }
 
 async function pollOnce(){

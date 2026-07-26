@@ -37,4 +37,8 @@ void note_vin(uint16_t input_mv, uint16_t floor_mv);
 /// Copy the current diagnostics (thread-safe).
 Snapshot get();
 
+/// Reset the cumulative brownout counter to zero (clears the persisted NVS
+/// value and the live snapshot). Other diagnostics are left untouched.
+void reset_brownout_count();
+
 }  // namespace diag
