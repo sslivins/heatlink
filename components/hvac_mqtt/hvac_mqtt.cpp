@@ -28,8 +28,8 @@ CommandCallback    g_on_command;
 std::function<void()> g_on_connected;
 esp_mqtt_client_handle_t g_client = nullptr;
 bool               g_connected = false;
-std::string        g_base;  ///< "<base_topic>/<slug>"
-std::string        g_slug;  ///< friendly_name reduced to a safe topic segment
+std::string        g_base;  ///< "<base_topic>/heatlink-<uid>" (uid-keyed, stable)
+std::string        g_slug;  ///< legacy friendly_name slug (only for cleanup)
 std::string        g_did;   ///< stable HA discovery object_id ("heatlink-<uid>")
 StoredSettings     g_settings;          ///< settings the client was started with
 constexpr char     kNvsNs[] = "mqtt";   ///< NVS namespace for persisted settings
@@ -135,16 +135,15 @@ void event_handler(void*, esp_event_base_t, int32_t id, void* data) {
 esp_err_t init(const Config& cfg, CommandCallback on_command) {
     g_cfg = cfg;
     g_on_command = std::move(on_command);
-    g_slug = slugify(cfg.friendly_name);
-    g_base = cfg.base_topic + "/" + g_slug;
-    // The HA discovery config *topic* must be stable across friendly_name
-    // renames: it is HA's registry key for the entity. Deriving it from the
-    // (mutable) friendly slug meant a rename published a new retained config at
-    // a new topic while the old one lingered — two configs with the same
-    // unique_id, so HA dropped one and the entity vanished. The hostname is
-    // immutable, so use it for the discovery object_id (state/command topics
-    // still track the friendly slug via g_base, preserving the m2MQTT contract).
     g_did = discovery_object_id(cfg.device_uid);
+    // Topic base is keyed on the immutable unique id ("heatlink-<uid>"), NOT the
+    // (mutable) friendly_name. Renaming a device therefore never moves its
+    // state/command topics or orphans retained state — the name is purely the HA
+    // display label (make_device_block "name"). g_slug is retained only so
+    // clear_legacy_discovery() can purge discovery configs published by older
+    // firmware that keyed the discovery object_id on the friendly slug.
+    g_slug = slugify(cfg.friendly_name);
+    g_base = cfg.base_topic + "/" + g_did;
 
     std::string lwt_topic = g_base + "/availability";
 
@@ -392,13 +391,16 @@ esp_err_t publish_group_discovery() {
                              "{{ 'ON' if value_json.conflict else 'OFF' }}",
                              "problem", "mdi:swap-horizontal-bold") != ESP_OK) rc = ESP_FAIL;
     if (publish_group_entity("sensor", "Group status", "group_status",
-                             "{{ value_json.status }}",
+                             "{{ {'ok':'OK','standalone':'Standalone',"
+                             "'conflict':'Conflict','pending_conflict':'Pending conflict',"
+                             "'indeterminate':'Indeterminate'}"
+                             ".get(value_json.status, value_json.status) }}",
                              nullptr, "mdi:heat-pump") != ESP_OK) rc = ESP_FAIL;
     if (publish_group_entity("sensor", "Compressor locked mode", "group_locked_mode",
-                             "{{ value_json.locked_mode if value_json.locked_mode else 'none' }}",
+                             "{{ value_json.locked_mode | capitalize if value_json.locked_mode else 'None' }}",
                              nullptr, "mdi:lock") != ESP_OK) rc = ESP_FAIL;
     if (publish_group_entity("sensor", "Compressor locked by", "group_locked_by",
-                             "{{ value_json.locked_by if value_json.locked_by else 'none' }}",
+                             "{{ value_json.locked_by if value_json.locked_by else 'None' }}",
                              nullptr, "mdi:account-lock") != ESP_OK) rc = ESP_FAIL;
     if (publish_group_entity("sensor", "Group members", "group_members",
                              "{{ value_json.member_count }}",

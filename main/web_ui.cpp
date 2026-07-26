@@ -784,9 +784,10 @@ esp_err_t handle_mqtt_post(httpd_req_t* req) {
 }
 
 // ── POST /api/device — set the web-UI display name (admin only) ─────────
-// Independent of the MQTT friendly_name / mDNS hostname; shown on the login
-// screen, header, and browser tab so identical units are distinguishable.
-// Empty string clears it (falls back to hostname). No reboot required.
+// The display name is also the HA device label (via the MQTT friendly_name
+// fallback), so when a broker is configured a rename triggers a quick reboot to
+// re-publish discovery with the new label. Unique ids / topics are uid-keyed, so
+// nothing is orphaned. Empty string clears it (falls back to "heatlink-<uid>").
 esp_err_t handle_device_post(httpd_req_t* req) {
     set_cors(req);
     REQUIRE_ADMIN(req);
@@ -804,6 +805,7 @@ esp_err_t handle_device_post(httpd_req_t* req) {
     const cJSON* v = cJSON_GetObjectItem(json, "name");
     esp_err_t err = ESP_OK;
     bool name_changed = false, unit_changed = false;
+    const std::string old_name = wifi::device_display_name();
     // Partial update: only touch a field when its key is present, so a
     // temp_unit-only POST doesn't clear the display name (and vice versa).
     if (v && cJSON_IsString(v)) {
@@ -841,6 +843,15 @@ esp_err_t handle_device_post(httpd_req_t* req) {
     httpd_resp_sendstr(req, str);
     cJSON_free(str);
     cJSON_Delete(root);
+    // A rename changes the HA device label, which is only published at MQTT
+    // connect. Reboot to re-publish discovery with the new name so HA updates.
+    // Only when the value actually changed and a broker is configured — a
+    // temp_unit-only edit, or setting the same name, never reboots.
+    if (name_changed && wifi::device_display_name() != old_name &&
+        !hvac_mqtt::get_settings().host.empty()) {
+        vTaskDelay(pdMS_TO_TICKS(300));
+        esp_restart();
+    }
     return ESP_OK;
 }
 // ── Phase 2b: signed peer polling ──────────────────────────────────────
