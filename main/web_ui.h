@@ -56,6 +56,7 @@ struct DiagTelemetry {
     bool        last_was_brownout = false;
     uint16_t    vin_min_mv      = 0;
     uint32_t    vin_sag_count   = 0;
+    uint32_t    wifi_drop_count = 0;
 };
 
 /// Application-supplied accessors. All are invoked from the HTTP server task.

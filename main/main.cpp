@@ -130,7 +130,7 @@ void pmic_task(void*) {
                 if (hvac_mqtt::is_connected()) {
                     hvac_mqtt::publish_diag_state({ds.reset_reason, ds.brownout_count,
                                                    ds.vin_sag_count, ds.vin_min_mv,
-                                                   wifi::get_rssi()});
+                                                   wifi::get_rssi(), wifi::disconnect_count()});
                 }
             }
         }
@@ -196,6 +196,26 @@ void on_mqtt_command(const hvac_mqtt::Command& cmd) {
         case K::System:      ESP_LOGI(TAG, "system cmd: %s", cmd.value.c_str()); break;
         case K::Ota:         ota::start_url(cmd.value); break;
         case K::UpdateInstall: ota::install_latest(); break;
+        case K::ResetBrownout: {
+            diag::reset_brownout_count();
+            diag::Snapshot ds = diag::get();
+            if (hvac_mqtt::is_connected()) {
+                hvac_mqtt::publish_diag_state({ds.reset_reason, ds.brownout_count,
+                                               ds.vin_sag_count, ds.vin_min_mv,
+                                               wifi::get_rssi(), wifi::disconnect_count()});
+            }
+            break;
+        }
+        case K::ResetWifiDrops: {
+            wifi::reset_disconnect_count();
+            diag::Snapshot ds = diag::get();
+            if (hvac_mqtt::is_connected()) {
+                hvac_mqtt::publish_diag_state({ds.reset_reason, ds.brownout_count,
+                                               ds.vin_sag_count, ds.vin_min_mv,
+                                               wifi::get_rssi(), wifi::disconnect_count()});
+            }
+            break;
+        }
     }
 }
 
@@ -407,7 +427,7 @@ extern "C" void app_main() {
         diag::Snapshot ds = diag::get();
         hvac_mqtt::publish_diag_state({ds.reset_reason, ds.brownout_count,
                                        ds.vin_sag_count, ds.vin_min_mv,
-                                       wifi::get_rssi()});
+                                       wifi::get_rssi(), wifi::disconnect_count()});
     });
 
     // On-device web UI (REST + dashboard). Reuses on_mqtt_command so the web
@@ -440,6 +460,7 @@ extern "C" void app_main() {
         t.vin_min_mv        = s.vin_min_mv;
         t.vin_min_ever_mv   = s.vin_min_ever_mv;
         t.vin_sag_count     = s.vin_sag_count;
+        t.wifi_drop_count   = wifi::disconnect_count();
         return t;
     };
     if (web_ui::init(hooks) != ESP_OK) {

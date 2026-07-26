@@ -119,4 +119,20 @@ Snapshot get() {
     return g_snap;
 }
 
+void reset_brownout_count() {
+    {
+        std::lock_guard<std::mutex> lock(g_mtx);
+        g_snap.brownout_count = 0;
+    }
+    nvs_handle_t h;
+    if (nvs_open(kNs, NVS_READWRITE, &h) == ESP_OK) {
+        nvs_set_u32(h, "bo_cnt", 0);
+        nvs_commit(h);
+        nvs_close(h);
+    } else {
+        ESP_LOGW(TAG, "nvs_open failed; brownout count reset not persisted");
+    }
+    ESP_LOGI(TAG, "brownout count reset to 0");
+}
+
 }  // namespace diag

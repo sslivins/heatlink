@@ -46,7 +46,7 @@ struct Config {
 
 /// A command parsed from a .../*/set topic, to be applied to the heat pump.
 struct Command {
-    enum class Kind { Power, Mode, Temperature, Fan, Vane, WideVane, RemoteTemp, System, Ota, UpdateInstall };
+    enum class Kind { Power, Mode, Temperature, Fan, Vane, WideVane, RemoteTemp, System, Ota, UpdateInstall, ResetBrownout, ResetWifiDrops };
     Kind kind;
     std::string value;  ///< raw payload (e.g. "HEAT", "21.5", "AUTO")
 };
@@ -123,6 +123,7 @@ struct DiagState {
     uint32_t    vin_sag_count  = 0;
     uint16_t    vin_min_mv     = 0;   ///< lowest effective input this session (mV)
     int         rssi_dbm       = 0;   ///< current WiFi RSSI (dBm; 0 = unknown)
+    uint32_t    wifi_drop_count = 0;  ///< WiFi outages this session (RAM, resets on boot)
 };
 
 /// Publish the HA MQTT-discovery configs (retained) for the diagnostic sensors

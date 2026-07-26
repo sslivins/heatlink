@@ -206,6 +206,38 @@ paths:
               schema: { $ref: '#/components/schemas/StartedStatus' }
         '409':
           description: No update available or OTA busy
+  /api/diag/reset-brownout:
+    post:
+      tags: [Diagnostics]
+      summary: Reset the cumulative brownout counter to zero
+      security:
+        - ApiKeyAuth: []
+        - SessionCookie: []
+      responses:
+        '200':
+          description: Counter reset
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: ok }
+  /api/diag/reset-wifi-drops:
+    post:
+      tags: [Diagnostics]
+      summary: Reset the session WiFi-drop counter to zero
+      security:
+        - ApiKeyAuth: []
+        - SessionCookie: []
+      responses:
+        '200':
+          description: Counter reset
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: ok }
   /api/ota:
     post:
       tags: [Firmware]
@@ -810,6 +842,7 @@ components:
         hostname: { type: string }
         name: { type: string, description: User-set display name }
         ip: { type: string }
+        ssid: { type: string, description: SSID of the associated WiFi network }
         rssi: { type: integer, description: WiFi signal strength in dBm }
         unit_connected: { type: boolean }
         mqtt_connected: { type: boolean }
@@ -837,6 +870,7 @@ components:
             vin_min_mv: { type: integer }
             vin_min_ever_mv: { type: integer }
             vin_sag_count: { type: integer }
+            wifi_drop_count: { type: integer, description: WiFi outages this session (RAM, resets on boot) }
     Settings:
       type: object
       properties:

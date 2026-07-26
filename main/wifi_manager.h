@@ -9,6 +9,7 @@
 #pragma once
 
 #include <string>
+#include <cstdint>
 
 #include "esp_err.h"
 
@@ -62,6 +63,16 @@ int get_auth();
 
 /// SSID the device is configured to join (empty in out-of-box / provisioning).
 const char* get_ssid();
+
+/// Number of WiFi outages (an established association was lost) since boot.
+/// Counted once per outage — not per reconnect retry — and only after the STA
+/// has actually obtained an IP, so initial connect attempts don't count. This
+/// is a session counter kept in RAM: it starts at 0 every boot, so a firmware
+/// update / device reset can never inflate it.
+uint32_t disconnect_count();
+
+/// Zero the session WiFi-drop counter.
+void reset_disconnect_count();
 
 /// Whether a WiFi password is currently stored (the password itself is never
 /// exposed over the API — used server-side only to preserve it on partial saves).
