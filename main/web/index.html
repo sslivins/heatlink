@@ -1273,7 +1273,20 @@ function bumpTemp(d){
   }else{
     c=snapC(c+d);
   }
-  climate.temp=c;renderClimate();post({temperature:c});
+  climate.temp=c;renderClimate();commitTempDebounced(c);
+}
+
+// Debounce +/- setpoint commits. While the user taps repeatedly we update the
+// dial immediately but only POST the final value once they pause, so the
+// activity log gets one entry (and the unit one CN105 command) for the value
+// they settle on — not one per tap. Dragging the dial already commits once on
+// release; this gives the buttons the same behaviour.
+let tempCommitTimer=null;
+function commitTempDebounced(c){
+  userEditing=true;                 // keep the poll off the setpoint while tapping
+  setPending({temperature:c});      // hold the shown value as pending during the wait
+  clearTimeout(tempCommitTimer);
+  tempCommitTimer=setTimeout(()=>{ tempCommitTimer=null; post({temperature:c}); }, 500);
 }
 
 // Drag / tap on the dial to set the temperature.
