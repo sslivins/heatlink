@@ -244,9 +244,12 @@ alongside MQTT/Home Assistant.
 
 Everything the UI does is backed by the same JSON API — so you can drive the unit
 from a script, a wall panel, or your own front-end. The full contract lives in
-[`openapi.yaml`](openapi.yaml) and is browsable in-app (Swagger UI, linked from
-**Settings → API access**). Optional per-endpoint API-key auth can be enabled
-there.
+[`openapi.yaml`](openapi.yaml):
+
+**▶ [Browse the REST API in Swagger UI](https://petstore.swagger.io/?url=https://raw.githubusercontent.com/sslivins/heatlink/main/openapi.yaml)** — an interactive viewer for every `/api` endpoint.
+
+The same reference is available in-app (Swagger UI, linked from **Settings → API
+access**). Optional per-endpoint API-key auth can be enabled there.
 
 ### Control & status
 
