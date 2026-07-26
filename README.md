@@ -1,29 +1,34 @@
 # HeatLink
 
 **A tiny, 100 %-local WiFi controller for Mitsubishi Electric mini-splits — with
-a full touch web UI, a documented REST API, and native Home Assistant
-integration. No cloud, no subscription, no proprietary hub.**
+a full touch web UI, a documented REST API, native Home Assistant integration,
+and one-of-a-kind multi-head zone coordination. No cloud, no subscription, no
+proprietary hub.**
 
 HeatLink is ESP-IDF firmware for an **M5Stack Stamp-S3Bat** (ESP32-S3) that talks
 to a **Mitsubishi Electric** indoor unit over its **CN105** service port and
 bridges it to **Home Assistant over MQTT** — while also serving a polished,
 phone-friendly control panel and a clean JSON API directly from the device.
 
-Solder five wires to a CN105 pigtail, flash the board, and you get a thermostat
-you fully own: it runs on your LAN, survives internet outages, and exposes every
-capability over an open API so you can build whatever front-end you like — a
-custom WiFi remote, a wall-mounted tablet dashboard, a physical knob, or a Node/
-Python automation.
+Solder four wires to a CN105 pigtail (the 12 V pin is left unconnected), flash
+the board, and you get a thermostat you fully own: it runs on your LAN, survives
+internet outages, and exposes every capability over an open API so you can build
+whatever front-end you like — a custom WiFi remote, a wall-mounted tablet
+dashboard, a physical knob, or a Node/Python automation.
 
-It is the ground-up ESP-IDF successor to
+And uniquely, when several indoor heads share one outdoor compressor, HeatLink
+units **coordinate their HEAT/COOL demands with each other over your LAN** so
+they never fight the shared unit — to our knowledge the first open Mitsubishi
+bridge to solve this multi-zone problem.
+
+HeatLink descends from the lineage of
 [`mitsubishi2MQTT`](https://github.com/gysmo38/mitsubishi2MQTT) (Arduino/ESP8266)
-and preserves that project's MQTT topic contract, so existing Home Assistant
-entities keep working.
+and the CN105 protocol work in [SwiCago/HeatPump][swicago], rebuilt from the
+ground up on ESP-IDF with its own web UI, REST API, and MQTT schema.
 
 <p align="center">
-  <img src="docs/images/climate-dark.png" alt="HeatLink climate control — dark" width="270">
-  <img src="docs/images/status-dark.png" alt="HeatLink status &amp; diagnostics" width="270">
-  <img src="docs/images/settings-dark.png" alt="HeatLink settings" width="270">
+  <img src="docs/images/climate-dark.png" alt="HeatLink climate control — dark" width="250">
+  <img src="docs/images/climate-light.png" alt="HeatLink climate control — light" width="250">
 </p>
 
 ## Why HeatLink?
@@ -34,6 +39,12 @@ with no UI of its own. HeatLink is different:
 
 - 🌐 **100 % local, no cloud, no account.** Everything runs on the device and
   your LAN. Nothing phones home.
+- 🧊 **Multi-head zone coordination — a HeatLink first.** When several indoor
+  heads share one outdoor compressor, Mitsubishi hardware forces them all into
+  the *same* HEAT-or-COOL mode; ask two rooms for opposing modes and they fight
+  the compressor. HeatLink units negotiate over your LAN, elect a coordinator,
+  and lock the shared unit to one demand — to our knowledge no other open
+  Mitsubishi bridge solves this.
 - 📱 **A real web UI, not just a bridge.** A responsive touch dashboard —
   temperature dial, mode/fan/vane controls, live status, and settings — served
   straight off the ESP32 at `http://heatlink-<id>.local/`. Light & dark themes,
@@ -50,9 +61,6 @@ with no UI of its own. HeatLink is different:
   battery state, and lets you reset those counters from the UI or Home Assistant.
   A closed-loop **PMIC charge governor** buffers the rail with a small LiPo so the
   module rides through power blips a naked bridge would crash on.
-- 🧊 **Multi-head zone coordination.** Heads that share one outdoor compressor
-  negotiate over the LAN so they never fight over HEAT vs COOL — a failure mode
-  unique to multi-zone Mitsubishi systems.
 - 🔎 **Capability auto-detection.** Probes the unit (e.g. powered vs. manual
   wide-vane louver) and hides controls the hardware doesn't actually support.
 - 🚀 **Painless updates.** OTA via drag-and-drop, HTTPS URL, MQTT, or one-click
@@ -73,7 +81,7 @@ with no UI of its own. HeatLink is different:
 The controller is an off-the-shelf **[M5Stack Stamp-S3Bat][stamp]** module — an
 ESP32-S3 (`ESP32-S3-PICO-1-N8R8`, 8 MB flash / 8 MB PSRAM) with an on-board
 battery/PMIC subsystem, so a single small LiPo buffers the whole thing off the
-heat pump's own 5 V rail. No custom PCB is required; you solder five wires from
+heat pump's own 5 V rail. No custom PCB is required; you solder four wires from
 its castellated pads to a CN105 cable.
 
 | Part | Role |
@@ -164,7 +172,7 @@ protocol are identical):
    └────────────────────────────┘   └──────────────┘
 ```
 
-## MQTT contract (from mitsubishi2MQTT)
+## MQTT contract
 
 Base: `<base_topic>/<friendly_name>`
 
@@ -226,11 +234,13 @@ sensors, activity log), and **Settings** (display, wide-vane, WiFi, MQTT/HA,
 firmware, web/API access, device reset). It works standalone as a thermostat, or
 alongside MQTT/Home Assistant.
 
-<p align="center">
-  <img src="docs/images/climate-light.png" alt="Climate — light theme" width="240">
-  <img src="docs/images/climate-dark.png" alt="Climate — dark theme" width="240">
-  <img src="docs/images/settings-dark.png" alt="Settings" width="240">
-</p>
+<table>
+  <tr>
+    <td align="center" valign="top" width="33%"><b>Status &amp; diagnostics</b><br><br><img src="docs/images/status-dark.png" alt="Status tab" width="230"></td>
+    <td align="center" valign="top" width="33%"><b>Zones (multi-head)</b><br><br><img src="docs/images/zones-dark.png" alt="Zones tab" width="230"></td>
+    <td align="center" valign="top" width="33%"><b>Settings</b><br><br><img src="docs/images/settings-dark.png" alt="Settings tab" width="230"></td>
+  </tr>
+</table>
 
 Everything the UI does is backed by the same JSON API — so you can drive the unit
 from a script, a wall panel, or your own front-end. The full contract lives in
