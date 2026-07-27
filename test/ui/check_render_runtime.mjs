@@ -26,7 +26,10 @@ import vm from 'node:vm';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-process.on('unhandledRejection', () => {}); // startup IIFE awaits a stubbed fetch
+// The startup IIFE awaits a stubbed fetch; surface (don't silently swallow) any
+// unhandled rejection so a real async fault in the load path fails the test.
+const unhandled = [];
+process.on('unhandledRejection', (e) => { unhandled.push(e); });
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const html = fs.readFileSync(path.join(root, 'main', 'web', 'index.html'), 'utf8');
@@ -181,6 +184,14 @@ for (const caps of [
 
 if (failures > 0) {
   console.error(`render-runtime check FAILED: ${failures} problem(s)`);
+  process.exit(1);
+}
+// Give the startup IIFE's stubbed-fetch microtasks a tick to settle, then assert
+// nothing rejected unobserved during load.
+await new Promise((r) => setImmediate(r));
+if (unhandled.length > 0) {
+  console.error(`render-runtime check FAILED: ${unhandled.length} unhandled rejection(s) during load`);
+  console.error('  ' + (unhandled[0] && (unhandled[0].stack || unhandled[0].message || unhandled[0])));
   process.exit(1);
 }
 console.log('render-runtime check passed: render path runs clean for all modes + capability states');

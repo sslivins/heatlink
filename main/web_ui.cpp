@@ -263,6 +263,9 @@ esp_err_t handle_status(httpd_req_t* req) {
     cJSON_AddStringToObject(root, "ip", wifi::get_ip());
     cJSON_AddStringToObject(root, "ssid", wifi::get_ssid());
     cJSON_AddNumberToObject(root, "rssi", wifi::get_rssi());
+    cJSON_AddNumberToObject(root, "tx_power_dbm", wifi::get_tx_power_dbm());
+    cJSON_AddNumberToObject(root, "tx_power_min_dbm", wifi::tx_power_min_dbm());
+    cJSON_AddNumberToObject(root, "tx_power_max_dbm", wifi::tx_power_max_dbm());
     cJSON_AddBoolToObject(root, "unit_connected",
                           s_hooks.unit_connected && s_hooks.unit_connected());
     cJSON_AddBoolToObject(root, "mqtt_connected",
@@ -854,6 +857,13 @@ esp_err_t handle_device_post(httpd_req_t* req) {
         err = wifi::set_temp_unit(f);
         unit_changed = (err == ESP_OK);
     }
+    const cJSON* vtx = cJSON_GetObjectItem(json, "tx_power");
+    bool tx_changed = false;
+    int old_tx = wifi::get_tx_power_dbm();
+    if (err == ESP_OK && vtx && cJSON_IsNumber(vtx)) {
+        err = wifi::set_tx_power_dbm((int)vtx->valuedouble);
+        tx_changed = (err == ESP_OK) && (wifi::get_tx_power_dbm() != old_tx);
+    }
     cJSON_Delete(json);
     if (err != ESP_OK) {
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "NVS write failed");
@@ -868,11 +878,18 @@ esp_err_t handle_device_post(httpd_req_t* req) {
                         (wifi::temp_unit_fahrenheit() ? "\xC2\xB0""F" : "\xC2\xB0""C");
         events::log(events::Cat::System, events::Actor::WebUI, m.c_str(), who.c_str());
     }
+    if (tx_changed) {
+        std::string who = web_actor_name(req);
+        std::string m = std::string("WiFi TX power set to ") +
+                        std::to_string(wifi::get_tx_power_dbm()) + " dBm";
+        events::log(events::Cat::System, events::Actor::WebUI, m.c_str(), who.c_str());
+    }
     // Echo the canonical (sanitised) values so the UI can update in place.
     cJSON* root = cJSON_CreateObject();
     cJSON_AddStringToObject(root, "name", wifi::device_display_name().c_str());
     cJSON_AddStringToObject(root, "temp_unit",
                             wifi::temp_unit_fahrenheit() ? "F" : "C");
+    cJSON_AddNumberToObject(root, "tx_power_dbm", wifi::get_tx_power_dbm());
     char* str = cJSON_PrintUnformatted(root);
     httpd_resp_set_type(req, "application/json");
     httpd_resp_sendstr(req, str);

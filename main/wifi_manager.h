@@ -45,6 +45,19 @@ bool temp_unit_fahrenheit();
 /// Persist the temperature display unit to NVS and update the cache (no reboot).
 esp_err_t set_temp_unit(bool fahrenheit);
 
+/// WiFi transmit-power cap currently in effect, in whole dBm. Lowering it shrinks
+/// the radio's transmit-current peaks (which sag the current-limited CN105 5 V
+/// rail and can trip brownout on buffer-less heads) at the cost of link margin.
+int get_tx_power_dbm();
+/// Inclusive bounds the UI/API should clamp a TX-power request to (dBm).
+int tx_power_min_dbm();
+int tx_power_max_dbm();
+
+/// Persist a new TX-power cap (clamped to [tx_power_min_dbm, tx_power_max_dbm])
+/// and apply it to the live radio immediately — no reboot. Returns ESP_OK on a
+/// successful NVS write (the value is applied only after it is persisted).
+esp_err_t set_tx_power_dbm(int dbm);
+
 /// Bring up WiFi. Returns ESP_OK once STA is connected with an IP, or
 /// ESP_ERR_NOT_FINISHED when it has fallen back to SoftAP provisioning.
 esp_err_t init();
