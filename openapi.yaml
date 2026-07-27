@@ -444,11 +444,12 @@ paths:
   /api/device:
     post:
       tags: [System]
-      summary: Set the device display name and/or temperature display unit
+      summary: Set the device display name, temperature display unit and/or WiFi TX power
       description: |
         Partial update — only the fields present are applied, so a `temp_unit`-only
         POST won't clear the display name (and vice versa). `temp_unit` controls
-        the web UI display only.
+        the web UI display only. `tx_power` sets the WiFi transmit-power cap (dBm)
+        and is applied to the live radio immediately, without a reboot.
       security:
         - SessionCookie: []
       requestBody:
@@ -844,6 +845,9 @@ components:
         ip: { type: string }
         ssid: { type: string, description: SSID of the associated WiFi network }
         rssi: { type: integer, description: WiFi signal strength in dBm }
+        tx_power_dbm: { type: integer, description: WiFi transmit-power cap currently applied, in dBm }
+        tx_power_min_dbm: { type: integer, description: Minimum settable TX power (dBm) }
+        tx_power_max_dbm: { type: integer, description: Maximum settable TX power (dBm) }
         unit_connected: { type: boolean }
         mqtt_connected: { type: boolean }
         mqtt_configured: { type: boolean, description: true once a broker host is stored (false on a fresh unconfigured unit) }
@@ -1019,11 +1023,13 @@ components:
       properties:
         name: { type: string, description: Device display name }
         temp_unit: { type: string, enum: [C, F] }
+        tx_power: { type: integer, description: 'WiFi transmit-power cap in dBm (clamped to tx_power_min_dbm..tx_power_max_dbm from /api/status); applied live, no reboot' }
     DeviceResult:
       type: object
       properties:
         name: { type: string }
         temp_unit: { type: string, enum: [C, F] }
+        tx_power_dbm: { type: integer, description: TX-power cap in effect after the update (dBm) }
     WifiNetwork:
       type: object
       properties:

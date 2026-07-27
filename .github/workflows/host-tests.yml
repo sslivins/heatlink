@@ -12,6 +12,7 @@ on:
       - 'test/host/**'
       - 'test/ui/**'
       - 'test/api/**'
+      - 'test/run_all.mjs'
       - 'main/web/index.html'
       - 'main/web_ui.cpp'
       - 'openapi.yaml'
@@ -27,6 +28,7 @@ on:
       - 'test/host/**'
       - 'test/ui/**'
       - 'test/api/**'
+      - 'test/run_all.mjs'
       - 'main/web/index.html'
       - 'main/web_ui.cpp'
       - 'openapi.yaml'
@@ -68,18 +70,6 @@ jobs:
             -o cn105_codec_tests
           ./cn105_codec_tests
 
-      - name: Check web UI syntax
+      - name: Run Node host tests (web UI + API contract)
         shell: bash
-        run: node test/ui/check_ui_syntax.mjs
-
-      - name: Check member-row rendering (hostile display names)
-        shell: bash
-        run: node test/ui/check_render_handlers.mjs
-
-      - name: Check web UI render path (runtime smoke)
-        shell: bash
-        run: node test/ui/check_render_runtime.mjs
-
-      - name: Check openapi.yaml matches the API routes
-        shell: bash
-        run: node test/api/check_openapi_routes.mjs
+        run: node test/run_all.mjs

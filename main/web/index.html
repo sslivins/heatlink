@@ -647,6 +647,7 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
     <div class="grid">
       <div class="stat"><div class="k">Network</div><div class="v" id="wsNet">--</div></div>
       <div class="stat"><div class="k">Signal</div><div class="v" id="wsSig">--</div></div>
+      <div class="stat"><div class="k">TX power</div><div class="v" id="wsTx">--</div></div>
       <div class="stat"><div class="k">Drops</div><div class="v-row"><div class="v" id="wsDrops">--</div><button type="button" class="icon-btn" id="wdReset" onclick="resetWifiDrops(event)" title="Reset count" aria-label="Reset WiFi drop count">&#x21BB;</button></div></div>
     </div>
   </div>
@@ -714,6 +715,15 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
     </div>
 
     <button class="btn" id="wfOtherBtn" onclick="joinOther()" style="margin-top:10px">Other network…</button>
+
+    <div class="wf-head" style="margin-top:16px"><span class="wf-head-t">Transmit power</span></div>
+    <div class="row" style="align-items:center;gap:12px">
+      <input type="range" id="txPow" min="2" max="20" step="1" value="20" style="flex:1"
+             oninput="$('txPowVal').textContent=this.value+' dBm'" onchange="saveTxPow()">
+      <span id="txPowVal" class="v" style="min-width:64px;text-align:right">20 dBm</span>
+    </div>
+    <div class="hint" style="margin-top:4px">Lower power reduces current spikes that can brown out the controller; raise it if the signal is weak.</div>
+    <div id="txMsg" class="status hidden" style="margin:10px 0"></div>
   </div>
 
   <div class="card" data-grp="settings" id="sec-mqtt">
@@ -1019,12 +1029,26 @@ function confirmField(k,serverVal){
 }
 
 async function refresh(){
+  let s;
+  // Phase 1 — transport. Only a genuine fetch/timeout failure (device actually
+  // unreachable) may present as "Disconnected". A later RENDER error must NOT:
+  // a client-side JS bug once masqueraded as a WiFi outage (see refresh() note
+  // in test/ui/check_refresh_pipeline.mjs).
   try{
     const r=await jget('/api/status');
     // A 401 means our session lapsed (e.g. server restart) — re-show the
     // login gate instead of rendering an error body as garbage status.
     if(r.status===401){ $('loginGate').classList.remove('hidden'); $('lgPass').focus(); return; }
-    const s=await r.json();
+    s=await r.json();
+  }catch(e){
+    badge($('bWifi'),false);
+    $('subtitle').textContent='Disconnected';
+    return;
+  }
+  // Phase 2 — render the status we successfully fetched. Guarded on its own so a
+  // rendering bug logs (and stays visible) instead of faking a disconnect; the
+  // WiFi badge stays green because the device demonstrably answered.
+  try{
     badge($('bWifi'),true);
     badge($('bUnit'),s.unit_connected);
     badge($('bMqtt'),s.mqtt_connected);
@@ -1039,6 +1063,7 @@ async function refresh(){
     curRssi=s.rssi; renderCurrent();
     $('wsNet').textContent=s.ssid||'--';
     $('wsSig').innerHTML=(s.rssi?((s.rssi+' dBm')+' '+barsHtml(s.rssi)):'--');
+    if(s.tx_power_dbm!=null){ $('wsTx').textContent=s.tx_power_dbm+' dBm'; syncTxSetting(s); }
     $('uptime').textContent=fmtUptime(s.uptime_s);
     $('heap').textContent=(s.free_heap/1024|0)+' KB';
     const p=s.power||{};
@@ -1061,8 +1086,14 @@ async function refresh(){
     $('wdReset').style.display=(d.wifi_drop_count>0)?'inline-flex':'none';
     $('stubNote').style.display=s.unit_connected?'none':'block';
     $('dgLink').textContent=s.unit_connected?'Connected':'Not connected';
+  }catch(e){
+    console.error('status render failed',e);
+  }
 
-    if(!userEditing){
+  // Phase 3 — settings/climate render. Separate guard: a failure here must not
+  // touch the WiFi badge either.
+  if(!userEditing){
+    try{
       const c=await (await fetch('/api/settings')).json();
       if(c.temp_unit){TUNIT=c.temp_unit;syncUnitToggle();}
       if(confirmField('power',c.power)) climate.power=(c.power==='ON');
@@ -1090,10 +1121,9 @@ async function refresh(){
       $('dgSub').textContent=(conn&&c.subMode)?c.subMode:'--';
       $('dgStg').textContent=(conn&&c.stage)?c.stage:'--';
       $('dgErr').textContent=(conn&&c.errorCode)?c.errorCode:'--';
+    }catch(e){
+      console.error('settings update failed',e);
     }
-  }catch(e){
-    badge($('bWifi'),false);
-    $('subtitle').textContent='Disconnected';
   }
 }
 
@@ -1134,6 +1164,33 @@ async function saveDisplayUnit(){
   }catch(e){ fail('Save failed'); }
 }
 const MODE_COLOR={HEAT:'#ff7b29',COOL:'#3b9bff',AUTO:'#3fb950',DRY:'#9aa4ad',FAN:'#9aa4ad'};
+// --- WiFi TX power --------------------------------------------------------
+let txSynced=false;   // seed the slider once from the first status poll
+function syncTxSetting(s){
+  const sl=$('txPow'); if(!sl) return;
+  if(s.tx_power_min_dbm!=null) sl.min=s.tx_power_min_dbm;
+  if(s.tx_power_max_dbm!=null) sl.max=s.tx_power_max_dbm;
+  // Don't fight the user while they're dragging the slider.
+  if(document.activeElement===sl) return;
+  if(!txSynced && s.tx_power_dbm!=null){
+    sl.value=s.tx_power_dbm; $('txPowVal').textContent=s.tx_power_dbm+' dBm'; txSynced=true;
+  }
+}
+async function saveTxPow(){
+  const sl=$('txPow'), want=parseInt(sl.value,10), msg=$('txMsg');
+  const fail=t=>{msg.textContent=t;msg.className='status err';msg.classList.remove('hidden');};
+  try{
+    const r=await fetch('/api/device',{method:'POST',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify({tx_power:want})});
+    if(r.status===401||r.status===403){ loadAuth(); return; }
+    if(!r.ok){ fail('Save failed'); return; }
+    const d=await r.json();
+    if(d.tx_power_dbm!=null){ sl.value=d.tx_power_dbm; $('txPowVal').textContent=d.tx_power_dbm+' dBm'; }
+    msg.textContent='Applied '+(d.tx_power_dbm!=null?d.tx_power_dbm+' dBm':'');
+    msg.className='status ok'; msg.classList.remove('hidden');
+    setTimeout(()=>msg.classList.add('hidden'),2500);
+  }catch(e){ fail('Save failed'); }
+}
 // --- Wide-vane capability -------------------------------------------------
 const WV_STATUS={supported:'Powered (detected)',unsupported:'Manual louver (no motor)',
   inconclusive:'Not determined yet',unknown:'Not detected yet'};
@@ -2402,7 +2459,7 @@ async function pollOnce(){
 function schedule(ms){ clearTimeout(pollTimer); pollTimer=setTimeout(tick,ms); }
 async function tick(){
   if(document.hidden){ schedule(2000); return; }   // paused: just re-check visibility
-  try{ await pollOnce(); }catch(e){/* jget already flagged offline */}
+  try{ await pollOnce(); }catch(e){ console.error('poll failed',e); }
   schedule(offline?8000:5000);                      // back off while disconnected
 }
 document.addEventListener('visibilitychange',()=>{ if(!document.hidden) schedule(150); });
@@ -2545,7 +2602,7 @@ function wzWaitReboot(msg){
 (async()=>{
   const ok=await loadAuth(true);   // defer revealing the app until the wizard decision is made
   if(!ok) return;  // login gate shown; loops start after login + reload
-  try{ await pollOnce(); }catch(e){/* jget already flagged offline */}
+  try{ await pollOnce(); }catch(e){ console.error('startup poll failed',e); }
   $('appWrap').classList.remove('hidden');   // wizard overlay (if any) is already covering the app
   schedule(offline?8000:5000);
 })();

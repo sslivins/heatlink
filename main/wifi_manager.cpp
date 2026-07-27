@@ -40,6 +40,28 @@ constexpr int kConnectedBit = BIT0;
 constexpr int kFailBit      = BIT1;
 constexpr char kNvsNs[]     = "wifi";
 
+// WiFi transmit power cap (user-tunable, persisted in the "device" NVS
+// namespace under key "txpow", in whole dBm). The radio defaults to the PHY
+// ceiling (20 dBm), whose transmit-current peaks sag the current-limited CN105
+// 5 V rail — with no LiPo/bulk buffer on the deployed heads, the deepest sags
+// can trip the brownout detector. The default keeps the full 20 dBm for the best
+// link margin; the cap is exposed on the Settings page so a brownout-prone unit
+// can be turned down individually against its link margin. The driver takes
+// 0.25 dBm units over 8..84, so we clamp to 2..20 dBm.
+constexpr int8_t kDefaultTxPowerDbm = 20;
+constexpr int8_t kMinTxPowerDbm     = 2;
+constexpr int8_t kMaxTxPowerDbm     = 20;
+int8_t s_tx_power_dbm = kDefaultTxPowerDbm;
+
+// Apply the current TX-power cap to the radio. Must be called after
+// esp_wifi_start() — the driver rejects the setting before the PHY is up.
+// Best-effort: a failure just leaves the radio at its previous level, so we log
+// and continue.
+void apply_tx_power_cap() {
+    esp_err_t err = esp_wifi_set_max_tx_power(static_cast<int8_t>(s_tx_power_dbm * 4));
+    if (err != ESP_OK) ESP_LOGW(TAG, "set_max_tx_power failed: %s", esp_err_to_name(err));
+}
+
 EventGroupHandle_t s_events = nullptr;
 Mode  s_mode = Mode::IDLE;
 char  s_ip[16] = "0.0.0.0";
@@ -76,6 +98,12 @@ void load_name() {
         if (nvs_get_str(h, "name", buf, &len) == ESP_OK) s_name = buf;
         uint8_t tf = 0;
         if (nvs_get_u8(h, "tunit", &tf) == ESP_OK) s_temp_f = (tf != 0);
+        int8_t tx = 0;
+        if (nvs_get_i8(h, "txpow", &tx) == ESP_OK) {
+            if (tx < kMinTxPowerDbm) tx = kMinTxPowerDbm;
+            if (tx > kMaxTxPowerDbm) tx = kMaxTxPowerDbm;
+            s_tx_power_dbm = tx;
+        }
         nvs_close(h);
     }
 }
@@ -312,6 +340,7 @@ esp_err_t start_provisioning() {
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &ap));
     ESP_ERROR_CHECK(esp_wifi_start());
+    apply_tx_power_cap();
 
     start_dns_server();
 
@@ -497,6 +526,25 @@ esp_err_t set_temp_unit(bool fahrenheit) {
     return ESP_OK;
 }
 
+int get_tx_power_dbm() { return s_tx_power_dbm; }
+int tx_power_min_dbm() { return kMinTxPowerDbm; }
+int tx_power_max_dbm() { return kMaxTxPowerDbm; }
+
+esp_err_t set_tx_power_dbm(int dbm) {
+    if (dbm < kMinTxPowerDbm) dbm = kMinTxPowerDbm;
+    if (dbm > kMaxTxPowerDbm) dbm = kMaxTxPowerDbm;
+    nvs_handle_t h;
+    esp_err_t err = nvs_open(kDeviceNvsNs, NVS_READWRITE, &h);
+    if (err != ESP_OK) return err;
+    err = nvs_set_i8(h, "txpow", static_cast<int8_t>(dbm));
+    if (err == ESP_OK) err = nvs_commit(h);
+    nvs_close(h);
+    if (err != ESP_OK) return err;  // keep the old cached value on failure
+    s_tx_power_dbm = static_cast<int8_t>(dbm);
+    apply_tx_power_cap();           // live — no reboot needed
+    return ESP_OK;
+}
+
 esp_err_t init() {
     s_events = xEventGroupCreate();
     s_name_mtx = xSemaphoreCreateMutex();
@@ -529,6 +577,7 @@ esp_err_t init() {
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &sta));
     ESP_ERROR_CHECK(esp_wifi_start());
+    apply_tx_power_cap();
 
     ESP_LOGI(TAG, "connecting to '%s'…", ssid);
     EventBits_t bits = xEventGroupWaitBits(
