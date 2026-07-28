@@ -322,6 +322,7 @@ esp_err_t handle_get_settings(httpd_req_t* req) {
     cJSON_AddBoolToObject(root, "connected", st.connected);
     cJSON_AddStringToObject(root, "temp_unit",
                             wifi::temp_unit_fahrenheit() ? "F" : "C");
+    cJSON_AddStringToObject(root, "lang", wifi::ui_language().c_str());
     // Feature capabilities the UI needs inline (so it can hide the wide-vane
     // control in the same poll it already runs). See /api/capabilities for the
     // full object + control endpoints.
@@ -864,6 +865,10 @@ esp_err_t handle_device_post(httpd_req_t* req) {
         err = wifi::set_tx_power_dbm((int)vtx->valuedouble);
         tx_changed = (err == ESP_OK) && (wifi::get_tx_power_dbm() != old_tx);
     }
+    const cJSON* vl = cJSON_GetObjectItem(json, "lang");
+    if (err == ESP_OK && vl && cJSON_IsString(vl)) {
+        err = wifi::set_ui_language(vl->valuestring);
+    }
     cJSON_Delete(json);
     if (err != ESP_OK) {
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "NVS write failed");
@@ -890,6 +895,7 @@ esp_err_t handle_device_post(httpd_req_t* req) {
     cJSON_AddStringToObject(root, "temp_unit",
                             wifi::temp_unit_fahrenheit() ? "F" : "C");
     cJSON_AddNumberToObject(root, "tx_power_dbm", wifi::get_tx_power_dbm());
+    cJSON_AddStringToObject(root, "lang", wifi::ui_language().c_str());
     char* str = cJSON_PrintUnformatted(root);
     httpd_resp_set_type(req, "application/json");
     httpd_resp_sendstr(req, str);

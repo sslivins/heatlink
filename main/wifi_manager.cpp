@@ -89,6 +89,10 @@ std::string       s_name;
 // values are always °C. Guarded by s_name_mtx (same "device" namespace, both low
 // contention).
 bool              s_temp_f = false;
+// Web-UI language preference (BCP-47-ish short code, e.g. "en"/"fr"). Empty =
+// "auto": the browser picks from navigator.language. A pure display choice for
+// the device web UI; firmware/MQTT/HA are unaffected. Guarded by s_name_mtx.
+std::string       s_ui_lang;
 
 void load_name() {
     char buf[64] = {0};
@@ -104,6 +108,9 @@ void load_name() {
             if (tx > kMaxTxPowerDbm) tx = kMaxTxPowerDbm;
             s_tx_power_dbm = tx;
         }
+        char lang[16] = {0};
+        size_t ll = sizeof(lang);
+        if (nvs_get_str(h, "lang", lang, &ll) == ESP_OK) s_ui_lang = lang;
         nvs_close(h);
     }
 }
@@ -522,6 +529,39 @@ esp_err_t set_temp_unit(bool fahrenheit) {
     if (err != ESP_OK) return err;  // keep the old cached value on failure
     if (s_name_mtx) xSemaphoreTake(s_name_mtx, portMAX_DELAY);
     s_temp_f = fahrenheit;
+    if (s_name_mtx) xSemaphoreGive(s_name_mtx);
+    return ESP_OK;
+}
+
+std::string ui_language() {
+    if (!s_name_mtx) return s_ui_lang;
+    xSemaphoreTake(s_name_mtx, portMAX_DELAY);
+    std::string v = s_ui_lang;
+    xSemaphoreGive(s_name_mtx);
+    return v;
+}
+
+esp_err_t set_ui_language(const char* lang) {
+    // Keep only a short, sane code: letters, digits and '-', capped at 15 bytes.
+    // Empty ("") is valid and means "auto" (browser-detected).
+    std::string n;
+    if (lang) {
+        for (const char* p = lang; *p && n.size() < 15; ++p) {
+            char c = *p;
+            if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                (c >= '0' && c <= '9') || c == '-')
+                n += c;
+        }
+    }
+    nvs_handle_t h;
+    esp_err_t err = nvs_open(kDeviceNvsNs, NVS_READWRITE, &h);
+    if (err != ESP_OK) return err;
+    err = nvs_set_str(h, "lang", n.c_str());
+    if (err == ESP_OK) err = nvs_commit(h);
+    nvs_close(h);
+    if (err != ESP_OK) return err;  // keep the old cached value on failure
+    if (s_name_mtx) xSemaphoreTake(s_name_mtx, portMAX_DELAY);
+    s_ui_lang = n;
     if (s_name_mtx) xSemaphoreGive(s_name_mtx);
     return ESP_OK;
 }

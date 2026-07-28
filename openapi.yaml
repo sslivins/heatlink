@@ -444,12 +444,14 @@ paths:
   /api/device:
     post:
       tags: [System]
-      summary: Set the device display name, temperature display unit and/or WiFi TX power
+      summary: Set the device display name, temperature display unit, WiFi TX power and/or web UI language
       description: |
         Partial update — only the fields present are applied, so a `temp_unit`-only
         POST won't clear the display name (and vice versa). `temp_unit` controls
         the web UI display only. `tx_power` sets the WiFi transmit-power cap (dBm)
-        and is applied to the live radio immediately, without a reboot.
+        and is applied to the live radio immediately, without a reboot. `lang`
+        overrides the web UI language ("" = auto-detect from the browser), applied
+        live without a reboot.
       security:
         - SessionCookie: []
       requestBody:
@@ -886,6 +888,7 @@ components:
         wideVane: { type: string }
         connected: { type: boolean }
         temp_unit: { type: string, enum: [C, F], description: Web UI display unit (Home Assistant stays in °C) }
+        lang: { type: string, description: 'Persisted web UI language override ("" = auto-detect from browser, e.g. "en", "fr")' }
         caps: { $ref: '#/components/schemas/SettingsCaps' }
         roomTemperature: { type: number }
         operating: { type: boolean }
@@ -1024,12 +1027,14 @@ components:
         name: { type: string, description: Device display name }
         temp_unit: { type: string, enum: [C, F] }
         tx_power: { type: integer, description: 'WiFi transmit-power cap in dBm (clamped to tx_power_min_dbm..tx_power_max_dbm from /api/status); applied live, no reboot' }
+        lang: { type: string, description: 'Web UI language override ("" = auto-detect from browser, e.g. "en", "fr"); applied live, no reboot' }
     DeviceResult:
       type: object
       properties:
         name: { type: string }
         temp_unit: { type: string, enum: [C, F] }
         tx_power_dbm: { type: integer, description: TX-power cap in effect after the update (dBm) }
+        lang: { type: string, description: Web UI language override in effect after the update }
     WifiNetwork:
       type: object
       properties:
