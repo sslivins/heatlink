@@ -45,6 +45,15 @@ bool temp_unit_fahrenheit();
 /// Persist the temperature display unit to NVS and update the cache (no reboot).
 esp_err_t set_temp_unit(bool fahrenheit);
 
+/// Web-UI language preference as a short code (e.g. "en", "fr"). Empty string
+/// means "auto" — the browser chooses from navigator.language. A pure display
+/// choice for the device web UI; firmware, MQTT and Home Assistant are unaffected.
+std::string ui_language();
+
+/// Persist the web-UI language code to NVS and update the cache (no reboot). The
+/// value is sanitised to [A-Za-z0-9-] and capped; "" is valid and means "auto".
+esp_err_t set_ui_language(const char* lang);
+
 /// WiFi transmit-power cap currently in effect, in whole dBm. Lowering it shrinks
 /// the radio's transmit-current peaks (which sag the current-limited CN105 5 V
 /// rail and can trip brownout on buffer-less heads) at the cost of link margin.

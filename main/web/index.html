@@ -672,6 +672,14 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
       <label>Show temperatures in &deg;F</label>
       <div class="toggle"><input type="checkbox" id="dispF" onchange="saveDisplayUnit()"><span class="slider" onclick="document.getElementById('dispF').click()"></span></div>
     </div>
+    <div class="row">
+      <label for="uiLang">Language</label>
+      <select id="uiLang" onchange="saveLang(this.value)">
+        <option value="">Automatic (browser)</option>
+        <option value="en">English</option>
+        <option value="fr">Français</option>
+      </select>
+    </div>
     <div id="dispMsg" class="status hidden" style="margin:10px 0"></div>
   </div>
 
@@ -873,6 +881,205 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
 
 <script>
 function $(id){return document.getElementById(id)}
+// ── Localization (i18n) ────────────────────────────────────────────────
+// English-keyed dictionary: the English source string IS the key, so
+// static markup needs no per-node annotation — applyI18n() walks the shell once
+// and swaps any text/attr that has a translation. Missing keys fall back to
+// English. A new language = one more table below. Dynamic (JS-set) strings are
+// wrapped in i18n("English"). Language resolution: persisted device setting
+// ("lang" in /api/settings, ""=auto) wins; otherwise navigator.language.
+// Switching re-runs applyI18n() from stored English originals (reversible).
+const I18N = { fr: {
+  // Chrome / tabs / badges
+  "Climate":"Climat","Zones":"Zones","Status":"État","Settings":"Réglages",
+  "Unit":"Unité","connecting…":"connexion…","Disconnected":"Déconnecté",
+  "Connection lost — reconnecting…":"Connexion perdue — reconnexion…",
+  // Login
+  "Sign in":"Se connecter","Password":"Mot de passe","Signing in…":"Connexion…",
+  "Invalid password":"Mot de passe invalide","Login failed":"Échec de la connexion",
+  // Setup wizard
+  "Setup wizard":"Assistant de configuration",
+  "Mitsubishi mini-split controller":"Contrôleur mini-split Mitsubishi",
+  "New controller":"Nouveau contrôleur",
+  "Choose how to get this controller connected.":"Choisissez comment connecter ce contrôleur.",
+  "Join an existing multizone group":"Rejoindre un groupe multizone existant",
+  "Manual setup":"Configuration manuelle","Skip wizard":"Ignorer l’assistant",
+  "Join a group":"Rejoindre un groupe","Scan for groups":"Rechercher des groupes",
+  "6-digit code":"Code à 6 chiffres","Join":"Rejoindre","Cancel":"Annuler",
+  "← Back":"← Retour","Broker host":"Hôte du courtier","Port":"Port",
+  "Username":"Nom d’utilisateur","Base topic":"Sujet de base",
+  "Enter your MQTT broker. Other zones can copy these when they join.":"Saisissez votre courtier MQTT. Les autres zones pourront le copier en rejoignant.",
+  "Save & connect":"Enregistrer et connecter","Almost there":"Presque terminé",
+  "Applying settings and restarting…":"Application des réglages et redémarrage…",
+  "Done":"Terminé",
+  // Climate card
+  "° room":"° pièce","idle":"ralenti",
+  "Off":"Arrêt","Heat":"Chaud","Cool":"Froid","Auto":"Auto","Dry":"Sec","Fan":"Ventilo",
+  "Idle":"Ralenti","Heating":"Chauffage","Cooling":"Refroidissement",
+  "Drying":"Déshumidification","Fan running":"Ventilation active","Active":"Actif",
+  "Fan & Vanes":"Ventilation et volets","Vane":"Volet","Wide Vane":"Volet large",
+  "Far left":"Extrême gauche","Left":"Gauche","Center":"Centre","Right":"Droite",
+  "Far right":"Extrême droite","Wide":"Large","Swing":"Oscillation",
+  // Section nav
+  "Controller":"Contrôleur","Power":"Alimentation","Heat pump":"Pompe à chaleur",
+  "Activity":"Activité","Display":"Affichage","Wide vane":"Volet large",
+  "Firmware":"Micrologiciel","Web access":"Accès web","Device":"Appareil",
+  // Controller / WiFi / Power stats
+  "IP":"IP","Uptime":"Disponibilité","Free heap":"Mémoire libre",
+  "Last reset":"Dernier redémarrage","Brownouts":"Sous-tensions",
+  "Network":"Réseau","Signal":"Signal","TX power":"Puissance TX","Drops":"Déconnexions",
+  "Controller power":"Alimentation du contrôleur","Battery":"Batterie","Input":"Entrée",
+  "Source":"Source","Charging":"En charge","5VIN pin":"Broche 5VIN",
+  "5VINOUT port":"Port 5VINOUT","Min input":"Entrée min","Sags":"Chutes",
+  // Display + language
+  "Show temperatures in °F":"Afficher les températures en °F",
+  "Language":"Langue","Automatic (browser)":"Automatique (navigateur)","English":"English",
+  "Français":"Français",
+  // Wide vane settings
+  "Some units have a manual wide-vane louver with no motor. The control is hidden automatically when the unit ignores wide-vane commands.":"Certaines unités ont un volet large manuel sans moteur. Le contrôle est masqué automatiquement lorsque l’unité ignore les commandes de volet large.",
+  "Control":"Contrôle","Automatic":"Automatique","Always show":"Toujours afficher",
+  "Always hide":"Toujours masquer",
+  "Wide vane was not detected on your unit and may have no effect.":"Le volet large n’a pas été détecté sur votre unité et peut n’avoir aucun effet.",
+  "Detect now":"Détecter maintenant","Detecting…":"Détection…",
+  "Powered (detected)":"Motorisé (détecté)","Manual louver (no motor)":"Volet manuel (sans moteur)",
+  "Not determined yet":"Pas encore déterminé","Not detected yet":"Pas encore détecté",
+  // WiFi settings
+  "Other networks":"Autres réseaux","Scan":"Rechercher","Rescan":"Relancer",
+  "Scanning…":"Recherche…","Tap Scan to search for networks":"Touchez Rechercher pour trouver des réseaux",
+  "Network (SSID)":"Réseau (SSID)","Connect & reboot":"Connecter et redémarrer",
+  "Other network…":"Autre réseau…","Transmit power":"Puissance d’émission",
+  "Lower power reduces current spikes that can brown out the controller; raise it if the signal is weak.":"Une puissance plus faible réduit les pics de courant qui peuvent faire chuter la tension du contrôleur ; augmentez-la si le signal est faible.",
+  "No other networks found":"Aucun autre réseau trouvé",
+  "Scan failed — tap Scan":"Échec de la recherche — touchez Rechercher",
+  "Connected":"Connecté","Not connected":"Non connecté","Connecting…":"Connexion…",
+  "Setup mode":"Mode configuration","Broadcasting setup Wi-Fi":"Diffusion du Wi-Fi de configuration",
+  "No network configured":"Aucun réseau configuré",
+  // MQTT
+  "Device ID":"Identifiant","Friendly name":"Nom convivial",
+  "Save & reboot":"Enregistrer et redémarrer",
+  // Firmware
+  "Installed":"Installé","Latest (GitHub)":"Dernière (GitHub)","Checking…":"Vérification…",
+  "Check for updates":"Vérifier les mises à jour","Install update":"Installer la mise à jour",
+  "Advanced — manual flash":"Avancé — flash manuel","Upload .bin":"Téléverser .bin",
+  "Upload & flash":"Téléverser et flasher","From URL":"Depuis une URL",
+  "Pull & flash":"Récupérer et flasher",
+  // Web access
+  "Web Access":"Accès web","Require login to open the web UI":"Exiger une connexion pour ouvrir l’interface web",
+  "Set a password for each access level below. Anyone with that password gets that level — there is no separate username.":"Définissez un mot de passe pour chaque niveau d’accès ci-dessous. Quiconque possède ce mot de passe obtient ce niveau — il n’y a pas de nom d’utilisateur distinct.",
+  "Administrator":"Administrateur","Full access":"Accès complet",
+  "Full control of all settings and updates.":"Contrôle total de tous les réglages et mises à jour.",
+  "Confirm password":"Confirmer le mot de passe","No password set yet.":"Aucun mot de passe défini.",
+  "Climate-only":"Climat uniquement","Climate only":"Climat uniquement",
+  "Can view and control climate, but not change any settings. Optional.":"Peut voir et contrôler le climat, mais pas modifier les réglages. Optionnel.",
+  "No climate-only password set.":"Aucun mot de passe climat uniquement défini.",
+  "Remove climate-only access":"Retirer l’accès climat uniquement",
+  "Save web access":"Enregistrer l’accès web",
+  // API
+  "API Access":"Accès API","Require API key for /api":"Exiger une clé API pour /api",
+  "API key":"Clé API","View the API reference ↗":"Voir la référence de l’API ↗",
+  // Heat pump sensors
+  "Heat pump sensors":"Capteurs de la pompe à chaleur","Unit link":"Liaison unité",
+  "Operating":"En marche","Compressor":"Compresseur","Unit room temp":"Temp. pièce (unité)",
+  "Outside temp":"Temp. extérieure","Input power":"Puissance absorbée","Energy":"Énergie",
+  "Runtime":"Durée de fonctionnement","Target humidity":"Humidité cible",
+  "Sub-mode":"Sous-mode","Fan stage":"Palier ventilateur","Error":"Erreur",
+  "Yes":"Oui","No":"Non",
+  // Activity
+  "Recent changes to this zone, with who made them.":"Modifications récentes de cette zone, avec leur auteur.",
+  "Loading…":"Chargement…","Load older":"Charger plus anciens",
+  "Clear activity log":"Effacer le journal d’activité",
+  // Device
+  "Restart the controller. Settings and WiFi are preserved.":"Redémarrer le contrôleur. Les réglages et le Wi-Fi sont conservés.",
+  "Restart":"Redémarrer","Factory reset":"Réinitialisation d’usine",
+  // Zones / group
+  "Coordinate HEAT / COOL across heads that share one outdoor compressor, so opposing demands don't fight.":"Coordonnez CHAUD / FROID entre les têtes qui partagent un compresseur extérieur, pour que les demandes opposées ne se contrarient pas.",
+  "Sign in as admin to manage the compressor group.":"Connectez-vous en tant qu’administrateur pour gérer le groupe de compresseur.",
+  "Add this zone":"Ajouter cette zone","Join by address":"Rejoindre par adresse",
+  "Owner host":"Hôte propriétaire","Group name":"Nom du groupe",
+  "Create group & show code":"Créer le groupe et afficher le code",
+  "+ Add a zone":"+ Ajouter une zone","Add a zone to this group":"Ajouter une zone à ce groupe",
+  "Save":"Enregistrer","Save failed":"Échec de l’enregistrement",
+  // Common dynamic toasts (parameterised with {n})
+  "Applied {n} dBm":"{n} dBm appliqué",
+}
+};
+let LANG = 'en';
+let devLang = '';   // persisted device language ("" = auto); from /api/settings
+function detectLang(){
+  const langs = navigator.languages || [navigator.language || 'en'];
+  for(const l of langs){ if(l && l.toLowerCase().indexOf('fr')===0) return 'fr'; }
+  return 'en';
+}
+// Translate an English source string. params fills {name} placeholders.
+function i18n(s, params){
+  const tbl = I18N[LANG];
+  let out = (tbl && tbl[s] !== undefined) ? tbl[s] : s;
+  if(params) out = out.replace(/\{(\w+)\}/g, (m,k)=> params[k]!==undefined ? params[k] : m);
+  return out;
+}
+// Collected static text nodes + translatable attributes, captured (in English)
+// on first apply so re-applying on a language switch is reversible.
+let _i18nText = null, _i18nAttr = null;
+function _collectI18n(){
+  _i18nText = []; _i18nAttr = [];
+  // Feature-detect the DOM APIs we need; degrade to a no-op (English) if absent
+  // so i18n can never break the page (e.g. a headless/test environment).
+  if(typeof NodeFilter === 'undefined' ||
+     typeof document.createTreeWalker !== 'function') return;
+  const roots = ['loginGate','setupWizard','appWrap'].map($).filter(Boolean);
+  for(const root of roots){
+    const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+      acceptNode(n){
+        const p = n.parentElement;
+        if(!p) return NodeFilter.FILTER_REJECT;
+        // <option> with no value attribute uses its text AS the value — never
+        // translate those (fan/vane codes) or the posted value would change.
+        if(p.tagName==='OPTION' && !p.hasAttribute('value')) return NodeFilter.FILTER_REJECT;
+        return (n.nodeValue && n.nodeValue.trim()) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
+      }
+    });
+    while(w.nextNode()) _i18nText.push({node:w.currentNode, raw:w.currentNode.nodeValue});
+    ['placeholder','title','aria-label'].forEach(a=>{
+      root.querySelectorAll('['+a+']').forEach(el=>{
+        const v = el.getAttribute(a);
+        if(v && v.trim()) _i18nAttr.push({el, attr:a, en:v.trim()});
+      });
+    });
+  }
+}
+// Swap static text/attrs to the active language. Only writes when a translation
+// actually exists (tr!==norm) so live values (e.g. "22.5", "--") are never
+// clobbered — their placeholders have no entry in the table. Wrapped so an i18n
+// glitch can never break rendering (same principle as refresh()'s split phases).
+function applyI18n(){
+  try{
+    if(!_i18nText) _collectI18n();
+    for(const it of _i18nText){
+      const raw = it.raw;
+      const norm = raw.trim().replace(/\s+/g,' ');
+      const tr = i18n(norm);
+      if(tr !== norm){
+        const lead = raw.match(/^\s*/)[0], trail = raw.match(/\s*$/)[0];
+        it.node.nodeValue = lead + tr + trail;
+      }
+    }
+    for(const it of _i18nAttr){
+      const tr = i18n(it.en);
+      if(tr !== it.en) it.el.setAttribute(it.attr, tr);
+    }
+    document.documentElement.lang = LANG;
+  }catch(e){ console.error('applyI18n failed', e); }
+}
+// Apply a resolved language: deviceLang ("" = auto → navigator). Re-renders the
+// static shell in place. Returns true if the active language changed.
+function setLang(deviceLang){
+  const want = deviceLang ? deviceLang : detectLang();
+  const norm = (want.toLowerCase().indexOf('fr')===0) ? 'fr' : 'en';
+  if(norm === LANG && _i18nText) return false;
+  LANG = norm;
+  applyI18n();
+  return true;
+}
 // ── Reusable modal dialog (replaces native alert/confirm) ──────────────
 // uiConfirm(opts) -> Promise<bool>; uiAlert(opts) -> Promise<true>.
 // opts: {title, body, okText, cancelText, danger, showCancel}. Title/body are
@@ -1042,7 +1249,7 @@ async function refresh(){
     s=await r.json();
   }catch(e){
     badge($('bWifi'),false);
-    $('subtitle').textContent='Disconnected';
+    $('subtitle').textContent=i18n('Disconnected');
     return;
   }
   // Phase 2 — render the status we successfully fetched. Guarded on its own so a
@@ -1072,7 +1279,7 @@ async function refresh(){
     $('vinPin').textContent=p.present?(p.vin_mv/1000).toFixed(2)+' V':'N/A';
     $('vinOut').textContent=p.present?((p.vinout_mv||0)/1000).toFixed(2)+' V':'N/A';
     $('psrc').textContent=p.present?(p.source||'--'):'N/A';
-    $('chg').textContent=p.present?(p.charging?'Yes':'No'):'N/A';
+    $('chg').textContent=p.present?(p.charging?i18n('Yes'):i18n('No')):'N/A';
     const d=s.diag||{};
     $('vinMin').textContent=(d.vin_min_mv?((d.vin_min_mv/1000).toFixed(2)+' V'):'--');
     $('vinSags').textContent=(d.vin_sag_count!=null?d.vin_sag_count:'--');
@@ -1085,7 +1292,7 @@ async function refresh(){
     $('wsDrops').style.color=(d.wifi_drop_count>0)?'#ff5252':'';
     $('wdReset').style.display=(d.wifi_drop_count>0)?'inline-flex':'none';
     $('stubNote').style.display=s.unit_connected?'none':'block';
-    $('dgLink').textContent=s.unit_connected?'Connected':'Not connected';
+    $('dgLink').textContent=s.unit_connected?i18n('Connected'):i18n('Not connected');
   }catch(e){
     console.error('status render failed',e);
   }
@@ -1096,6 +1303,7 @@ async function refresh(){
     try{
       const c=await (await fetch('/api/settings')).json();
       if(c.temp_unit){TUNIT=c.temp_unit;syncUnitToggle();}
+      if(c.lang!==undefined){ devLang=c.lang||''; setLang(devLang); syncLangSelect(devLang); }
       if(confirmField('power',c.power)) climate.power=(c.power==='ON');
       if(confirmField('mode',c.mode)) climate.mode=c.mode||climate.mode;
       if(c.temperature!=null&&confirmField('temperature',c.temperature)) climate.temp=c.temperature;
@@ -1108,7 +1316,7 @@ async function refresh(){
       renderClimate();
       // Diagnostics tab — live serial telemetry.
       const conn=!!c.connected;
-      $('dgOp').textContent=conn?(c.operating?'Yes':'No'):'--';
+      $('dgOp').textContent=conn?(c.operating?i18n('Yes'):i18n('No')):'--';
       $('dgComp').textContent=(conn&&c.compressorFrequency!=null)?(c.compressorFrequency+' Hz'):'--';
       $('dgRoom').textContent=(conn&&c.roomTemperature!=null&&c.roomTemperature>0)?(fmtTemp(c.roomTemperature)+' '+unitSym()):'--';
       // Extended telemetry — each field only present in the payload when the
@@ -1163,6 +1371,26 @@ async function saveDisplayUnit(){
     msg.classList.add('hidden');
   }catch(e){ fail('Save failed'); }
 }
+// Persist the UI language ("" = auto) and re-render the shell in place. Mirrors
+// the temp-unit/TX-power pattern (POST /api/device → NVS "lang").
+function syncLangSelect(dev){
+  const sel=$('uiLang');
+  if(sel && document.activeElement!==sel) sel.value = dev || '';
+}
+async function saveLang(v){
+  const msg=$('dispMsg');
+  try{
+    const r=await fetch('/api/device',{method:'POST',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify({lang:v})});
+    if(r.status===401||r.status===403){ loadAuth(); return; }
+    if(!r.ok){ msg.textContent=i18n('Save failed');msg.className='status err';msg.classList.remove('hidden'); return; }
+    const d=await r.json();
+    devLang = d.lang || '';
+    setLang(devLang);
+    if(actData)renderActivity();
+    msg.classList.add('hidden');
+  }catch(e){ msg.textContent=i18n('Save failed');msg.className='status err';msg.classList.remove('hidden'); }
+}
 const MODE_COLOR={HEAT:'#ff7b29',COOL:'#3b9bff',AUTO:'#3fb950',DRY:'#9aa4ad',FAN:'#9aa4ad'};
 // --- WiFi TX power --------------------------------------------------------
 let txSynced=false;   // seed the slider once from the first status poll
@@ -1183,13 +1411,13 @@ async function saveTxPow(){
     const r=await fetch('/api/device',{method:'POST',
       headers:{'Content-Type':'application/json'},body:JSON.stringify({tx_power:want})});
     if(r.status===401||r.status===403){ loadAuth(); return; }
-    if(!r.ok){ fail('Save failed'); return; }
+    if(!r.ok){ fail(i18n('Save failed')); return; }
     const d=await r.json();
     if(d.tx_power_dbm!=null){ sl.value=d.tx_power_dbm; $('txPowVal').textContent=d.tx_power_dbm+' dBm'; }
-    msg.textContent='Applied '+(d.tx_power_dbm!=null?d.tx_power_dbm+' dBm':'');
+    msg.textContent=(d.tx_power_dbm!=null)?i18n('Applied {n} dBm',{n:d.tx_power_dbm}):'';
     msg.className='status ok'; msg.classList.remove('hidden');
     setTimeout(()=>msg.classList.add('hidden'),2500);
-  }catch(e){ fail('Save failed'); }
+  }catch(e){ fail(i18n('Save failed')); }
 }
 // --- Wide-vane capability -------------------------------------------------
 const WV_STATUS={supported:'Powered (detected)',unsupported:'Manual louver (no motor)',
@@ -1202,14 +1430,14 @@ function applyCaps(caps){
   if(!wv) return;
   // Settings card.
   const st=$('wvStatus');
-  if(st) st.textContent=wv.detecting?'Detecting…':(WV_STATUS[wv.detected]||wv.detected);
+  if(st) st.textContent=wv.detecting?i18n('Detecting…'):i18n(WV_STATUS[wv.detected]||wv.detected);
   const sel=$('wvOverride');
   if(sel&&document.activeElement!==sel) sel.value=wv.override||'auto';
   const warn=$('wvWarn');
   if(warn) warn.classList.toggle('hidden',
     !(wv.override==='show'&&wv.detected!=='supported'));
   const btn=$('wvDetectBtn');
-  if(btn){ btn.disabled=!!wv.detecting; btn.textContent=wv.detecting?'Detecting…':'Detect now'; }
+  if(btn){ btn.disabled=!!wv.detecting; btn.textContent=wv.detecting?i18n('Detecting…'):i18n('Detect now'); }
 }
 async function saveWideVaneOverride(v){
   const msg=$('wvMsg');
@@ -1284,7 +1512,7 @@ function renderClimate(){
       default: opTxt='Active';
     }
   }
-  op.textContent=opTxt;
+  op.textContent=i18n(opTxt);
   op.className='op'+(climate.power&&climate.operating?' active':'');
   $('tDec').disabled=$('tInc').disabled=!climate.power;
   [...document.querySelectorAll('#modePills button')].forEach(b=>{
@@ -1479,9 +1707,9 @@ async function refreshUpdate(){
   try{
     const u=await (await jget('/api/update')).json();
     $('updCur').textContent=u.current||'--';
-    $('updLatest').textContent=u.checked?(u.latest||'--'):(u.checking?'Checking…':'—');
+    $('updLatest').textContent=u.checked?(u.latest||'--'):(u.checking?i18n('Checking…'):'—');
     $('updCheckBtn').disabled=u.checking;
-    $('updCheckBtn').textContent=u.checking?'Checking…':'Check for updates';
+    $('updCheckBtn').textContent=u.checking?i18n('Checking…'):i18n('Check for updates');
     // While a check is in flight, keep showing "Checking…" and don't render a
     // verdict yet — otherwise the stale previous result flashes ("Up to date")
     // before the fresh one ("Update available") lands.
@@ -1533,7 +1761,7 @@ async function loadMqtt(){
       $('mqFriendly').value=m.friendly_name||'';
       $('mqPass').placeholder=m.password_set?'••••••••':'None set';
     }
-    $('mqttStat').textContent=m.connected?'Connected':'Disconnected';
+    $('mqttStat').textContent=m.connected?i18n('Connected'):i18n('Disconnected');
     $('mqttNode').textContent=m.friendly_name||'heatlink-<id>';
   }catch(e){}
 }
@@ -1617,15 +1845,15 @@ function renderCurrent(){
   if(wfCurSsid){
     name.textContent=(wifiConnected?'✓ ':'')+wfCurSsid;
     if(wifiConnected){
-      sub.textContent='Connected'; sub.classList.add('ok');
+      sub.textContent=i18n('Connected'); sub.classList.add('ok');
       meta.innerHTML=(curAuth!==0?'<span title="secured">🔒</span>':'')+barsHtml(curRssi);
-    }else if(wifiMode==='connecting'){ sub.textContent='Connecting…'; }
-    else { sub.textContent='Not connected'; }
+    }else if(wifiMode==='connecting'){ sub.textContent=i18n('Connecting…'); }
+    else { sub.textContent=i18n('Not connected'); }
     row.style.cursor='pointer';
     row.onclick=()=>pickWifi(wfCurSsid,curAuth);
   }else{
-    name.textContent=(wifiMode==='provisioning')?'Setup mode':'Not connected';
-    sub.textContent=(wifiMode==='provisioning')?'Broadcasting setup Wi-Fi':'No network configured';
+    name.textContent=(wifiMode==='provisioning')?i18n('Setup mode'):i18n('Not connected');
+    sub.textContent=(wifiMode==='provisioning')?i18n('Broadcasting setup Wi-Fi'):i18n('No network configured');
     row.style.cursor='default';
   }
   ss.appendChild(name); if(sub.textContent) ss.appendChild(sub);
@@ -1634,22 +1862,22 @@ function renderCurrent(){
 }
 
 async function scanWifi(){
-  const btn=$('wfScanBtn'); if(btn){ btn.disabled=true; btn.textContent='Scanning…'; }
-  $('wfList').innerHTML='<div class="wf-empty">Scanning…</div>';
+  const btn=$('wfScanBtn'); if(btn){ btn.disabled=true; btn.textContent=i18n('Scanning…'); }
+  $('wfList').innerHTML='<div class="wf-empty">'+i18n('Scanning…')+'</div>';
   try{
     const r=await jget('/api/scan');
     if(r.status===401){ $('loginGate').classList.remove('hidden'); return; }
     renderWifiList(await r.json());
   }catch(e){
-    $('wfList').innerHTML='<div class="wf-empty">Scan failed — tap Scan</div>';
-  }finally{ if(btn){ btn.disabled=false; btn.textContent='Rescan'; } }
+    $('wfList').innerHTML='<div class="wf-empty">'+i18n('Scan failed — tap Scan')+'</div>';
+  }finally{ if(btn){ btn.disabled=false; btn.textContent=i18n('Rescan'); } }
 }
 
 function renderWifiList(nets){
   const el=$('wfList'); el.innerHTML='';
   // The current/saved network is shown in its own row above, so drop it here.
   const others=(nets||[]).filter(n=>!(wfCurSsid && n.ssid===wfCurSsid));
-  if(!others.length){ el.innerHTML='<div class="wf-empty">No other networks found</div>'; return; }
+  if(!others.length){ el.innerHTML='<div class="wf-empty">'+i18n('No other networks found')+'</div>'; return; }
   others.forEach(n=>{
     const row=document.createElement('div');
     row.className='wf-row';
@@ -2600,6 +2828,7 @@ function wzWaitReboot(msg){
 
 // ── Startup (gated by auth) ────────────────────────────────────────────
 (async()=>{
+  setLang('');   // navigator default first, so the login gate/wizard are localized
   const ok=await loadAuth(true);   // defer revealing the app until the wizard decision is made
   if(!ok) return;  // login gate shown; loops start after login + reload
   try{ await pollOnce(); }catch(e){ console.error('startup poll failed',e); }
