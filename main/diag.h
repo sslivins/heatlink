@@ -31,7 +31,8 @@ void init();
 
 /// Feed the latest effective input voltage (mV). Updates session/all-time minima
 /// and counts a "sag" each time the rail crosses below `floor_mv` (edge-triggered).
-/// Cheap; NVS is only written when a new all-time low is set (rare).
+/// Reads below a plausibility floor (~2000 mV) are ignored as post-boot ADC
+/// glitches. Cheap; NVS is only written when a new all-time low is set (rare).
 void note_vin(uint16_t input_mv, uint16_t floor_mv);
 
 /// Copy the current diagnostics (thread-safe).
@@ -40,5 +41,10 @@ Snapshot get();
 /// Reset the cumulative brownout counter to zero (clears the persisted NVS
 /// value and the live snapshot). Other diagnostics are left untouched.
 void reset_brownout_count();
+
+/// Reset the persisted all-time-low input voltage (vin_min_ever). Clears the NVS
+/// record and the live snapshot; the next note_vin re-seeds it from the current
+/// rail. Use to clear a stale record low left by a pre-plausibility-floor glitch.
+void reset_vin_min_ever();
 
 }  // namespace diag

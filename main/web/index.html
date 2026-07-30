@@ -983,7 +983,7 @@ const I18N = { fr: {
   "Outside temp":"Temp. extérieure","Input power":"Puissance absorbée","Energy":"Énergie",
   "Runtime":"Durée de fonctionnement","Target humidity":"Humidité cible",
   "Sub-mode":"Sous-mode","Fan stage":"Palier ventilateur","Error":"Erreur",
-  "Yes":"Oui","No":"Non",
+  "Yes":"Oui","No":"Non","None":"Aucune",
   // Activity
   "Recent changes to this zone, with who made them.":"Modifications récentes de cette zone, avec leur auteur.",
   "Loading…":"Chargement…","Load older":"Charger plus anciens",
@@ -1274,12 +1274,13 @@ async function refresh(){
     $('uptime').textContent=fmtUptime(s.uptime_s);
     $('heap').textContent=(s.free_heap/1024|0)+' KB';
     const p=s.power||{};
-    $('vbat').textContent=p.present?(p.vbat_mv/1000).toFixed(2)+' V':'N/A';
+    const hasBatt=p.present&&p.battery_present;
+    $('vbat').textContent=p.present?(hasBatt?(p.vbat_mv/1000).toFixed(2)+' V':i18n('None')):'N/A';
     $('vin').textContent=p.present?((p.input_mv!=null?p.input_mv:p.vin_mv)/1000).toFixed(2)+' V':'N/A';
     $('vinPin').textContent=p.present?(p.vin_mv/1000).toFixed(2)+' V':'N/A';
     $('vinOut').textContent=p.present?((p.vinout_mv||0)/1000).toFixed(2)+' V':'N/A';
     $('psrc').textContent=p.present?(p.source||'--'):'N/A';
-    $('chg').textContent=p.present?(p.charging?i18n('Yes'):i18n('No')):'N/A';
+    $('chg').textContent=p.present?(hasBatt?(p.charging?i18n('Yes'):i18n('No')):i18n('None')):'N/A';
     const d=s.diag||{};
     $('vinMin').textContent=(d.vin_min_mv?((d.vin_min_mv/1000).toFixed(2)+' V'):'--');
     $('vinSags').textContent=(d.vin_sag_count!=null?d.vin_sag_count:'--');

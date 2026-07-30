@@ -283,6 +283,7 @@ esp_err_t handle_status(httpd_req_t* req) {
     cJSON_AddNumberToObject(p, "input_mv", pwr.input_mv);
     cJSON_AddStringToObject(p, "source", pwr.source);
     cJSON_AddBoolToObject(p, "charging", pwr.charging);
+    cJSON_AddBoolToObject(p, "battery_present", pwr.battery_present);
     cJSON_AddItemToObject(root, "power", p);
 
     DiagTelemetry dg = s_hooks.get_diag ? s_hooks.get_diag() : DiagTelemetry{};
@@ -738,6 +739,22 @@ esp_err_t handle_diag_reset_wifi_drops(httpd_req_t* req) {
     REQUIRE_ADMIN(req);
     ESP_LOGI(TAG, "/api/diag/reset-wifi-drops from %s", requester_str(req).c_str());
     wifi::reset_disconnect_count();
+    if (s_hooks.get_diag) {
+        DiagTelemetry dg = s_hooks.get_diag();
+        hvac_mqtt::publish_diag_state({dg.reset_reason, dg.brownout_count,
+                                       dg.vin_sag_count, dg.vin_min_mv,
+                                       wifi::get_rssi(), wifi::disconnect_count()});
+    }
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_sendstr(req, "{\"status\":\"ok\"}");
+}
+
+// ── POST /api/diag/reset-vin-min — clear the persisted all-time-low input ─
+esp_err_t handle_diag_reset_vin_min(httpd_req_t* req) {
+    set_cors(req);
+    REQUIRE_ADMIN(req);
+    ESP_LOGI(TAG, "/api/diag/reset-vin-min from %s", requester_str(req).c_str());
+    diag::reset_vin_min_ever();
     if (s_hooks.get_diag) {
         DiagTelemetry dg = s_hooks.get_diag();
         hvac_mqtt::publish_diag_state({dg.reset_reason, dg.brownout_count,
@@ -2627,6 +2644,7 @@ esp_err_t init(const Hooks& hooks) {
         {"/api/update/install",      HTTP_POST,    handle_update_install, nullptr},
         {"/api/diag/reset-brownout", HTTP_POST,    handle_diag_reset_brownout, nullptr},
         {"/api/diag/reset-wifi-drops", HTTP_POST,  handle_diag_reset_wifi_drops, nullptr},
+        {"/api/diag/reset-vin-min",  HTTP_POST,    handle_diag_reset_vin_min, nullptr},
         {"/api/mqtt",                HTTP_GET,      handle_mqtt_get,       nullptr},
         {"/api/mqtt",                HTTP_POST,     handle_mqtt_post,      nullptr},
         {"/api/device",              HTTP_POST,     handle_device_post,    nullptr},
