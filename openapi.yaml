@@ -238,6 +238,23 @@ paths:
                 type: object
                 properties:
                   status: { type: string, example: ok }
+  /api/diag/reset-vin-min:
+    post:
+      tags: [Diagnostics]
+      summary: Clear the persisted all-time-low input voltage (vin_min_ever)
+      description: Resets the NVS record low to 0; the next reading re-seeds it from the current rail. Use to clear a stale record left by a pre-plausibility-floor glitch.
+      security:
+        - ApiKeyAuth: []
+        - SessionCookie: []
+      responses:
+        '200':
+          description: Record low reset
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: ok }
   /api/ota:
     post:
       tags: [Firmware]
@@ -865,6 +882,7 @@ components:
             input_mv: { type: integer }
             source: { type: string }
             charging: { type: boolean }
+            battery_present: { type: boolean, description: 'Actively probed Li-ion cell presence (relaxation test + insert/remove IRQ tracking)' }
         diag:
           type: object
           description: Power/brownout diagnostics

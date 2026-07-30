@@ -16,6 +16,12 @@ constexpr const char* kNs = "diag";
 std::mutex   g_mtx;
 diag::Snapshot g_snap;
 
+// Reject implausibly low VIN reads. A genuine sag below this would have already
+// tripped a hardware brownout+reset (caught separately via the reset reason), so
+// any sub-threshold value here is a post-boot ADC settling glitch, not a real
+// low. Without this floor a single 2 mV glitch persists as the all-time low.
+constexpr uint16_t kVinPlausibleMinMv = 2000;
+
 const char* reset_reason_str(esp_reset_reason_t r) {
     switch (r) {
         case ESP_RST_POWERON:   return "poweron";
@@ -78,7 +84,7 @@ void init() {
 }
 
 void note_vin(uint16_t input_mv, uint16_t floor_mv) {
-    if (input_mv == 0) return;  // ignore invalid/absent reads
+    if (input_mv < kVinPlausibleMinMv) return;  // ignore invalid/glitch reads
 
     bool new_all_time_low = false;
     uint16_t all_time_low = 0;
@@ -133,6 +139,22 @@ void reset_brownout_count() {
         ESP_LOGW(TAG, "nvs_open failed; brownout count reset not persisted");
     }
     ESP_LOGI(TAG, "brownout count reset to 0");
+}
+
+void reset_vin_min_ever() {
+    {
+        std::lock_guard<std::mutex> lock(g_mtx);
+        g_snap.vin_min_ever_mv = 0;  // 0 = "none yet"; next note_vin re-seeds it
+    }
+    nvs_handle_t h;
+    if (nvs_open(kNs, NVS_READWRITE, &h) == ESP_OK) {
+        nvs_set_u32(h, "vin_min", 0);
+        nvs_commit(h);
+        nvs_close(h);
+    } else {
+        ESP_LOGW(TAG, "nvs_open failed; vin_min_ever reset not persisted");
+    }
+    ESP_LOGI(TAG, "vin_min_ever reset to 0");
 }
 
 }  // namespace diag

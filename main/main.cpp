@@ -32,6 +32,7 @@
 
 #include "esp_log.h"
 #include "esp_app_desc.h"
+#include "esp_timer.h"
 #include "esp_mac.h"
 #include "nvs_flash.h"
 #include "esp_netif_sntp.h"
@@ -57,6 +58,7 @@ struct PowerSnap {
     uint16_t            input_mv = 0;   ///< effective supply = max(vin, vinout)
     m5pm1::PowerSource  source   = m5pm1::PowerSource::UNKNOWN;
     bool                charging = false;
+    bool                battery_present = false; ///< actively probed cell presence
 };
 std::mutex g_pwr_mtx;
 PowerSnap  g_pwr;
@@ -70,13 +72,29 @@ const char* power_source_str(m5pm1::PowerSource s) {
     }
 }
 
+// --- Power thresholds & telemetry-task timing ---
+constexpr uint16_t kBattPresentMv = 3000; ///< VBAT floor for "BATTERY" source derivation
+constexpr uint16_t kBattFullMv    = 4180; ///< CV plateau — above this, charge has tapered
+constexpr uint16_t kVinSagFloorMv = 4800; ///< diag sag early-warning threshold (mV)
+// Skip VIN min/sag tracking during a post-boot warm-up so ADC settling glitches
+// (seen as spurious low-mV all-time lows) never get persisted.
+constexpr int64_t  kVinWarmupUs      = 15LL * 1000000; ///< 15 s
+// Battery-presence detection. The LGS4056 charger holds the (unloaded) BAT node
+// near float even with no cell, and periodically runs a recharge/detect cycle
+// that swings VBAT by many hundreds of mV between 1 s samples. A real Li-ion
+// cell has far too much capacitance to move that fast (even mid-charge), so a
+// large adjacent-sample jump means "no cell". We declare a battery present only
+// after VBAT stays jump-free for a settling window.
+constexpr uint16_t kBattJumpMv    = 250;  ///< adjacent-sample |dVBAT| a real cell can't exceed in ~1 s
+constexpr uint32_t kBattStableSec = 30;   ///< no jump for this long => cell present
+
 // Derive the active power source from the measured rails. The PMIC's PWR_SRC
 // register proved unreliable on the Stamp-S3Bat (reads "BAT" while USB-powered),
 // so trust the ADC: whichever rail is at a healthy 5V is the live source.
 m5pm1::PowerSource derive_source(uint16_t vin_mv, uint16_t vinout_mv, uint16_t vbat_mv) {
     if (vinout_mv >= 4500) return m5pm1::PowerSource::VIN_OUT;
     if (vin_mv    >= 4500) return m5pm1::PowerSource::VIN;
-    if (vbat_mv   >= 3000) return m5pm1::PowerSource::BATTERY;
+    if (vbat_mv   >= kBattPresentMv) return m5pm1::PowerSource::BATTERY;
     return m5pm1::PowerSource::UNKNOWN;
 }
 
@@ -88,11 +106,12 @@ m5pm1::PowerSource derive_source(uint16_t vin_mv, uint16_t vinout_mv, uint16_t v
 // the battery with zero brownouts at the CN105 5V budget, so there is no
 // firmware charge governor. This task just refreshes telemetry and feeds the
 // PMIC watchdog + the sag/brownout diagnostics.
-constexpr uint16_t kBattPresentMv = 3000; ///< below this, treat VBAT as "no battery"
-constexpr uint16_t kBattFullMv    = 4180; ///< CV plateau — above this, charge has tapered
-constexpr uint16_t kVinSagFloorMv = 4800; ///< diag sag early-warning threshold (mV)
 
 void pmic_task(void*) {
+    const int64_t t_start = esp_timer_get_time();
+    uint16_t prev_vbat  = 0;      // last VBAT sample, for jump detection
+    bool     have_prev  = false;
+    uint32_t stable_sec = 0;      // seconds since the last large VBAT jump
     while (true) {
         if (g_pmic.present()) {
             g_pmic.feed_watchdog();
@@ -103,17 +122,40 @@ void pmic_task(void*) {
             g_pmic.read_vinout_mv(snap.vinout_mv);
             snap.input_mv = (snap.vin_mv > snap.vinout_mv) ? snap.vin_mv : snap.vinout_mv;
             snap.source = derive_source(snap.vin_mv, snap.vinout_mv, snap.vbat_mv);
+
+            const int64_t elapsed = esp_timer_get_time() - t_start;
+
+            // Battery presence via VBAT stability. A real idle cell holds VBAT
+            // rock-steady; a bare BAT node swings hundreds of mV as the charger
+            // cycles. Any big adjacent jump resets the "stable" timer; a cell is
+            // declared present only once VBAT has been jump-free for a while.
+            if (have_prev) {
+                const uint16_t d = (snap.vbat_mv > prev_vbat)
+                                       ? (snap.vbat_mv - prev_vbat)
+                                       : (prev_vbat - snap.vbat_mv);
+                if (d >= kBattJumpMv)          stable_sec = 0;
+                else if (stable_sec < 0xFFFF)  stable_sec++;
+            }
+            prev_vbat = snap.vbat_mv;
+            have_prev = true;
+            snap.battery_present = (stable_sec >= kBattStableSec);
+            // If the board is demonstrably running off the cell, a battery
+            // obviously exists — don't let a load-transient jump read as "absent".
+            if (snap.source == m5pm1::PowerSource::BATTERY) snap.battery_present = true;
+
             // Report charging only when an external input is present and a real
-            // battery sits below the CV plateau. The LGS4056 owns actual charge
-            // current; this is a best-effort display heuristic (no status pin).
+            // (detected) battery sits below the CV plateau. The LGS4056 owns the
+            // actual charge current; this is a best-effort display heuristic.
             snap.charging = (snap.source == m5pm1::PowerSource::VIN ||
                              snap.source == m5pm1::PowerSource::VIN_OUT) &&
-                            (snap.vbat_mv >= kBattPresentMv) &&
-                            (snap.vbat_mv < kBattFullMv);
-            std::lock_guard<std::mutex> lock(g_pwr_mtx);
-            g_pwr = snap;
-            // Feed the sag/brownout early-warning tracker with effective input.
-            diag::note_vin(snap.input_mv, kVinSagFloorMv);
+                            snap.battery_present && (snap.vbat_mv < kBattFullMv);
+            {
+                std::lock_guard<std::mutex> lock(g_pwr_mtx);
+                g_pwr = snap;
+            }
+            // Feed the sag/brownout tracker with effective input, but only after
+            // the warm-up window so post-boot ADC glitches never persist a low.
+            if (elapsed >= kVinWarmupUs) diag::note_vin(snap.input_mv, kVinSagFloorMv);
         }
         // Push diagnostics to HA on sag/record-low change, and at least every
         // ~30 s so RSSI (which drifts continuously) stays fresh without spamming.
@@ -448,6 +490,7 @@ extern "C" void app_main() {
         t.input_mv  = g_pwr.input_mv;
         t.source    = power_source_str(g_pwr.source);
         t.charging  = g_pwr.charging;
+        t.battery_present = g_pwr.battery_present;
         return t;
     };
     hooks.get_diag = [] {

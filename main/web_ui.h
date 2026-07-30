@@ -45,6 +45,7 @@ struct PowerTelemetry {
     uint16_t    input_mv = 0;   ///< effective supply = max(vin, vinout)
     const char* source   = "unknown";  ///< "vin" | "vin_out" | "battery" | "unknown"
     bool        charging = false;
+    bool        battery_present = false; ///< actively probed Li-ion cell presence
 };
 
 /// Diagnostics snapshot for the dashboard (boot/brownout/power-sag).
