@@ -447,12 +447,6 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
   <p class="sub" id="subtitle">connecting…</p>
   <div id="offline" class="hidden" style="margin:8px auto;max-width:420px;padding:8px 12px;border-radius:8px;background:var(--err-bg);color:var(--red);font-size:.8em">Connection lost — reconnecting…</div>
 
-  <div class="badges" id="statusBadges">
-    <span class="badge" id="bWifi"><span class="dot"></span>WiFi</span>
-    <span class="badge" id="bUnit"><span class="dot"></span>Unit</span>
-    <span class="badge" id="bMqtt"><span class="dot"></span>MQTT</span>
-  </div>
-
   <div class="gbanner" id="groupBanner"></div>
 
   <div class="tabs">
@@ -493,8 +487,7 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
       <button data-mode="FAN"  onclick="setMode('FAN')"><span class="mi">✦</span>Fan</button>
     </div>
 
-    <details class="adv">
-      <summary>Fan &amp; Vanes</summary>
+    <div class="adv">
       <div class="row">
         <label>Fan</label>
         <select id="fan" onchange="setField('fan',this.value)">
@@ -516,7 +509,7 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
           <option value="&gt;">Right</option><option value="&gt;&gt;">Far right</option><option value="&lt;&gt;">Wide</option><option value="SWING">Swing</option>
         </select>
       </div>
-    </details>
+    </div>
   </div>
   </div><!-- /panel-climate -->
 
@@ -613,6 +606,11 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
   </div><!-- /panel-group -->
 
   <div class="panel" id="panel-system">
+  <div class="badges" id="statusBadges" data-grp="status">
+    <span class="badge" id="bWifi"><span class="dot"></span>WiFi</span>
+    <span class="badge" id="bUnit"><span class="dot"></span>Unit</span>
+    <span class="badge" id="bMqtt"><span class="dot"></span>MQTT</span>
+  </div>
   <div class="secnav" data-grp="status">
     <button onclick="jumpTo('sec-controller')">Controller</button>
     <button onclick="jumpTo('sec-wifi-status')">WiFi</button>
@@ -2009,9 +2007,6 @@ function applyRole(){
   document.querySelectorAll('.tab').forEach(t=>{
     if(t.dataset.tab!=='climate') t.style.display=user?'none':'';
   });
-  // The WiFi/Unit/MQTT badges are diagnostics for admins; hide them for the
-  // climate-only user.
-  $('statusBadges').style.display=user?'none':'';
   if(user) showTab('climate');
 }
 
