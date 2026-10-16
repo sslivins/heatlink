@@ -1,8 +1,8 @@
 name: Create Release
 
+# Manual only: merges to main do not release. Run from the Actions tab or
+# `gh workflow run create-release.yml --repo sslivins/heatlink`.
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
     inputs:
       dry_run:
@@ -11,7 +11,7 @@ on:
         default: false
         type: boolean
 
-# Serialize releases so a fast second merge can't race the tag/bump of the first.
+# Serialize releases so a second run can't race the tag/bump of the first.
 concurrency:
   group: create-release
   cancel-in-progress: false

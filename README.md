@@ -362,9 +362,12 @@ so a broken image that can't get online is automatically rolled back on reset.
 
 ## Releasing
 
-Bump `set(PROJECT_VER "x.y.z")` in `CMakeLists.txt`, then run the **Create
-Release** workflow. It tags `vx.y.z`, builds, generates a changelog from
-conventional commits, and attaches the flashable binaries.
+Releases are manual — merging to `main` does not cut one. Run the **Create
+Release** workflow (Actions tab, or `gh workflow run create-release.yml`). It
+tags `v<PROJECT_VER>` from `CMakeLists.txt`, builds, generates a changelog from
+conventional commits, attaches the flashable binaries, then bumps the patch
+version on `main` ready for the next release. To cut a minor/major release,
+set `PROJECT_VER` by hand before running it.
 
 ## Layout
 
