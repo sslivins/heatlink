@@ -9,6 +9,7 @@
 #pragma once
 
 #include <string>
+#include <vector>
 #include <cstdint>
 
 #include "esp_err.h"
@@ -124,5 +125,22 @@ void set_pairing_advert(bool active, const std::string& glabel = "",
 /// Browse the LAN for heads currently advertising pair=1 and return a JSON array
 /// string: [{"uid":..,"name":..,"glabel":..,"host":"<ip>"}], excluding self.
 esp_err_t discover_pairing(std::string& out_json);
+
+/// Always-on House-view identity in the _mmhvac._tcp TXT: display name, the
+/// group fingerprint (hvac_group::group_fingerprint()) and group label. Empty
+/// values are removed from the TXT. Cheap no-op when nothing changed, so it can
+/// be called on every poll cycle. Display-only; never trusted for control.
+void set_house_advert(const std::string& name, const std::string& ghash,
+                      const std::string& glabel);
+
+/// One head found by browse_heads().
+struct HeadAdvert {
+    std::string uid, name, ghash, glabel, ip;
+    int pv = -1;
+};
+
+/// Browse _mmhvac._tcp for every HeatLink head on the LAN (excluding self),
+/// regardless of group or pairing state. Blocks ~2.5 s.
+esp_err_t browse_heads(std::vector<HeadAdvert>& out);
 
 }  // namespace wifi

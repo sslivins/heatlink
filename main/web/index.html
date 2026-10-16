@@ -603,6 +603,12 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
 
     <div id="gPairMsg" class="status hidden" style="margin-top:10px"></div>
   </div>
+  <!-- House: every head on the LAN across all outdoor units (read-only; tap to open) -->
+  <div class="card hidden" id="houseCard">
+    <h2>House</h2>
+    <p class="hint">Every HeatLink head on your network, grouped by outdoor unit. Tap one to open it.</p>
+    <div id="hMembers"></div>
+  </div>
   </div><!-- /panel-group -->
 
   <div class="panel" id="panel-system">
@@ -1201,7 +1207,9 @@ function showTab(name){
   // Re-sync stored auth state when opening Settings so the pending-change gate
   // and the toggle reflect the current server state, not a stale snapshot.
   if(name==='settings'){ loadAuth(); }
+  groupTabActive=(name==='group');
   if(name==='group' && authState.role==='admin'){ refreshGroup(); }
+  if(groupTabActive){ refreshHouse(); }
 }
 
 function badge(el,on){el.className='badge '+(on?'on':'off')}
@@ -2339,6 +2347,67 @@ async function refreshGroup(){
   renderGroupPanel(g);
 }
 function modeCap(m){ return m.charAt(0)+m.slice(1).toLowerCase(); }
+// ── House view (all heads across outdoor units) ─────────────────────────
+let groupTabActive=false, houseRetry=null;
+function houseRow(h,isSelf){
+  let tag='', known=true;
+  if(isSelf) tag='This device';
+  else if(!h.reachable){ tag='Offline'; known=false; }
+  else if(!h.summary_supported){ tag='Update firmware'; known=false; }
+  else if(!h.unit_connected){ tag='No unit'; known=false; }
+  const mode=known&&h.mode?((h.power==='OFF')?'OFF':h.mode):null;
+  return memberRow({ name:h.name||h.uid, dotcls:isSelf?'selfdot':(known?'known':'unknown'),
+    tag:tag, isLock:false, uid:null, isPeer:false, mode:mode,
+    room:known&&h.roomTemp!=null?h.roomTemp:null, target:known&&h.targetTemp!=null?h.targetTemp:null,
+    url:(!isSelf&&h.ip)?('http://'+h.ip+'/'):null });
+}
+function renderHouse(d){
+  const card=$('houseCard'); if(!card) return;
+  const self=d.self||{}, heads=d.heads||[];
+  const sk=self.ghash||'';
+  // Hidden unless some head lives outside this head's group (single-group and
+  // single-head installs see no change).
+  const others=heads.filter(h=>!sk||(h.ghash||'')!==sk);
+  if(!others.length){ card.classList.add('hidden'); return; }
+  const secs=new Map();
+  const add=(k,lbl,row)=>{ if(!secs.has(k)) secs.set(k,{lbl:lbl,rows:[]}); const s=secs.get(k); if(!s.lbl&&lbl) s.lbl=lbl; s.rows.push(row); };
+  add(sk||'_none', self.glabel||'', houseRow(self,true));
+  const sorted=heads.slice().sort((a,b)=>(a.name||a.uid).localeCompare(b.name||b.uid));
+  sorted.filter(h=>h.ghash).forEach(h=>add(h.ghash,h.glabel||'',houseRow(h,false)));
+  sorted.filter(h=>!h.ghash).forEach(h=>add('_none','',houseRow(h,false)));
+  const title=(k,s)=>{
+    if(k==='_none') return 'Standalone';
+    return s.lbl||(k===sk?'This outdoor unit':'Outdoor unit '+k);
+  };
+  const keys=[...secs.keys()];
+  // This head's section first, other outdoor units by name, standalone last.
+  const rest=keys.slice(1).filter(k=>k!=='_none')
+    .sort((a,b)=>title(a,secs.get(a)).localeCompare(title(b,secs.get(b))));
+  const order=[keys[0]].concat(rest, (keys[0]!=='_none'&&secs.has('_none'))?['_none']:[]);
+  let html='';
+  order.forEach(k=>{ const s=secs.get(k); html+='<div class="wf-head"><span class="wf-head-t">'+gEsc(title(k,s))+'</span></div>'+s.rows.join(''); });
+  $('hMembers').innerHTML=html;
+  card.classList.remove('hidden');
+}
+let houseWired=false;
+function wireHouse(){
+  if(houseWired) return; const box=$('hMembers'); if(!box) return;
+  box.addEventListener('click',e=>{
+    const card=e.target.closest('.gmember[data-gurl]');
+    if(card&&card.dataset.gurl) window.open(card.dataset.gurl,'_blank','noopener');
+  });
+  houseWired=true;
+}
+async function refreshHouse(){
+  wireHouse();
+  let d;
+  try{ const r=await jget('/api/house'); if(!r.ok) return; d=await r.json(); }
+  catch(e){ return; }
+  renderHouse(d);
+  // A scan is still running (first visit / stale cache): look again shortly.
+  clearTimeout(houseRetry);
+  if(d.scanning&&groupTabActive) houseRetry=setTimeout(refreshHouse,3500);
+}
 // True when switching THIS head to Heat/Cool would diverge from the shared
 // outdoor unit's current direction — i.e. another zone is on the opposite mode,
 // or the unit is already inferred locked the other way. Only admins coordinate.
@@ -2673,6 +2742,7 @@ async function resetWifiDrops(ev){
 
 async function pollOnce(){
   await refresh();
+  if(groupTabActive && tickN%3===0) await refreshHouse();
   if(authState.role!=='admin'){ tickN++; return; }  // user role: climate only
   if(tickN%3===0) await loadWifi();
   if(tickN%6===0){ await refreshUpdate(); await loadMqtt(); }

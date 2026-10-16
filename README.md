@@ -229,7 +229,8 @@ Once connected to WiFi the device serves a responsive touch dashboard at
 `http://<ip>/` (or `http://heatlink-<id>.local/` via mDNS, where `<id>` is the
 unit's MAC suffix shown on the Status tab). It has four tabs — **Climate**
 (temperature dial, mode, fan & vanes), **Zones** (multi-head pairing &
-coordination), **Status** (live diagnostics — WiFi, controller power, heat-pump
+coordination, plus a **House** view listing every head on the LAN grouped by
+outdoor unit when you have more than one), **Status** (live diagnostics — WiFi, controller power, heat-pump
 sensors, activity log), and **Settings** (display, wide-vane, WiFi, MQTT/HA,
 firmware, web/API access, device reset). It works standalone as a thermostat, or
 alongside MQTT/Home Assistant.
@@ -292,6 +293,18 @@ access**). Optional per-endpoint API-key auth can be enabled there.
 | `POST` | `/api/group/pair/claim` · `/join` | claim a code · join a group |
 | `POST` | `/api/group/leave` · `/label` · `/member/remove` | leave · relabel · remove a member |
 | `POST` | `/api/group/sync` · `/resolve` | signed peer sync · coordinator HEAT/COOL resolve |
+
+### House view (all outdoor units)
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `GET`  | `/api/house` | every head on the LAN (mDNS `_mmhvac._tcp` browse), sectioned by outdoor unit, with live mode/temps |
+| `GET`  | `/api/house/summary` | **unauthenticated, read-only** summary of this head (name, outdoor-unit fingerprint/label, mode, temps) |
+
+Each head always advertises `name`, `ghash` (a display-only outdoor-unit
+fingerprint: the first 8 hex chars of SHA-256 of the group id) and `glabel` in
+its `_mmhvac._tcp` TXT record. The group secret never leaves its group and the
+House view is read-only: tapping a head opens that head's own UI.
 
 ### Updates & system
 
