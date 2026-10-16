@@ -365,6 +365,140 @@ static void test_disconnected_pauses() {
     CHECK(m.state() == State::Running);
 }
 
+// ── Time-slice hold (#133) ──────────────────────────────────────────────────
+
+static void test_shared_config_roundtrip() {
+    Config c;
+    c.enabled = true;
+    c.delta_c = 1.5f;
+    c.min_off_s = 600;
+    c.probe_enabled = false;
+    c.probe_interval_s = 1800;
+    c.probe_duration_s = 180;
+    CHECK(encode_shared(c) == "1,600,0,1800,180");
+    Config local;               // a head's own config: delta stays its own
+    local.delta_c = 2.0f;
+    CHECK(decode_shared("1,600,0,1800,180", local));
+    CHECK(local.enabled && local.min_off_s == 600 && !local.probe_enabled);
+    CHECK(local.probe_interval_s == 1800 && local.probe_duration_s == 180);
+    CHECK(local.delta_c == 2.0f);
+    CHECK(decode_shared("1,10,1,20,5", local));   // sanitized
+    CHECK(local.min_off_s == kMinOffFloorS && local.probe_interval_s == kMinOffFloorS);
+    CHECK(local.probe_duration_s == kMinProbeDurationS);
+    Config keep = local;
+    CHECK(!decode_shared("", keep));
+    CHECK(!decode_shared("1,600,0,1800", keep));
+    CHECK(!decode_shared("2,600,0,1800,180", keep));
+    CHECK(!decode_shared("1,600,0,1800,180,", keep));
+    CHECK(!decode_shared("1,600,x,1800,180", keep));
+    CHECK(keep.min_off_s == local.min_off_s);
+}
+
+static void test_hold_parks_running_head() {
+    uint32_t now;
+    Machine m = running_heat(now);
+    CHECK(m.set_hold(true, now) == Action::PowerOff);
+    CHECK(m.state() == State::Parked);
+    CHECK(std::string(m.reason()) == kWaitingForSlice);
+    CHECK(m.parked());
+    CHECK(!m.parked_satisfied());
+    CHECK(m.take_event() == nullptr);  // slice changes are logged by the coordinator
+    CHECK(m.next_probe_s(now) == -1);
+}
+
+static void test_hold_blocks_drift_and_probe() {
+    uint32_t now;
+    Machine m = running_heat(now);
+    m.set_hold(true, now);
+    // Room far below setpoint for longer than min-off and probe interval: no wake.
+    Inputs cold = heat(15.0f, 21.0f, false);
+    CHECK(run(m, cold, now + 1, now + 3000).a == Action::None);
+    CHECK(m.state() == State::Parked);
+}
+
+static void test_hold_survives_ineligible_mode() {
+    uint32_t now;
+    Machine m = running_heat(now);
+    m.set_hold(true, now);
+    Inputs in = heat(19.0f, 21.0f, false);
+    in.mode = "AUTO";
+    CHECK(run(m, in, now + 1, now + 100).a == Action::None);
+    CHECK(m.state() == State::Parked);
+    CHECK(m.set_hold(false, now + 100) == Action::PowerOn);
+    CHECK(m.state() == State::Running);
+    CHECK(run(m, in, now + 101, now + 300).a == Action::None);  // AUTO never parks
+}
+
+static void test_release_resumes() {
+    uint32_t now;
+    Machine m = running_heat(now);
+    m.set_hold(true, now);
+    run(m, heat(19.0f, 21.0f, false), now + 1, now + 100);
+    CHECK(m.set_hold(false, now + 100) == Action::PowerOn);
+    CHECK(m.state() == State::Running);
+    CHECK(std::string(m.reason()).empty());
+    CHECK(m.set_hold(false, now + 101) == Action::None);  // idempotent
+}
+
+static void test_hold_on_satisfied_head_relabels() {
+    uint32_t now;
+    Machine m = running_heat(now);
+    uint32_t at = park_it(m, now);
+    CHECK(m.parked_satisfied());
+    CHECK(m.set_hold(true, at + 5) == Action::None);  // already off
+    CHECK(std::string(m.reason()) == kWaitingForSlice);
+    CHECK(!m.parked_satisfied());
+}
+
+static void test_remote_on_while_held_reparks() {
+    uint32_t now;
+    Machine m = running_heat(now);
+    m.set_hold(true, now);
+    // IR remote turns the unit on; after the settle + hold windows it is re-parked.
+    Hit h = run(m, heat(19.0f), now + 1, now + 200);
+    CHECK(h.a == Action::PowerOff);
+    CHECK(m.state() == State::Parked);
+    CHECK(std::string(m.reason()) == kWaitingForSlice);
+}
+
+static void test_turn_on_while_held_stays_off() {
+    uint32_t now;
+    Machine m = running_heat(now);
+    m.set_desired_power(false, now);
+    run(m, heat(19.0f, 21.0f, false), now + 1, now + 20);
+    m.set_hold(true, now + 20);
+    CHECK(m.state() == State::Off);
+    CHECK(m.set_desired_power(true, now + 21) == Action::None);  // unit already off
+    CHECK(m.state() == State::Parked);
+    CHECK(std::string(m.reason()) == kWaitingForSlice);
+    CHECK(m.notify_intent_change(now + 22) == Action::None);   // no probe while held
+    CHECK(m.set_desired_power(false, now + 23) == Action::PowerOff);
+    CHECK(m.state() == State::Off);
+}
+
+static void test_hold_applied_on_first_tick() {
+    Machine m;
+    m.configure(enabled_cfg(), 0);
+    m.set_hold(true, 0);
+    CHECK(m.tick(heat(19.0f), 0) == Action::PowerOff);  // unit was on
+    CHECK(m.state() == State::Parked);
+    Machine r;
+    r.configure(enabled_cfg(), 0);
+    r.restore(true);
+    r.set_hold(true, 0);
+    CHECK(r.tick(heat(19.0f, 21.0f, false), 0) == Action::None);
+    CHECK(r.state() == State::Parked);
+    CHECK(std::string(r.reason()) == kWaitingForSlice);
+}
+
+static void test_disable_while_held_resumes() {
+    uint32_t now;
+    Machine m = running_heat(now);
+    m.set_hold(true, now);
+    Config off;
+    CHECK(m.configure(off, now + 5) == Action::PowerOn);
+}
+
 int main() {
     test_sanitize();
     test_disabled_is_passthrough();
@@ -385,6 +519,16 @@ int main() {
     test_restore_after_reboot();
     test_disable_while_parked();
     test_disconnected_pauses();
+    test_shared_config_roundtrip();
+    test_hold_parks_running_head();
+    test_hold_blocks_drift_and_probe();
+    test_hold_survives_ineligible_mode();
+    test_release_resumes();
+    test_hold_on_satisfied_head_relabels();
+    test_remote_on_while_held_reparks();
+    test_turn_on_while_held_stays_off();
+    test_hold_applied_on_first_tick();
+    test_disable_while_held_resumes();
     if (g_failures) {
         std::printf("%d park_logic test(s) FAILED\n", g_failures);
         return 1;

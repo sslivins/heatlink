@@ -284,6 +284,8 @@ struct ReplicaMember {
 struct GroupReplica {
     uint64_t                                      lamport = 0;
     LwwRegister                                   label;
+    LwwRegister                                   slice;  ///< time-slice config "e,min,max,settle" (#133); version 0 = never set
+    LwwRegister                                   park;   ///< outdoor-unit off-at-setpoint config (park::encode_shared); version 0 = never set
     std::vector<ReplicaMember>                    members;
     std::vector<std::pair<std::string, uint64_t>> tombstones;  // uid → remove version
 };
@@ -307,6 +309,16 @@ bool merge_replica(GroupReplica& local, const GroupReplica& remote);
 /// @p writer_uid. Returns true (always a new write) so callers persist.
 bool replica_set_label(GroupReplica& r, const std::string& label,
                        const std::string& writer_uid);
+
+/// Local write: set the encoded time-slice config (#133). No-op (returns false)
+/// if unchanged.
+bool replica_set_slice(GroupReplica& r, const std::string& encoded,
+                       const std::string& writer_uid);
+
+/// Local write: set the encoded shared off-at-setpoint config. No-op (returns
+/// false) if unchanged.
+bool replica_set_park(GroupReplica& r, const std::string& encoded,
+                      const std::string& writer_uid);
 
 /// Local write: set @p uid's display name (only if @p uid is a present member).
 /// No-op (returns false) if the name is unchanged or the member is absent.

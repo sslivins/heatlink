@@ -382,6 +382,8 @@ int member_index(const std::vector<ReplicaMember>& members, const std::string& u
 void bump_clock_to_cover(GroupReplica& r) {
     uint64_t hi = r.lamport;
     if (r.label.version > hi) hi = r.label.version;
+    if (r.slice.version > hi) hi = r.slice.version;
+    if (r.park.version > hi) hi = r.park.version;
     for (const auto& m : r.members) {
         if (m.name.version > hi) hi = m.name.version;
         if (m.add_version > hi)  hi = m.add_version;
@@ -426,6 +428,16 @@ bool merge_replica(GroupReplica& local, const GroupReplica& remote) {
     if (lww_wins(remote.label.version, remote.label.origin,
                  local.label.version, local.label.origin)) {
         local.label = remote.label;
+        changed = true;
+    }
+    if (lww_wins(remote.slice.version, remote.slice.origin,
+                 local.slice.version, local.slice.origin)) {
+        local.slice = remote.slice;
+        changed = true;
+    }
+    if (lww_wins(remote.park.version, remote.park.origin,
+                 local.park.version, local.park.origin)) {
+        local.park = remote.park;
         changed = true;
     }
 
@@ -488,6 +500,26 @@ bool replica_set_label(GroupReplica& r, const std::string& label,
     r.label.value   = label;
     r.label.version = ++r.lamport;
     r.label.origin  = writer_uid;
+    return true;
+}
+
+bool replica_set_slice(GroupReplica& r, const std::string& encoded,
+                       const std::string& writer_uid) {
+    if (r.slice.version != 0 && r.slice.value == encoded) return false;
+    bump_clock_to_cover(r);
+    r.slice.value   = encoded;
+    r.slice.version = ++r.lamport;
+    r.slice.origin  = writer_uid;
+    return true;
+}
+
+bool replica_set_park(GroupReplica& r, const std::string& encoded,
+                      const std::string& writer_uid) {
+    if (r.park.version != 0 && r.park.value == encoded) return false;
+    bump_clock_to_cover(r);
+    r.park.value   = encoded;
+    r.park.version = ++r.lamport;
+    r.park.origin  = writer_uid;
     return true;
 }
 

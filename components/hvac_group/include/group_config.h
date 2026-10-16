@@ -48,6 +48,23 @@ esp_err_t save(const GroupConfig& cfg);
 /// the replicated LWW register so the new label propagates to every peer.
 esp_err_t set_label(const std::string& label);
 
+/// The group's replicated time-slice config, encoded "e,min,max,settle"
+/// (see slice::encode_config), or "" if never set / not grouped (#133).
+std::string slice_config();
+
+/// Set the replicated time-slice config (must be in a group). Propagates to
+/// every member through the replica's LWW register.
+esp_err_t set_slice_config(const std::string& encoded);
+
+/// The outdoor unit's shared off-at-setpoint config (park::encode_shared), or
+/// "" if never set / not grouped. When set it overrides each head's own
+/// enable / minimum-off / probe settings.
+std::string park_config();
+
+/// Set the shared off-at-setpoint config (must be in a group). Propagates to
+/// every member through the replica's LWW register.
+esp_err_t set_park_config(const std::string& encoded);
+
 /// Leave the group: clears group_id/secret/label/peers and persists. Idempotent.
 esp_err_t leave_group();
 

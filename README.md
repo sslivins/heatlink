@@ -205,11 +205,18 @@ setpoint (thermo-off), and there is no CN105 command to stop it. With **Settings
 - **Air check (probe).** With the fan stopped, the head only senses the air
   around itself. By default it runs every 15 min for 2 min of real airflow
   (preheat time doesn't count) and resumes if the room needs it, else parks
-  again. The interval is never shorter than the minimum off time.
+  again. The check runs the fan at its lowest speed (Quiet) and then restores
+  your fan setting; a fan change made during a check is kept. The interval is never shorter than the minimum off time.
 - **Your commands win.** Turning a head off makes it really off (it is never
   re-parked or probed). Changing the mode or setpoint while parked starts an air
   check. Turning the feature off while parked powers the unit back on. The
   parked state survives a reboot.
+
+**Outdoor-unit settings.** In a zone group the on/off switch, minimum off time
+and air-check settings belong to the outdoor unit: saving them on any head
+(admin) applies them to every head in the group, and a head that joins adopts
+them. The restart threshold stays per head. Until the group's settings are
+first saved, each head keeps its own.
 
 Home Assistant gets `parked`/`park_state` in the climate entity's attributes and
 a **Parked** binary sensor. Park/resume transitions are written to the activity
@@ -222,6 +229,34 @@ Limitations:
   web UI or HA to turn a parked head off. Pressing ON on the remote while parked
   is detected and starts an air check.
 - As before, remote presses within 30 s of a HeatLink command are reverted.
+
+## Tandem: heating and cooling on one outdoor unit
+
+All heads on one outdoor unit share its direction: it can heat or cool, not
+both. Normally a zone group resolves a mixed request by switching every zone to
+one mode. With **Zones → Tandem** enabled (admin, needs every head online and
+on firmware that supports it), the group instead takes turns heating and cooling
+(time-slicing):
+
+- The online head with the lowest uid is the coordinator (the same election
+  as zone polling; another head takes over within ~45 s if it drops off). It
+  publishes the current turn — HEAT or COOL — in its signed group snapshot.
+- Heads that want the served mode run normally (with off-at-setpoint). Heads
+  that want the other mode keep that mode but are held **parked** ("Waiting for
+  its turn") until their turn. HeatLink never changes a head's mode to slice.
+- A turn lasts at least the **minimum turn** (5–60 min, default 10; protects
+  the outdoor unit from short cycling). After that it hands over once every
+  head in the current mode is satisfied, or at the **maximum turn** (default
+  30 min) regardless. A mode nobody wants any more ends its turn at once.
+  Between modes every head is parked for the **pause between modes** (default
+  60 s). The turn clock pauses during defrost and never switches mid-defrost.
+- Off-at-setpoint is forced on for every head while Tandem is enabled. DRY
+  counts as cooling; OFF and FAN heads are unaffected.
+- AUTO is not available: the UI hides it, `/api/settings` rejects it, Home
+  Assistant snaps back, and a unit put into AUTO from the IR remote is returned
+  to its previous mode. Turning a waiting head on from the IR remote re-parks it.
+- `/api/group/resolve`, `/api/group/sync` and the "switch all zones" prompt are
+  disabled; mixed modes are expected rather than a conflict.
 
 ## Build / flash
 
@@ -329,7 +364,8 @@ access**). Optional per-endpoint API-key auth can be enabled there.
 | `GET`  | `/api/group/pair/status` · `/discover` | pairing status · mDNS-browse for pairable groups |
 | `POST` | `/api/group/pair/claim` · `/join` | claim a code · join a group |
 | `POST` | `/api/group/leave` · `/label` · `/member/remove` | leave · relabel · remove a member |
-| `POST` | `/api/group/sync` · `/resolve` | signed peer sync · coordinator HEAT/COOL resolve |
+| `POST` | `/api/group/sync` · `/resolve` | signed peer sync · coordinator HEAT/COOL resolve (409 while time-slicing) |
+| `POST` | `/api/group/slice` | admin: time-slicing settings (`enabled`, `min_slice_s`, `max_slice_s`, `settle_s`) |
 
 ### House view (all outdoor units)
 

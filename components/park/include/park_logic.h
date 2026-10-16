@@ -44,9 +44,19 @@ constexpr uint32_t kCmdSettleS     = 15;   ///< ignore unit/command mismatch aft
 constexpr uint32_t kExternalHoldS  = 8;    ///< mismatch must persist this long to count
 constexpr uint32_t kProbeExtraMaxS = 600;  ///< cap on no-airflow time (preheat/defrost) per probe
 
+/// Reason reported while a head is held off for the other mode's slice.
+constexpr const char* kWaitingForSlice = "waiting_for_slice";
+
 /// Clamp a config into the supported ranges (delta to 0.5 °C steps; probe
 /// interval is never shorter than the minimum off time).
 Config sanitize(const Config& c);
+
+/// The outdoor-unit-wide subset of Config (enable, min off, probe on/interval/
+/// duration) shared by every head in a group: "e,min_off,pe,pint,pdur".
+/// delta_c stays per head. decode_shared() overlays the shared fields onto
+/// @p inout (keeping its delta_c) and sanitizes; false (untouched) if malformed.
+std::string encode_shared(const Config& c);
+bool        decode_shared(const std::string& s, Config& inout);
 
 enum class State { Off, Running, Parked, Probing };
 const char* state_str(State s);  ///< "off" | "running" | "parked" | "probing"
@@ -85,6 +95,14 @@ public:
     /// the new target is evaluated with real airflow.
     Action notify_intent_change(uint32_t now_s);
 
+    /// Time-sliced heat/cool (#133): while held, a head whose desired power is
+    /// ON is kept parked (reason "waiting_for_slice") with no drift wakes or
+    /// probes, and a remote turn-on is re-parked. Releasing a held head powers it
+    /// back on (normal parking then applies). Held/released transitions log no
+    /// activity event (the slice coordinator logs slice changes).
+    Action set_hold(bool hold, uint32_t now_s);
+    bool   hold() const { return hold_; }
+
     /// Advance with a fresh unit snapshot (call ~1 Hz).
     Action tick(const Inputs& in, uint32_t now_s);
 
@@ -97,6 +115,9 @@ public:
     bool  managed() const {
         return cfg_.enabled && (state_ == State::Parked || state_ == State::Probing);
     }
+    /// Parked because the setpoint was reached (not held for a slice): the
+    /// slice scheduler's "this head is satisfied" signal.
+    bool  parked_satisfied() const { return parked() && !hold_; }
     const char* reason() const { return reason_; }
     /// Seconds until the next probe while parked with probing on, else -1.
     int32_t next_probe_s(uint32_t now_s) const;
@@ -127,6 +148,7 @@ private:
     uint32_t probe_ref_ = 0;         ///< probe interval measured from here
     uint32_t probe_start_ = 0;
     uint32_t probe_airflow_s_ = 0;
+    bool     hold_ = false;
     bool     have_tick_ = false;
     uint32_t last_tick_ = 0;
     const char* reason_ = "";

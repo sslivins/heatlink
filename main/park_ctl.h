@@ -21,7 +21,14 @@ struct Hooks {
     std::function<park::Inputs()> read;            ///< snapshot of the unit
     std::function<void(bool on)>  set_power;       ///< physical power command
     std::function<void()>         on_change;       ///< republish state (MQTT)
+    std::function<std::string()>  get_fan;         ///< unit's reported fan speed
+    std::function<void(const std::string&)> set_fan;  ///< physical fan command
 };
+
+/// Air checks run the fan at its lowest speed (QUIET) and restore the user's
+/// setting afterwards. A user fan command during a check becomes the setting
+/// to restore (returns true: don't send it now); otherwise returns false.
+bool request_fan(const std::string& fan);
 
 /// Load config + persisted managed flag from NVS. Call before the CN105 task.
 void init(const Hooks& hooks);
@@ -35,12 +42,24 @@ void set_desired_power(bool on);
 /// User/HA/group changed mode or setpoint. Starts a probe if parked.
 void notify_intent_change();
 
-/// Physical settings -> what users should see (power ON while parked).
+/// Physical settings -> what users should see (power ON while parked, the
+/// user's fan speed during a quiet air check).
 cn105::Settings overlay(cn105::Settings s);
 
+/// True when the enable / min-off / probe settings come from the group's
+/// shared outdoor-unit config rather than this head alone.
+bool shared();
+
+/// The configured settings (what /api/park shows: this head's own, with the
+/// outdoor unit's shared fields applied), regardless of slicing.
 park::Config config();
 /// Sanitize, persist and apply new tunables. Returns the sanitized config.
 park::Config set_config(const park::Config& c);
+
+/// Time-slicing (#133): while @p active the machine runs even if the user
+/// disabled off-at-setpoint (it is how heads park and report satisfaction),
+/// and @p hold keeps the unit parked off until its slice comes up.
+void set_slice(bool active, bool hold);
 
 struct Snapshot {
     bool        enabled = false;
@@ -49,6 +68,11 @@ struct Snapshot {
     std::string reason;
     int32_t     next_probe_s = -1;
     bool        unit_on = false;  ///< physical unit power at the last tick
+    bool        satisfied = false;  ///< parked at setpoint (not held for a slice)
+    bool        held = false;       ///< held off for another slice (#133)
+    bool        forced = false;     ///< running only because slicing is on
+    bool        slicing = false;    ///< group time-slicing is enabled
+    bool        quiet_fan = false;  ///< air check running with the fan at QUIET
 };
 Snapshot snapshot();
 
