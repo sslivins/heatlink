@@ -13,7 +13,7 @@
 #include "esp_timer.h"
 #include "nvs_flash.h"
 #include "nvs.h"
-#include "mbedtls/sha256.h"
+#include "psa/crypto.h"
 
 static const char* TAG = "auth_mgr";
 
@@ -66,12 +66,13 @@ static void generate_random_hex(char* buffer, size_t len) {
 }
 
 static void hash_password(const char* password, uint8_t* hash_out) {
-    mbedtls_sha256_context ctx;
-    mbedtls_sha256_init(&ctx);
-    mbedtls_sha256_starts(&ctx, 0);  // 0 = SHA-256 (not SHA-224)
-    mbedtls_sha256_update(&ctx, (const unsigned char*)password, strlen(password));
-    mbedtls_sha256_finish(&ctx, hash_out);
-    mbedtls_sha256_free(&ctx);
+    size_t hash_len = 0;
+    if (psa_crypto_init() != PSA_SUCCESS ||
+        psa_hash_compute(PSA_ALG_SHA_256, (const uint8_t*)password, strlen(password),
+                         hash_out, 32, &hash_len) != PSA_SUCCESS) {
+        ESP_LOGE(TAG, "SHA-256 failed");
+        memset(hash_out, 0, 32);
+    }
 }
 
 static bool load_from_nvs(void) {

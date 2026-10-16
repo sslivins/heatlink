@@ -13,7 +13,7 @@
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
-#include "mbedtls/md.h"
+#include "psa/crypto.h"
 #include "nvs.h"
 #include "nvs_flash.h"
 
@@ -422,14 +422,22 @@ std::string hmac_hex(const std::string& message) {
     std::vector<uint8_t> key;
     if (!is_valid_group_secret(secret_hex) || !from_hex(secret_hex, key)) return "";
 
-    const mbedtls_md_info_t* info = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
-    if (!info) return "";
+    if (key.empty() || psa_crypto_init() != PSA_SUCCESS) return "";
+    psa_key_attributes_t attr = PSA_KEY_ATTRIBUTES_INIT;
+    psa_set_key_type(&attr, PSA_KEY_TYPE_HMAC);
+    psa_set_key_bits(&attr, PSA_BYTES_TO_BITS(key.size()));
+    psa_set_key_usage_flags(&attr, PSA_KEY_USAGE_SIGN_MESSAGE);
+    psa_set_key_algorithm(&attr, PSA_ALG_HMAC(PSA_ALG_SHA_256));
+    psa_key_id_t key_id = 0;
+    if (psa_import_key(&attr, key.data(), key.size(), &key_id) != PSA_SUCCESS) return "";
     uint8_t out[32];
-    if (mbedtls_md_hmac(info, key.data(), key.size(),
-                        reinterpret_cast<const uint8_t*>(message.data()),
-                        message.size(), out) != 0) {
-        return "";
-    }
+    size_t out_len = 0;
+    const psa_status_t st = psa_mac_compute(
+        key_id, PSA_ALG_HMAC(PSA_ALG_SHA_256),
+        reinterpret_cast<const uint8_t*>(message.data()), message.size(),
+        out, sizeof(out), &out_len);
+    psa_destroy_key(key_id);
+    if (st != PSA_SUCCESS || out_len != sizeof(out)) return "";
     return to_hex(out, sizeof(out));
 }
 
