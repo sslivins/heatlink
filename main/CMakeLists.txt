@@ -23,6 +23,7 @@ idf_component_register(
          "capability.cpp"
          "status_led.cpp"
          "factory_reset.cpp"
+         "park_ctl.cpp"
     INCLUDE_DIRS "."
     EMBED_FILES "web/index.html.gz"
                 "web/portal.html.gz"
@@ -33,7 +34,7 @@ idf_component_register(
     REQUIRES nvs_flash esp_wifi esp_netif esp_event esp_driver_i2c
              esp_timer esp_app_format esp_http_server lwip
              app_update esp_https_ota esp_http_client mbedtls spiffs
-             cn105 m5pm1 hvac_mqtt hvac_group
+             cn105 m5pm1 hvac_mqtt hvac_group park
 )
 
 # Re-gzip at build time when the source HTML or the gzip script changes.

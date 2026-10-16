@@ -88,6 +88,16 @@ void set_on_connected(std::function<void()> cb);
 /// the first successful connect.
 esp_err_t publish_discovery(const cn105::Settings& s);
 
+/// Off-at-setpoint ("parking") status merged into every /state payload.
+struct ParkInfo {
+    bool        enabled = false;
+    bool        parked  = false;
+    const char* state   = "off";  ///< off | running | parked | probing
+};
+/// Register the provider publish_state() reads park status from. Without one,
+/// /state carries parked=false.
+void set_park_provider(std::function<ParkInfo()> fn);
+
 /// Publish current state/settings. Call when cn105 reports a change.
 esp_err_t publish_state(const cn105::Settings& s, const cn105::Status& st);
 esp_err_t publish_settings(const cn105::Settings& s);
