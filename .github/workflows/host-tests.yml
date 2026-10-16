@@ -17,22 +17,9 @@ on:
       - 'main/web_ui.cpp'
       - 'openapi.yaml'
       - '.github/workflows/host-tests.yml'
+  # No path filter on PRs: this is a required check, so it must always report.
   pull_request:
     branches: [main]
-    paths:
-      - 'components/hvac_mqtt/hvac_topics.cpp'
-      - 'components/hvac_mqtt/include/hvac_topics.h'
-      - 'components/hvac_group/group_proto.cpp'
-      - 'components/hvac_group/include/group_proto.h'
-      - 'components/cn105/**'
-      - 'test/host/**'
-      - 'test/ui/**'
-      - 'test/api/**'
-      - 'test/run_all.mjs'
-      - 'main/web/index.html'
-      - 'main/web_ui.cpp'
-      - 'openapi.yaml'
-      - '.github/workflows/host-tests.yml'
 
 jobs:
   host-tests:

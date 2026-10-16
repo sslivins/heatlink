@@ -10,15 +10,9 @@ on:
       - 'sdkconfig.defaults'
       - 'partitions.csv'
       - '.github/workflows/build.yml'
+  # No path filter on PRs: this is a required check, so it must always report.
   pull_request:
     branches: [main]
-    paths:
-      - 'main/**'
-      - 'components/**'
-      - 'CMakeLists.txt'
-      - 'sdkconfig.defaults'
-      - 'partitions.csv'
-      - '.github/workflows/build.yml'
 
 jobs:
   build:
