@@ -627,6 +627,7 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
   <div class="secnav" data-grp="settings">
     <button onclick="jumpTo('sec-display')">Display</button>
     <button onclick="jumpTo('sec-widevane')">Wide vane</button>
+    <button onclick="jumpTo('sec-park')">Off at setpoint</button>
     <button onclick="jumpTo('sec-wifi')">WiFi</button>
     <button onclick="jumpTo('sec-mqtt')">MQTT</button>
     <button onclick="jumpTo('sec-firmware')">Firmware</button>
@@ -705,6 +706,43 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
       not detected on your unit and may have no effect.</div>
     <div id="wvMsg" class="status hidden" style="margin:10px 0"></div>
     <button class="btn" id="wvDetectBtn" onclick="detectWideVane()">Detect now</button>
+  </div>
+
+  <div class="card" data-grp="settings" id="sec-park">
+    <h2>Off at setpoint</h2>
+    <div class="sub" style="margin:-4px 0 8px">Turns the head off once the room
+      reaches its target so the fan stops, and back on when the room drifts
+      past it. Heat, cool and dry only. The unit beeps each time it switches.</div>
+    <div class="row">
+      <label>Enabled</label>
+      <div class="toggle"><input type="checkbox" id="pkEn" onchange="pkDirty=true"><span class="slider" onclick="document.getElementById('pkEn').click()"></span></div>
+    </div>
+    <div class="row">
+      <label for="pkDelta">Turn back on when off by</label>
+      <select id="pkDelta" onchange="pkDirty=true"></select>
+    </div>
+    <div class="row">
+      <label for="pkMinOff">Minimum off time</label>
+      <select id="pkMinOff" onchange="pkDirty=true"></select>
+    </div>
+    <div class="row">
+      <label>Periodic air check</label>
+      <div class="toggle"><input type="checkbox" id="pkProbe" onchange="pkDirty=true"><span class="slider" onclick="document.getElementById('pkProbe').click()"></span></div>
+    </div>
+    <div class="sub" style="margin:0 0 8px">With the fan stopped the head only
+      senses the air around itself. A short fan run moves room air past the
+      sensor for a true reading.</div>
+    <div class="row">
+      <label for="pkInt">Check every</label>
+      <select id="pkInt" onchange="pkDirty=true"></select>
+    </div>
+    <div class="row">
+      <label for="pkDur">Run the fan for</label>
+      <select id="pkDur" onchange="pkDirty=true"></select>
+    </div>
+    <div class="row"><label>Status</label><span class="v" id="pkStatus">--</span></div>
+    <div id="pkMsg" class="status hidden" style="margin:10px 0"></div>
+    <button class="btn" onclick="savePark()">Save</button>
   </div>
 
   <div class="card" data-grp="settings" id="sec-wifi">
@@ -947,6 +985,15 @@ const I18N = { fr: {
   "Detect now":"Détecter maintenant","Detecting…":"Détection…",
   "Powered (detected)":"Motorisé (détecté)","Manual louver (no motor)":"Volet manuel (sans moteur)",
   "Not determined yet":"Pas encore déterminé","Not detected yet":"Pas encore détecté",
+  // Off at setpoint
+  "Off at setpoint":"Arrêt à la consigne","Enabled":"Activé",
+  "Turn back on when off by":"Rallumer après un écart de","Minimum off time":"Durée d’arrêt minimale",
+  "Periodic air check":"Vérification périodique de l’air","Check every":"Vérifier toutes les",
+  "Run the fan for":"Faire tourner le ventilateur pendant","Disabled":"Désactivé",
+  "Parked":"En veille","Checking room":"Vérification de la pièce","Running":"En marche",
+  "air check in":"vérification dans","Saved":"Enregistré","Save failed":"Échec de l’enregistrement",
+  "Turns the head off once the room reaches its target so the fan stops, and back on when the room drifts past it. Heat, cool and dry only. The unit beeps each time it switches.":"Éteint l’unité dès que la pièce atteint la consigne pour arrêter le ventilateur, puis la rallume quand la température s’en écarte. Chauffage, refroidissement et déshumidification uniquement. L’unité émet un bip à chaque changement.",
+  "With the fan stopped the head only senses the air around itself. A short fan run moves room air past the sensor for a true reading.":"Ventilateur arrêté, l’unité ne mesure que l’air qui l’entoure. Une courte ventilation fait passer l’air de la pièce sur le capteur pour une mesure fiable.",
   // WiFi settings
   "Other networks":"Autres réseaux","Scan":"Rechercher","Rescan":"Relancer",
   "Scanning…":"Recherche…","Tap Scan to search for networks":"Touchez Rechercher pour trouver des réseaux",
@@ -1202,6 +1249,7 @@ function showTab(name){
   netTabActive=(name==='settings');
   statusTabActive=(name==='status');
   if(statusTabActive && authState.role==='admin'){ refreshActivity(true); }
+  if(netTabActive && authState.role==='admin'){ loadPark(); }
   mqEditing=false;   // switching tabs commits/abandons any in-progress MQTT edit
   if(netTabActive && authState.role==='admin'){ closeJoin(); }
   // Re-sync stored auth state when opening Settings so the pending-change gate
@@ -1316,6 +1364,7 @@ async function refresh(){
       if(c.temperature!=null&&confirmField('temperature',c.temperature)) climate.temp=c.temperature;
       climate.room=(c.roomTemperature!=null&&c.roomTemperature>0)?c.roomTemperature:null;
       climate.operating=!!c.operating;
+      climate.park=c.park||null;
       if(c.fan&&confirmField('fan',c.fan))$('fan').value=c.fan;
       if(c.vane&&confirmField('vane',c.vane))$('vane').value=c.vane;
       if(c.wideVane&&confirmField('wideVane',c.wideVane))$('wideVane').value=c.wideVane;
@@ -1427,6 +1476,60 @@ async function saveTxPow(){
   }catch(e){ fail(i18n('Save failed')); }
 }
 // --- Wide-vane capability -------------------------------------------------
+// ── Off at setpoint (Settings) ─────────────────────────────────────────
+let pkDirty=false;
+function pkFill(id,vals,label,cur){
+  const sel=$(id);
+  const list=vals.includes(cur)?vals:[...vals,cur].sort((a,b)=>a-b);
+  sel.innerHTML=list.map(v=>'<option value="'+v+'">'+label(v)+'</option>').join('');
+  sel.value=String(cur);
+}
+const pkMin=v=>(v%60?(v/60).toFixed(1):(v/60))+' min';
+function pkStatusText(st){
+  if(!st||!st.enabled) return i18n('Disabled');
+  if(st.state==='parked'){
+    let t=i18n('Parked');
+    if(st.next_probe_s!=null) t+=' \u00b7 '+i18n('air check in')+' '+Math.max(1,Math.ceil(st.next_probe_s/60))+' min';
+    return t;
+  }
+  if(st.state==='probing') return i18n('Checking room');
+  if(st.state==='running') return i18n('Running');
+  return i18n('Off');
+}
+async function loadPark(force){
+  if(pkDirty&&!force) { return; }
+  try{
+    const r=await fetch('/api/park');
+    if(!r.ok) return;
+    const c=await r.json();
+    $('pkStatus').textContent=pkStatusText(c.status);
+    if(pkDirty&&!force) return;
+    $('pkEn').checked=!!c.enabled;
+    $('pkProbe').checked=!!c.probe_enabled;
+    const dl=v=>TUNIT==='F'?(v*1.8).toFixed(1)+' \u00b0F':v.toFixed(1)+' \u00b0C';
+    pkFill('pkDelta',[0.5,1,1.5,2,2.5,3],dl,c.delta_c);
+    pkFill('pkMinOff',[300,600,900,1200,1800,2700,3600],pkMin,c.min_off_s);
+    pkFill('pkInt',[600,900,1200,1800,2700,3600,5400,7200],pkMin,c.probe_interval_s);
+    pkFill('pkDur',[60,120,180,300,600],pkMin,c.probe_duration_s);
+  }catch(e){}
+}
+async function savePark(){
+  const msg=$('pkMsg');
+  const body={enabled:$('pkEn').checked,probe_enabled:$('pkProbe').checked,
+    delta_c:parseFloat($('pkDelta').value),min_off_s:parseInt($('pkMinOff').value,10),
+    probe_interval_s:parseInt($('pkInt').value,10),probe_duration_s:parseInt($('pkDur').value,10)};
+  try{
+    const r=await fetch('/api/park',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    if(r.status===401||r.status===403){ loadAuth(); return; }
+    if(!r.ok) throw 0;
+    pkDirty=false;
+    msg.textContent=i18n('Saved');msg.className='status ok';msg.classList.remove('hidden');
+    setTimeout(()=>msg.classList.add('hidden'),2500);
+    await loadPark(true);
+    refresh();
+  }catch(e){ msg.textContent=i18n('Save failed');msg.className='status err';msg.classList.remove('hidden'); }
+}
+
 const WV_STATUS={supported:'Powered (detected)',unsupported:'Manual louver (no motor)',
   inconclusive:'Not determined yet',unknown:'Not detected yet'};
 function applyCaps(caps){
@@ -1502,7 +1605,13 @@ function renderClimate(){
   $('dialWrap').classList.toggle('off',!climate.power);
   const op=$('opState');
   let opTxt;
+  const pk=climate.park;
   if(!climate.power){ opTxt='Off'; }
+  else if(pk&&pk.parked){
+    opTxt=i18n('Parked');
+    if(pk.next_probe_s!=null) opTxt+=' \u00b7 '+i18n('air check in')+' '+Math.max(1,Math.ceil(pk.next_probe_s/60))+' min';
+  }
+  else if(pk&&pk.state==='probing'&&!climate.operating){ opTxt='Checking room'; }
   else if(!climate.operating){ opTxt='Idle'; }
   else {
     switch(climate.mode){
@@ -2748,6 +2857,7 @@ async function pollOnce(){
   if(tickN%6===0){ await refreshUpdate(); await loadMqtt(); }
   if(tickN%2===0) await refreshGroup();
   if(statusTabActive && tickN%2===0) await refreshActivity(false);
+  if(netTabActive && tickN%2===0) await loadPark();
   tickN++;
 }
 function schedule(ms){ clearTimeout(pollTimer); pollTimer=setTimeout(tick,ms); }

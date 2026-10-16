@@ -188,6 +188,41 @@ buttons** (reset brownout count, reset WiFi drops), so the same diagnostics the
 web UI shows are available as native HA entities you can chart, alert, or
 automate on.
 
+## Off at setpoint (parking)
+
+Mitsubishi wall heads keep the indoor fan running after they reach their
+setpoint (thermo-off), and there is no CN105 command to stop it. With **Settings
+→ Off at setpoint** enabled, HeatLink emulates it:
+
+- **Park.** A head in HEAT, COOL or DRY that has been at its setpoint with the
+  compressor idle for 60 s is powered off. Its *desired* state stays on: the web
+  UI, Home Assistant (`mode: heat`, `action: idle`) and zone peers still see it
+  as on. It shows **Parked** on the climate card. Defrost, preheat, warm-up and
+  standby never count as "at setpoint". FAN and AUTO never park.
+- **Resume.** It powers back on when the room drifts past the setpoint by the
+  restart threshold (0.5–3 °C, default 0.5) after the minimum off time
+  (5–60 min, default 5; this protects the outdoor unit from short cycling).
+- **Air check (probe).** With the fan stopped, the head only senses the air
+  around itself. By default it runs every 15 min for 2 min of real airflow
+  (preheat time doesn't count) and resumes if the room needs it, else parks
+  again. The interval is never shorter than the minimum off time.
+- **Your commands win.** Turning a head off makes it really off (it is never
+  re-parked or probed). Changing the mode or setpoint while parked starts an air
+  check. Turning the feature off while parked powers the unit back on. The
+  parked state survives a reboot.
+
+Home Assistant gets `parked`/`park_state` in the climate entity's attributes and
+a **Parked** binary sensor. Park/resume transitions are written to the activity
+log; routine air checks aren't.
+
+Limitations:
+- The unit **beeps** each time it is powered off or on.
+- Pressing **OFF on the IR remote while a head is parked** can't be detected
+  (the unit is already off), so the next air check turns it back on. Use the
+  web UI or HA to turn a parked head off. Pressing ON on the remote while parked
+  is detected and starts an air check.
+- As before, remote presses within 30 s of a HeatLink command are reverted.
+
 ## Build / flash
 
 ESP-IDF **v6.1** (matches CI; `>=6.0` required).
@@ -262,6 +297,8 @@ access**). Optional per-endpoint API-key auth can be enabled there.
 | `POST` | `/api/settings` | apply any subset of `{power,mode,temperature,fan,vane,wideVane,remoteTemp}` |
 | `GET`  | `/api/capabilities` | detected unit capabilities (e.g. wide-vane) + override |
 | `POST` | `/api/capabilities` | trigger a capability probe / set an override |
+| `GET`  | `/api/park` | off-at-setpoint config + live status |
+| `POST` | `/api/park` | (admin) update off-at-setpoint config (partial; values are clamped) |
 | `GET`  | `/api/events` | activity log (who changed what, paginated) |
 | `DELETE` | `/api/events` | clear the activity log |
 
@@ -377,4 +414,5 @@ set `PROJECT_VER` by hand before running it.
 | `components/cn105/` | Mitsubishi CN105 serial protocol (port of SwiCago/HeatPump) |
 | `components/m5pm1/` | PY32 PMIC I²C driver + charge governor |
 | `components/hvac_mqtt/` | MQTT bridge + Home Assistant discovery |
+| `components/park/` | off-at-setpoint state machine (pure C++, host-tested); glue in `main/park_ctl.cpp` |
 | `.github/workflows/` | `build.yml`, `create-release.yml` |

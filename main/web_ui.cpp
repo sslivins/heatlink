@@ -2,6 +2,7 @@
 /// @brief On-device diagnostics/control web server (implementation).
 
 #include "web_ui.h"
+#include "park_ctl.h"
 #include "wifi_manager.h"
 #include "ota.h"
 #include "auth_manager.h"
@@ -308,6 +309,22 @@ esp_err_t handle_status(httpd_req_t* req) {
     return ESP_OK;
 }
 
+// Off-at-setpoint runtime status (shared by /api/settings and /api/park).
+cJSON* park_status_json() {
+    park_ctl::Snapshot ps = park_ctl::snapshot();
+    cJSON* o = cJSON_CreateObject();
+    cJSON_AddBoolToObject(o, "enabled", ps.enabled);
+    cJSON_AddStringToObject(o, "state", park::state_str(ps.state));
+    cJSON_AddBoolToObject(o, "parked", ps.parked);
+    cJSON_AddStringToObject(o, "reason", ps.reason.c_str());
+    cJSON_AddBoolToObject(o, "unit_on", ps.unit_on);
+    if (ps.next_probe_s >= 0)
+        cJSON_AddNumberToObject(o, "next_probe_s", ps.next_probe_s);
+    else
+        cJSON_AddNullToObject(o, "next_probe_s");
+    return o;
+}
+
 // ── GET /api/settings ──────────────────────────────────────────────────
 esp_err_t handle_get_settings(httpd_req_t* req) {
     set_cors(req);
@@ -345,6 +362,7 @@ esp_err_t handle_get_settings(httpd_req_t* req) {
     cJSON_AddNumberToObject(root, "roomTemperature", sta.roomTemperature);
     cJSON_AddBoolToObject(root, "operating", sta.operating);
     cJSON_AddNumberToObject(root, "compressorFrequency", sta.compressorFrequency);
+    cJSON_AddItemToObject(root, "park", park_status_json());
 
     // Extended telemetry — only emitted when the unit actually reported the
     // field, so the UI can render "--" for anything absent.
@@ -456,6 +474,81 @@ esp_err_t handle_post_settings(httpd_req_t* req) {
 
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_sendstr(req, "{\"status\":\"ok\"}");
+}
+
+// ── GET /api/park ──────────────────────────────────────────────────────
+// Off-at-setpoint config + live status.
+cJSON* park_config_json(const park::Config& c) {
+    cJSON* o = cJSON_CreateObject();
+    cJSON_AddBoolToObject(o, "enabled", c.enabled);
+    cJSON_AddNumberToObject(o, "delta_c", c.delta_c);
+    cJSON_AddNumberToObject(o, "min_off_s", c.min_off_s);
+    cJSON_AddBoolToObject(o, "probe_enabled", c.probe_enabled);
+    cJSON_AddNumberToObject(o, "probe_interval_s", c.probe_interval_s);
+    cJSON_AddNumberToObject(o, "probe_duration_s", c.probe_duration_s);
+    cJSON_AddItemToObject(o, "status", park_status_json());
+    return o;
+}
+
+esp_err_t send_park(httpd_req_t* req, const park::Config& c) {
+    cJSON* root = park_config_json(c);
+    char* str = cJSON_PrintUnformatted(root);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, str);
+    cJSON_free(str);
+    cJSON_Delete(root);
+    return ESP_OK;
+}
+
+esp_err_t handle_park_get(httpd_req_t* req) {
+    set_cors(req);
+    REQUIRE_API_AUTH(req);
+    return send_park(req, park_ctl::config());
+}
+
+// ── POST /api/park ─────────────────────────────────────────────────────
+// Admin: partial update of the off-at-setpoint tunables. Out-of-range values
+// are clamped (see park::sanitize); the response echoes what was applied.
+esp_err_t handle_park_post(httpd_req_t* req) {
+    set_cors(req);
+    REQUIRE_ADMIN(req);
+    char* body = recv_body(req);
+    if (!body) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Empty or oversized body");
+        return ESP_FAIL;
+    }
+    cJSON* json = cJSON_Parse(body);
+    free(body);
+    if (!json || !cJSON_IsObject(json)) {
+        if (json) cJSON_Delete(json);
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid JSON");
+        return ESP_FAIL;
+    }
+    park::Config c = park_ctl::config();
+    const bool was = c.enabled;
+    const cJSON* v;
+    if ((v = cJSON_GetObjectItem(json, "enabled")) && cJSON_IsBool(v))
+        c.enabled = cJSON_IsTrue(v);
+    if ((v = cJSON_GetObjectItem(json, "delta_c")) && cJSON_IsNumber(v))
+        c.delta_c = (float)v->valuedouble;
+    if ((v = cJSON_GetObjectItem(json, "min_off_s")) && cJSON_IsNumber(v) && v->valuedouble >= 0)
+        c.min_off_s = (uint32_t)v->valuedouble;
+    if ((v = cJSON_GetObjectItem(json, "probe_enabled")) && cJSON_IsBool(v))
+        c.probe_enabled = cJSON_IsTrue(v);
+    if ((v = cJSON_GetObjectItem(json, "probe_interval_s")) && cJSON_IsNumber(v) && v->valuedouble >= 0)
+        c.probe_interval_s = (uint32_t)v->valuedouble;
+    if ((v = cJSON_GetObjectItem(json, "probe_duration_s")) && cJSON_IsNumber(v) && v->valuedouble >= 0)
+        c.probe_duration_s = (uint32_t)v->valuedouble;
+    cJSON_Delete(json);
+
+    park::Config applied = park_ctl::set_config(c);
+    if (applied.enabled != was) {
+        std::string who = web_actor_name(req);
+        events::log(events::Cat::Power, events::Actor::WebUI,
+                    applied.enabled ? "Off at setpoint enabled" : "Off at setpoint disabled",
+                    who.empty() ? "" : who.c_str());
+    }
+    return send_park(req, applied);
 }
 
 // ── GET /api/capabilities ──────────────────────────────────────────────
@@ -2800,7 +2893,7 @@ esp_err_t init(const Hooks& hooks) {
 
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
     cfg.uri_match_fn = httpd_uri_match_wildcard;
-    cfg.max_uri_handlers = 52;  // must exceed the uris[] count below
+    cfg.max_uri_handlers = 56;  // must exceed the uris[] count below
     cfg.stack_size = 8192;
     // The default 7 sockets reserve 3 for internal use, leaving only 4 for
     // clients — fewer than the 6 keep-alive connections a single browser tab
@@ -2832,6 +2925,8 @@ esp_err_t init(const Hooks& hooks) {
         {"/api/settings",            HTTP_POST,    handle_post_settings,  nullptr},
         {"/api/capabilities",        HTTP_GET,     handle_capabilities_get,  nullptr},
         {"/api/capabilities",        HTTP_POST,    handle_capabilities_post, nullptr},
+        {"/api/park",                HTTP_GET,     handle_park_get,       nullptr},
+        {"/api/park",                HTTP_POST,    handle_park_post,      nullptr},
         {"/api/ota",                 HTTP_POST,    handle_ota_upload,     nullptr},
         {"/api/ota/url",             HTTP_POST,    handle_ota_url,        nullptr},
         {"/api/ota/status",          HTTP_GET,     handle_ota_status,     nullptr},
@@ -2872,7 +2967,7 @@ esp_err_t init(const Hooks& hooks) {
         {"/api/events",              HTTP_DELETE,   handle_events_clear,   nullptr},
         {"/api/*",                   HTTP_OPTIONS, handle_options,        nullptr},
     };
-    static_assert(sizeof(uris) / sizeof(uris[0]) <= 52, "raise max_uri_handlers");
+    static_assert(sizeof(uris) / sizeof(uris[0]) <= 56, "raise max_uri_handlers");
     for (const auto& u : uris) {
         if (httpd_register_uri_handler(s_server, &u) != ESP_OK)
             ESP_LOGE(TAG, "failed to register %s", u.uri);

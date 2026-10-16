@@ -395,8 +395,9 @@ static esp_err_t publish_group_entity(const char* component, const char* name,
                                       const char* id_suffix,
                                       const char* value_template,
                                       const char* device_class,
-                                      const char* icon) {
-    std::string state_topic = t("/group/state");
+                                      const char* icon,
+                                      const char* state_suffix = "/group/state") {
+    std::string state_topic = t(state_suffix);
     std::string avail_topic = t("/availability");
     std::string unique_id   = g_cfg.device_uid + "_" + id_suffix;
 
@@ -509,8 +510,15 @@ std::string ha_action(const cn105::Settings& s, const cn105::Status& st) {
 }
 }  // namespace
 
+namespace {
+std::function<ParkInfo()> g_park_provider;
+}  // namespace
+
+void set_park_provider(std::function<ParkInfo()> fn) { g_park_provider = std::move(fn); }
+
 esp_err_t publish_state(const cn105::Settings& s, const cn105::Status& st) {
     if (!g_client) return ESP_ERR_INVALID_STATE;
+    ParkInfo park = g_park_provider ? g_park_provider() : ParkInfo{};
     cJSON* root = cJSON_CreateObject();
     cJSON_AddStringToObject(root, "mode", ha_mode(s).c_str());
     cJSON_AddStringToObject(root, "action", ha_action(s, st).c_str());
@@ -520,6 +528,9 @@ esp_err_t publish_state(const cn105::Settings& s, const cn105::Status& st) {
     cJSON_AddStringToObject(root, "vane", s.vane.empty() ? "AUTO" : s.vane.c_str());
     cJSON_AddBoolToObject(root, "operating", st.operating);
     cJSON_AddNumberToObject(root, "compressorFrequency", st.compressorFrequency);
+    cJSON_AddBoolToObject(root, "park_enabled", park.enabled);
+    cJSON_AddBoolToObject(root, "parked", park.parked);
+    cJSON_AddStringToObject(root, "park_state", park.state ? park.state : "off");
 
     char* payload = cJSON_PrintUnformatted(root);
     std::string topic = t("/state");
@@ -621,6 +632,13 @@ esp_err_t publish_discovery(const cn105::Settings& s) {
     cJSON_AddStringToObject(root, "action_topic", state_topic.c_str());
     cJSON_AddStringToObject(root, "action_template", "{{ value_json.action }}");
 
+    // Off-at-setpoint status as climate attributes (a parked head reads as
+    // mode=heat/cool, action=idle, parked=true).
+    cJSON_AddStringToObject(root, "json_attributes_topic", state_topic.c_str());
+    cJSON_AddStringToObject(root, "json_attributes_template",
+                            "{{ {'parked': value_json.parked | default(false), "
+                            "'park_state': value_json.park_state | default('off')} | tojson }}");
+
     cJSON_AddItemToObject(root, "device", make_device_block());
 
     char* payload = cJSON_PrintUnformatted(root);
@@ -629,6 +647,11 @@ esp_err_t publish_discovery(const cn105::Settings& s) {
     ESP_LOGI(TAG, "publish_discovery -> %s", topic.c_str());
     if (payload) cJSON_free(payload);
     cJSON_Delete(root);
+
+    // "Parked": held off at setpoint by the off-at-setpoint feature.
+    publish_group_entity("binary_sensor", "Parked", "parked",
+                         "{{ 'ON' if value_json.parked else 'OFF' }}",
+                         nullptr, "mdi:fan-off", "/state");
     return id < 0 ? ESP_FAIL : ESP_OK;
 }
 

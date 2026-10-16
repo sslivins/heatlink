@@ -21,11 +21,13 @@
 #include "events.h"
 #include "capability.h"
 #include "status_led.h"
+#include "park_ctl.h"
 
 #include <cstdlib>
 #include <cstdio>
 #include <cstring>
 #include <cctype>
+#include <cmath>
 #include <strings.h>
 #include <string>
 #include <mutex>
@@ -182,12 +184,14 @@ void pmic_task(void*) {
 
 // --- CN105 task: pump protocol, publish changes ---
 void cn105_task(void*) {
+    // Publish the park overlay (power ON while parked), never the raw unit.
     g_hp.setSettingsChangedCallback([](const cn105::Settings& s) {
-        hvac_mqtt::publish_settings(s);
-        hvac_mqtt::publish_state(s, g_hp.getStatus());
+        cn105::Settings e = park_ctl::overlay(s);
+        hvac_mqtt::publish_settings(e);
+        hvac_mqtt::publish_state(e, g_hp.getStatus());
     });
     g_hp.setStatusChangedCallback([](const cn105::Status& st) {
-        hvac_mqtt::publish_state(g_hp.getSettings(), st);
+        hvac_mqtt::publish_state(park_ctl::overlay(g_hp.getSettings()), st);
     });
 
     g_hp.enableExternalUpdate();
@@ -195,8 +199,13 @@ void cn105_task(void*) {
     g_hp.connect(static_cast<uart_port_t>(CONFIG_CN105_UART_PORT),
                  CONFIG_CN105_UART_TX_PIN, CONFIG_CN105_UART_RX_PIN);
 
+    int loops = 0;
     while (true) {
         g_hp.update();
+        if (++loops >= 10) {  // ~1 Hz
+            loops = 0;
+            park_ctl::tick();
+        }
         vTaskDelay(pdMS_TO_TICKS(100));
     }
 }
@@ -205,7 +214,11 @@ void cn105_task(void*) {
 void on_mqtt_command(const hvac_mqtt::Command& cmd) {
     using K = hvac_mqtt::Command::Kind;
     switch (cmd.kind) {
-        case K::Power:       g_hp.setPowerSetting(cmd.value); break;
+        // Power goes through the off-at-setpoint controller: it owns the
+        // physical power while a head is parked (desired ON, unit held off).
+        case K::Power:
+            park_ctl::set_desired_power(strcasecmp(cmd.value.c_str(), "off") != 0);
+            break;
         case K::Mode: {
             // Home Assistant (and the group coordinator) express "off" as a
             // climate mode, but the CN105 keeps power and mode separate. The
@@ -216,16 +229,24 @@ void on_mqtt_command(const hvac_mqtt::Command& cmd) {
             // "off" powers the unit down; any real mode powers it on (mapping
             // HA's "fan_only" to the native "FAN").
             if (strcasecmp(cmd.value.c_str(), "off") == 0) {
-                g_hp.setPowerSetting("OFF");
+                park_ctl::set_desired_power(false);
             } else {
-                g_hp.setPowerSetting("ON");
                 const char* mode = cmd.value.c_str();
                 if (strcasecmp(mode, "fan_only") == 0) mode = "FAN";
+                bool changed = strcasecmp(g_hp.getSettings().mode.c_str(), mode) != 0;
                 g_hp.setModeSetting(mode);
+                park_ctl::set_desired_power(true);
+                if (changed) park_ctl::notify_intent_change();
             }
             break;
         }
-        case K::Temperature: g_hp.setTemperature(strtof(cmd.value.c_str(), nullptr)); break;
+        case K::Temperature: {
+            float t = strtof(cmd.value.c_str(), nullptr);
+            bool changed = std::fabs(g_hp.getSettings().temperature - t) > 0.01f;
+            g_hp.setTemperature(t);
+            if (changed) park_ctl::notify_intent_change();
+            break;
+        }
         case K::Fan:         g_hp.setFanSpeed(cmd.value); break;
         case K::Vane:        g_hp.setVaneSetting(cmd.value); break;
         case K::WideVane:    g_hp.setWideVaneSetting(cmd.value);
@@ -458,12 +479,13 @@ extern "C" void app_main() {
     // current state so Home Assistant re-syncs after a broker drop. Retained
     // discovery alone is lost if it was queued before the link was up.
     hvac_mqtt::set_on_connected([] {
-        hvac_mqtt::publish_discovery(g_hp.getSettings());
+        cn105::Settings eff = park_ctl::overlay(g_hp.getSettings());
+        hvac_mqtt::publish_discovery(eff);
         hvac_mqtt::publish_update_discovery();
         hvac_mqtt::publish_diag_discovery();
         hvac_mqtt::publish_group_discovery();
-        hvac_mqtt::publish_settings(g_hp.getSettings());
-        hvac_mqtt::publish_state(g_hp.getSettings(), g_hp.getStatus());
+        hvac_mqtt::publish_settings(eff);
+        hvac_mqtt::publish_state(eff, g_hp.getStatus());
         ota::UpdateInfo u = ota::get_update_info();
         hvac_mqtt::publish_update_state(u.current_version, u.latest_version, u.release_url);
         diag::Snapshot ds = diag::get();
@@ -475,7 +497,7 @@ extern "C" void app_main() {
     // On-device web UI (REST + dashboard). Reuses on_mqtt_command so the web
     // and MQTT control paths funnel through identical apply logic.
     web_ui::Hooks hooks;
-    hooks.get_settings   = [] { return g_hp.getSettings(); };
+    hooks.get_settings   = [] { return park_ctl::overlay(g_hp.getSettings()); };
     hooks.get_status     = [] { return g_hp.getStatus(); };
     hooks.unit_connected = [] { return g_hp.isConnected(); };
     hooks.mqtt_connected = [] { return hvac_mqtt::is_connected(); };
@@ -553,6 +575,40 @@ extern "C" void app_main() {
         }
     });
     ota::start_update_checker();
+
+    // Off-at-setpoint ("parking"): must be initialised before the CN105 task
+    // ticks it, so a head parked before a reboot is restored, not adopted.
+    {
+        park_ctl::Hooks ph;
+        ph.read = [] {
+            park::Inputs in;
+            cn105::Settings s = g_hp.getSettings();
+            cn105::Status st = g_hp.getStatus();
+            in.connected = g_hp.isConnected();
+            in.phys_on   = s.power == "ON";
+            in.mode      = s.mode;
+            in.setpoint  = s.temperature;
+            in.room      = st.roomTemperature;
+            in.operating = st.operating;
+            in.sub_mode  = st.subMode;
+            return in;
+        };
+        ph.set_power = [](bool on) { g_hp.setPowerSetting(on ? "ON" : "OFF"); };
+        ph.on_change = [] {
+            cn105::Settings e = park_ctl::overlay(g_hp.getSettings());
+            hvac_mqtt::publish_settings(e);
+            hvac_mqtt::publish_state(e, g_hp.getStatus());
+        };
+        park_ctl::init(ph);
+        hvac_mqtt::set_park_provider([] {
+            park_ctl::Snapshot ps = park_ctl::snapshot();
+            hvac_mqtt::ParkInfo pi;
+            pi.enabled = ps.enabled;
+            pi.parked  = ps.parked;
+            pi.state   = park::state_str(ps.state);
+            return pi;
+        });
+    }
 
     // Heat pump protocol.
     xTaskCreate(cn105_task, "cn105", 8192, nullptr, 6, nullptr);

@@ -460,6 +460,53 @@ paths:
               schema: { $ref: '#/components/schemas/StatusOk' }
         '400':
           description: Empty, oversized or invalid JSON body
+  /api/park:
+    get:
+      tags: [Climate]
+      summary: Off-at-setpoint config and status
+      description: |
+        Mitsubishi heads keep the indoor fan running at thermo-off. With this
+        feature on, a HEAT/COOL/DRY head that has reached its setpoint is powered
+        off ("parked") while its desired state stays on (reported as power ON),
+        and powered back on when the room drifts `delta_c` past the setpoint
+        (after `min_off_s`) or a periodic probe run finds it needs conditioning.
+      security:
+        - ApiKeyAuth: []
+        - SessionCookie: []
+      responses:
+        '200':
+          description: Current config and live status
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ParkConfig' }
+    post:
+      tags: [Climate]
+      summary: Update off-at-setpoint config (admin)
+      description: |
+        Partial update; omitted fields keep their value. Out-of-range values are
+        clamped: `delta_c` 0.5–3.0 in 0.5 steps, `min_off_s` 300–3600,
+        `probe_interval_s` max(min_off_s)–7200, `probe_duration_s` 60–600.
+        Disabling while parked powers the unit back on.
+      security:
+        - ApiKeyAuth: []
+        - SessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ParkConfigUpdate' }
+      responses:
+        '200':
+          description: Applied (sanitized) config and live status
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ParkConfig' }
+        '400':
+          description: Empty, oversized or invalid JSON body
+        '401':
+          description: Not authorized
+        '403':
+          description: Admin access required
   /api/device:
     post:
       tags: [System]
@@ -989,6 +1036,32 @@ components:
         subMode: { type: string, description: Only present when reported by the unit }
         stage: { type: string, description: Only present when reported by the unit }
         errorCode: { type: string, description: Only present when reported by the unit }
+        park: { $ref: '#/components/schemas/ParkStatus' }
+    ParkStatus:
+      type: object
+      description: Off-at-setpoint runtime status. While parked, `power` reports ON.
+      properties:
+        enabled: { type: boolean }
+        state: { type: string, enum: [off, running, parked, probing] }
+        parked: { type: boolean, description: Desired on but held off at setpoint }
+        reason: { type: string, description: 'Why parked/probing, e.g. "setpoint reached", "scheduled probe"' }
+        next_probe_s: { type: integer, nullable: true, description: Seconds until the next probe while parked, else null }
+        unit_on: { type: boolean, description: Physical unit power (false while parked even though power reports ON) }
+    ParkConfigUpdate:
+      type: object
+      properties:
+        enabled: { type: boolean }
+        delta_c: { type: number, description: Restart threshold past setpoint, °C }
+        min_off_s: { type: integer, description: Minimum parked time before a drift restart }
+        probe_enabled: { type: boolean }
+        probe_interval_s: { type: integer, description: Parked time between probe runs }
+        probe_duration_s: { type: integer, description: Airflow time per probe run }
+    ParkConfig:
+      allOf:
+        - $ref: '#/components/schemas/ParkConfigUpdate'
+        - type: object
+          properties:
+            status: { $ref: '#/components/schemas/ParkStatus' }
     SettingsUpdate:
       type: object
       properties:
