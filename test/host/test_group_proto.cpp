@@ -417,6 +417,8 @@ static void test_replica_remove_and_readd() {
 // Merge is symmetric: A⊕B and B⊕A converge to the same state.
 static bool replicas_equal(const GroupReplica& a, const GroupReplica& b) {
     if (a.label.value != b.label.value) return false;
+    if (a.slice.value != b.slice.value) return false;
+    if (a.park.value != b.park.value) return false;
     if (a.members.size() != b.members.size()) return false;
     for (const auto& m : a.members) {
         if (replica_member_name(b, m.uid) != m.name.value) return false;
@@ -483,6 +485,44 @@ static void test_merge_idempotent_and_no_delta() {
     CHECK_TRUE(replicas_equal(m, once));
 }
 
+static void test_merge_slice_lww() {
+    // Time-slice config (#133): unset by default, LWW like the label, and an
+    // unchanged write is not a new version.
+    GroupReplica a = seeded_replica();
+    CHECK_TRUE(a.slice.version == 0);
+    GroupReplica b = a;
+    CHECK_TRUE(replica_set_slice(a, "1,600,1800,60", "aaaa"));
+    CHECK_FALSE(replica_set_slice(a, "1,600,1800,60", "aaaa"));
+    CHECK_TRUE(merge_replica(b, a));
+    CHECK_EQ(b.slice.value, "1,600,1800,60");
+    replica_set_slice(b, "0,600,1800,60", "bbbb");   // b disables after seeing a's write
+    GroupReplica ab = a; merge_replica(ab, b);
+    GroupReplica ba = b; merge_replica(ba, a);
+    CHECK_EQ(ab.slice.value, "0,600,1800,60");
+    CHECK_TRUE(replicas_equal(ab, ba));
+    // A later label write is ordered after the slice write.
+    replica_set_label(ab, "Cabin", "aaaa");
+    CHECK_TRUE(ab.label.version > ab.slice.version);
+}
+
+static void test_merge_park_lww() {
+    // Shared off-at-setpoint config: independent LWW register.
+    GroupReplica a = seeded_replica();
+    CHECK_TRUE(a.park.version == 0);
+    GroupReplica b = a;
+    CHECK_TRUE(replica_set_park(a, "1,300,1,900,120", "aaaa"));
+    CHECK_FALSE(replica_set_park(a, "1,300,1,900,120", "aaaa"));
+    replica_set_slice(b, "1,600,1800,60", "bbbb");
+    GroupReplica ab = a; merge_replica(ab, b);
+    GroupReplica ba = b; merge_replica(ba, a);
+    CHECK_EQ(ab.park.value, "1,300,1,900,120");
+    CHECK_EQ(ab.slice.value, "1,600,1800,60");
+    CHECK_TRUE(replicas_equal(ab, ba));
+    replica_set_park(ba, "0,300,1,900,120", "bbbb");
+    CHECK_TRUE(merge_replica(ab, ba));
+    CHECK_EQ(ab.park.value, "0,300,1,900,120");
+}
+
 int main() {
     test_hex_roundtrip();
     test_identity_validation();
@@ -510,6 +550,8 @@ int main() {
     test_merge_convergence_names();
     test_merge_remove_wins();
     test_merge_idempotent_and_no_delta();
+    test_merge_slice_lww();
+    test_merge_park_lww();
     if (g_failures == 0) {
         std::printf("OK - all host group-protocol tests passed\n");
         return 0;

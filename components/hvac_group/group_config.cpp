@@ -104,6 +104,18 @@ std::string serialize_replica_locked(const GroupReplica& r) {
     cJSON_AddStringToObject(lbl, "v", r.label.value.c_str());
     cJSON_AddNumberToObject(lbl, "ver", static_cast<double>(r.label.version));
     cJSON_AddStringToObject(lbl, "o", r.label.origin.c_str());
+    if (r.slice.version != 0) {
+        cJSON* sl = cJSON_AddObjectToObject(root, "sl");
+        cJSON_AddStringToObject(sl, "v", r.slice.value.c_str());
+        cJSON_AddNumberToObject(sl, "ver", static_cast<double>(r.slice.version));
+        cJSON_AddStringToObject(sl, "o", r.slice.origin.c_str());
+    }
+    if (r.park.version != 0) {
+        cJSON* pk = cJSON_AddObjectToObject(root, "pk");
+        cJSON_AddStringToObject(pk, "v", r.park.value.c_str());
+        cJSON_AddNumberToObject(pk, "ver", static_cast<double>(r.park.version));
+        cJSON_AddStringToObject(pk, "o", r.park.origin.c_str());
+    }
     cJSON* ms = cJSON_AddArrayToObject(root, "m");
     for (const auto& m : r.members) {
         cJSON* mo = cJSON_CreateObject();
@@ -128,6 +140,17 @@ std::string serialize_replica_locked(const GroupReplica& r) {
     return out;
 }
 
+// The encoded time-slice / shared park configs (comma-separated integers);
+// decoded and sanitized by their components, so only shape is checked here.
+bool is_valid_slice_value(const char* v) {
+    size_t n = 0;
+    for (; v[n]; ++n) {
+        if (n >= 32) return false;
+        if (!((v[n] >= '0' && v[n] <= '9') || v[n] == ',')) return false;
+    }
+    return n > 0;
+}
+
 // Read a uint64 Lamport clock from a cJSON number (bounded, never negative).
 uint64_t json_u64(const cJSON* n) {
     if (!n || !cJSON_IsNumber(n) || n->valuedouble < 0) return 0;
@@ -149,6 +172,26 @@ bool parse_replica(const std::string& json, GroupReplica& out) {
         out.label.version = json_u64(cJSON_GetObjectItem(lbl, "ver"));
         out.label.origin  = (o && cJSON_IsString(o) && is_valid_uid(o->valuestring))
                                 ? o->valuestring : "";
+    }
+    if (const cJSON* sl = cJSON_GetObjectItem(root, "sl")) {
+        const cJSON* v = cJSON_GetObjectItem(sl, "v");
+        const cJSON* o = cJSON_GetObjectItem(sl, "o");
+        if (v && cJSON_IsString(v) && is_valid_slice_value(v->valuestring)) {
+            out.slice.value   = v->valuestring;
+            out.slice.version = json_u64(cJSON_GetObjectItem(sl, "ver"));
+            out.slice.origin  = (o && cJSON_IsString(o) && is_valid_uid(o->valuestring))
+                                    ? o->valuestring : "";
+        }
+    }
+    if (const cJSON* pk = cJSON_GetObjectItem(root, "pk")) {
+        const cJSON* v = cJSON_GetObjectItem(pk, "v");
+        const cJSON* o = cJSON_GetObjectItem(pk, "o");
+        if (v && cJSON_IsString(v) && is_valid_slice_value(v->valuestring)) {
+            out.park.value   = v->valuestring;
+            out.park.version = json_u64(cJSON_GetObjectItem(pk, "ver"));
+            out.park.origin  = (o && cJSON_IsString(o) && is_valid_uid(o->valuestring))
+                                   ? o->valuestring : "";
+        }
     }
     if (const cJSON* ms = cJSON_GetObjectItem(root, "m"); ms && cJSON_IsArray(ms)) {
         const cJSON* mo = nullptr;
@@ -317,6 +360,34 @@ esp_err_t set_label(const std::string& label) {
     if (s_cfg.group_id.empty()) return ESP_ERR_INVALID_STATE;
     replica_set_label(s_replica, sanitize_label(label), s_self_uid);
     reproject_locked();
+    return persist_locked(s_cfg);
+}
+
+std::string slice_config() {
+    Lock lk;
+    if (s_cfg.group_id.empty()) return "";
+    return s_replica.slice.value;
+}
+
+esp_err_t set_slice_config(const std::string& encoded) {
+    Lock lk;
+    if (s_cfg.group_id.empty()) return ESP_ERR_INVALID_STATE;
+    if (!is_valid_slice_value(encoded.c_str())) return ESP_ERR_INVALID_ARG;
+    if (!replica_set_slice(s_replica, encoded, s_self_uid)) return ESP_OK;
+    return persist_locked(s_cfg);
+}
+
+std::string park_config() {
+    Lock lk;
+    if (s_cfg.group_id.empty()) return "";
+    return s_replica.park.value;
+}
+
+esp_err_t set_park_config(const std::string& encoded) {
+    Lock lk;
+    if (s_cfg.group_id.empty()) return ESP_ERR_INVALID_STATE;
+    if (!is_valid_slice_value(encoded.c_str())) return ESP_ERR_INVALID_ARG;
+    if (!replica_set_park(s_replica, encoded, s_self_uid)) return ESP_OK;
     return persist_locked(s_cfg);
 }
 

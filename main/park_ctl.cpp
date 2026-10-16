@@ -3,6 +3,7 @@
 
 #include "park_ctl.h"
 #include "events.h"
+#include "group_config.h"
 
 #include <mutex>
 
@@ -21,6 +22,26 @@ park::Machine s_m;
 Hooks         s_hooks;
 bool          s_saved_managed = false;
 bool          s_unit_on = false;
+park::Config  s_user;              // this head's own settings (NVS)
+std::string   s_shared;            // outdoor-unit config from the group ("" = none)
+bool          s_slice_active = false;
+bool          s_quiet = false;     // air check running at QUIET; s_saved_fan is the user's
+std::string   s_saved_fan;
+uint32_t      s_quiet_at = 0;
+constexpr const char* kQuietFan = "QUIET";
+
+// The head's settings with the outdoor unit's shared fields applied.
+park::Config configured_locked() {
+    park::Config c = s_user;
+    if (!s_shared.empty()) park::decode_shared(s_shared, c);
+    return c;
+}
+
+park::Config effective_locked() {
+    park::Config c = configured_locked();
+    if (s_slice_active) c.enabled = true;
+    return c;
+}
 
 uint32_t now_s() { return static_cast<uint32_t>(esp_timer_get_time() / 1000000); }
 
@@ -65,6 +86,55 @@ void persist_managed_locked() {
     s_saved_managed = m;
 }
 
+void persist_fan_locked() {
+    nvs_handle_t h;
+    if (nvs_open(kNs, NVS_READWRITE, &h) != ESP_OK) return;
+    if (s_quiet) nvs_set_str(h, "pfan", s_saved_fan.c_str());
+    else nvs_erase_key(h, "pfan");
+    nvs_commit(h);
+    nvs_close(h);
+}
+
+// Keep the fan at QUIET exactly while probing. Runs after every step (and
+// after a reboot mid-probe, where s_quiet was restored from NVS).
+void sync_fan() {
+    if (!s_hooks.set_fan || !s_hooks.get_fan) return;
+    const std::string fan = s_hooks.get_fan();  // outside s_mtx (CN105 lock)
+    std::string send;
+    bool republish = false;
+    {
+        std::lock_guard<std::mutex> lk(s_mtx);
+        const bool probing = s_m.enabled() && s_m.state() == park::State::Probing;
+        if (probing && !s_quiet) {
+            if (fan.empty()) return;  // not connected yet
+            s_saved_fan = fan;
+            s_quiet = true;
+            s_quiet_at = now_s();
+            persist_fan_locked();
+            if (fan != kQuietFan) send = kQuietFan;
+            republish = true;
+        } else if (!probing && s_quiet) {
+            s_quiet = false;
+            persist_fan_locked();
+            if (s_saved_fan != kQuietFan) send = s_saved_fan;
+            republish = true;
+        } else if (s_quiet && now_s() - s_quiet_at >= park::kCmdSettleS) {
+            // Changed on the IR remote mid-check: that's the user's new choice.
+            if (!fan.empty() && fan != kQuietFan) {
+                ESP_LOGI(TAG, "fan changed to %s during air check; keeping it", fan.c_str());
+                s_quiet = false;
+                persist_fan_locked();
+                republish = true;
+            }
+        }
+    }
+    if (!send.empty()) {
+        ESP_LOGI(TAG, "air check fan -> %s", send.c_str());
+        s_hooks.set_fan(send);
+    }
+    if (republish && s_hooks.on_change) s_hooks.on_change();
+}
+
 struct Outcome {
     park::Action action = park::Action::None;
     const char*  event = nullptr;
@@ -92,6 +162,7 @@ void step(F fn) {
         s_hooks.set_power(o.action == park::Action::PowerOn);
     if (o.event) events::log(events::Cat::Power, events::Actor::System, o.event);
     if (o.changed && s_hooks.on_change) s_hooks.on_change();
+    sync_fan();
 }
 
 }  // namespace
@@ -102,14 +173,56 @@ void init(const Hooks& hooks) {
     bool managed = false;
     load(c, managed);
     std::lock_guard<std::mutex> lk(s_mtx);
-    s_m.configure(c, now_s());
+    s_user = park::sanitize(c);
+    s_m.configure(s_user, now_s());
     s_m.restore(managed);
     s_saved_managed = managed;
+    nvs_handle_t h;
+    if (nvs_open(kNs, NVS_READONLY, &h) == ESP_OK) {
+        char buf[16];
+        size_t len = sizeof(buf);
+        if (nvs_get_str(h, "pfan", buf, &len) == ESP_OK && buf[0]) {
+            s_saved_fan = buf;
+            s_quiet = true;  // rebooted mid air check: restored on the first tick
+        }
+        nvs_close(h);
+    }
     ESP_LOGI(TAG, "off-at-setpoint %s%s", s_m.enabled() ? "enabled" : "disabled",
              managed ? " (restoring parked state)" : "");
 }
 
+// Adopt the group's shared config when it changes (another head saved it, or
+// we joined/left a group).
+void sync_shared() {
+    std::string enc = hvac_group::park_config();
+    park::Config probe;
+    if (!enc.empty() && !park::decode_shared(enc, probe)) enc.clear();
+    bool was = false, now = false;
+    bool changed = false;
+    park::Config adopted;
+    uint32_t t = now_s();
+    step([&](park::Machine& m) {
+        if (enc == s_shared) return park::Action::None;
+        changed = true;
+        was = configured_locked().enabled;
+        s_shared = enc;
+        // Keep the adopted settings as our own so leaving the group changes nothing.
+        s_user = adopted = configured_locked();
+        now = adopted.enabled;
+        return m.configure(effective_locked(), t);
+    });
+    if (!changed) return;
+    if (!enc.empty()) save_config(adopted);
+    ESP_LOGI(TAG, "outdoor-unit config %s", enc.empty() ? "cleared" : enc.c_str());
+    if (!enc.empty() && was != now)
+        events::log(events::Cat::Power, events::Actor::System,
+                    now ? "Off at setpoint enabled for the outdoor unit"
+                        : "Off at setpoint disabled for the outdoor unit");
+    if (s_hooks.on_change) s_hooks.on_change();
+}
+
 void tick() {
+    sync_shared();
     if (!s_hooks.read) return;
     park::Inputs in = s_hooks.read();
     uint32_t t = now_s();
@@ -133,21 +246,66 @@ void notify_intent_change() {
 cn105::Settings overlay(cn105::Settings s) {
     std::lock_guard<std::mutex> lk(s_mtx);
     if (s_m.parked()) s.power = "ON";
+    if (s_quiet) s.fan = s_saved_fan;
     return s;
+}
+
+bool request_fan(const std::string& fan) {
+    {
+        std::lock_guard<std::mutex> lk(s_mtx);
+        if (!s_quiet) return false;
+        s_saved_fan = fan;
+        persist_fan_locked();
+    }
+    if (s_hooks.on_change) s_hooks.on_change();
+    return true;
 }
 
 park::Config config() {
     std::lock_guard<std::mutex> lk(s_mtx);
-    return s_m.config();
+    return configured_locked();
+}
+
+bool shared() {
+    std::lock_guard<std::mutex> lk(s_mtx);
+    return !s_shared.empty();
 }
 
 park::Config set_config(const park::Config& c) {
     park::Config out = park::sanitize(c);
     save_config(out);
+    // Grouped: the enable / min-off / probe settings belong to the outdoor unit.
+    std::string enc;
+    if (hvac_group::in_group()) {
+        enc = park::encode_shared(out);
+        if (hvac_group::set_park_config(enc) != ESP_OK) enc.clear();
+    }
     uint32_t t = now_s();
-    step([&](park::Machine& m) { return m.configure(out, t); });
+    step([&](park::Machine& m) {
+        s_user = out;
+        if (!enc.empty()) s_shared = enc;
+        return m.configure(effective_locked(), t);
+    });
     if (s_hooks.on_change) s_hooks.on_change();  // enabled flag is in the state payload
     return out;
+}
+
+void set_slice(bool active, bool hold) {
+    uint32_t t = now_s();
+    bool republish = false;
+    step([&](park::Machine& m) {
+        park::Action a = park::Action::None;
+        if (active != s_slice_active) {
+            s_slice_active = active;
+            republish = true;
+            a = m.configure(effective_locked(), t);
+        }
+        // After (re)enable the hold takes effect on the machine's first tick
+        // (next CN105 loop pass, <= ~1 s), once it has fresh inputs.
+        park::Action h = m.set_hold(active && hold, t);
+        return h != park::Action::None ? h : a;
+    });
+    if (republish && s_hooks.on_change) s_hooks.on_change();
 }
 
 Snapshot snapshot() {
@@ -159,6 +317,11 @@ Snapshot snapshot() {
     s.reason = s_m.reason();
     s.next_probe_s = s_m.next_probe_s(now_s());
     s.unit_on = s_unit_on;
+    s.satisfied = s_m.parked_satisfied();
+    s.held = s_m.enabled() && s_m.hold();
+    s.forced = s_slice_active && !s_user.enabled;
+    s.slicing = s_slice_active;
+    s.quiet_fan = s_quiet;
     return s;
 }
 

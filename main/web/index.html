@@ -112,6 +112,13 @@ background:#fff;border-radius:50%;transition:.2s}
   font-size:1.15em;line-height:1;cursor:pointer;align-items:center;justify-content:center;
   padding:0;-webkit-tap-highlight-color:transparent}
 .icon-btn:active{background:var(--hover)}
+.info-btn{flex:0 0 auto;width:20px;height:20px;border-radius:50%;margin-left:6px;padding:0;
+  border:1px solid var(--border-strong);background:var(--chip);color:var(--fg-2);
+  font:italic 600 .75em/1 Georgia,serif;cursor:help;display:inline-flex;align-items:center;
+  justify-content:center;vertical-align:middle;-webkit-tap-highlight-color:transparent}
+.info-btn:hover,.info-btn[aria-expanded="true"]{background:var(--hover);color:var(--fg)}
+.info-pop{font-size:.82em;color:var(--fg-2);background:var(--chip);border:1px solid var(--border);
+  border-radius:8px;padding:8px 10px;margin:6px 0}
 .btn{cursor:pointer;border:none;border-radius:8px;padding:9px 14px;font-size:.88em;width:100%}
 .btn-warn{background:var(--chip);color:var(--orange);border:1px solid var(--border-strong);margin-top:8px}
 .btn-warn:hover{background:var(--hover)}
@@ -582,6 +589,35 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
       <div id="gRenameMsg" class="status hidden" style="margin:2px 0 8px"></div>
       <div id="gMembers"></div>
 
+      <!-- Time-slicing (#133): heads on one outdoor unit take turns heating
+           and cooling instead of fighting over its direction. -->
+      <div class="gjoincard" id="gSlice">
+        <div class="row" style="margin:0">
+          <span class="gjoin-t" style="margin:0;display:flex;align-items:center">Tandem<button type="button" class="info-btn" aria-label="What is Tandem?" aria-expanded="false" aria-controls="slInfo"
+            title="Tandem lets heads on one outdoor unit heat some rooms and cool others. The outdoor unit can only heat or cool at one time, so the heads take turns: rooms that want the current mode run, and the rest stay off until their turn. Each turn lasts between the minimum and maximum turn, with a short pause between modes." onclick="toggleInfo(this)">i</button></span>
+          <div class="toggle"><input type="checkbox" id="slEn" onchange="slDirty=true"><span class="slider" onclick="document.getElementById('slEn').click()"></span></div>
+        </div>
+        <div class="role-desc" style="margin:4px 0 6px">Heat some rooms and cool others: when rooms want different modes, the
+          outdoor unit serves one mode at a time. Rooms waiting for the other mode stay off
+          until their turn. Auto mode isn't available while this is on.</div>
+        <div id="slInfo" class="info-pop hidden">Tandem lets heads on one outdoor unit heat some rooms and cool others. The outdoor unit can only heat or cool at one time, so the heads take turns: rooms that want the current mode run, and the rest stay off until their turn. Each turn lasts between the minimum and maximum turn, with a short pause between modes.</div>
+        <div class="row"><label>Now</label><span class="v" id="slNow">--</span></div>
+        <div class="row">
+          <label for="slMin">Minimum turn</label>
+          <select id="slMin" onchange="slDirty=true"></select>
+        </div>
+        <div class="row">
+          <label for="slMax">Maximum turn</label>
+          <select id="slMax" onchange="slDirty=true"></select>
+        </div>
+        <div class="row">
+          <label for="slSettle">Pause between modes</label>
+          <select id="slSettle" onchange="slDirty=true"></select>
+        </div>
+        <div id="slMsg" class="status hidden" style="margin:8px 0"></div>
+        <button class="btn gwide" onclick="saveSlice()">Save</button>
+      </div>
+
       <!-- Owner: open a pairing window so a new head can join this group -->
       <button class="btn btn-accent gwide" onclick="groupAddZone()">+ Add a zone</button>
       <div id="gAddZoneCard" class="gjoincard hidden">
@@ -730,7 +766,7 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
       <div class="toggle"><input type="checkbox" id="pkProbe" onchange="pkDirty=true"><span class="slider" onclick="document.getElementById('pkProbe').click()"></span></div>
     </div>
     <div class="sub" style="margin:0 0 8px">With the fan stopped the head only
-      senses the air around itself. A short fan run moves room air past the
+      senses the air around itself. A short, quiet fan run moves room air past the
       sensor for a true reading.</div>
     <div class="row">
       <label for="pkInt">Check every</label>
@@ -740,7 +776,11 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
       <label for="pkDur">Run the fan for</label>
       <select id="pkDur" onchange="pkDirty=true"></select>
     </div>
+    <div id="pkShared" class="sub hidden" style="margin:0 0 8px">Shared by every head on this
+      outdoor unit (except the turn-back-on threshold).</div>
     <div class="row"><label>Status</label><span class="v" id="pkStatus">--</span></div>
+    <div id="pkForced" class="sub hidden" style="margin:0 0 8px">Kept on while the zone
+      group runs in Tandem.</div>
     <div id="pkMsg" class="status hidden" style="margin:10px 0"></div>
     <button class="btn" onclick="savePark()">Save</button>
   </div>
@@ -991,9 +1031,22 @@ const I18N = { fr: {
   "Periodic air check":"Vérification périodique de l’air","Check every":"Vérifier toutes les",
   "Run the fan for":"Faire tourner le ventilateur pendant","Disabled":"Désactivé",
   "Parked":"En veille","Checking room":"Vérification de la pièce","Running":"En marche",
-  "air check in":"vérification dans","Saved":"Enregistré","Save failed":"Échec de l’enregistrement",
+  "air check in":"vérification dans",
+  // Time-slicing
+  "Tandem":"Tandem","What is Tandem?":"Qu'est-ce que Tandem ?",
+  "Tandem lets heads on one outdoor unit heat some rooms and cool others. The outdoor unit can only heat or cool at one time, so the heads take turns: rooms that want the current mode run, and the rest stay off until their turn. Each turn lasts between the minimum and maximum turn, with a short pause between modes.":"Tandem permet aux unités d'une même unité extérieure de chauffer certaines pièces et d'en refroidir d'autres. L'unité extérieure ne peut que chauffer ou refroidir à la fois, donc les unités alternent : les pièces qui veulent le mode en cours fonctionnent et les autres restent arrêtées jusqu'à leur tour. Chaque tour dure entre le tour minimum et le tour maximum, avec une courte pause entre les modes.",
+  "When rooms want different modes, the outdoor unit serves one mode at a time. Rooms waiting for the other mode stay off until their turn. Auto mode isn't available while this is on.":"Quand les pièces demandent des modes différents, l’unité extérieure sert un mode à la fois. Les pièces qui attendent l’autre mode restent éteintes jusqu’à leur tour. Le mode Auto n’est pas disponible tant que cette option est active.",
+  "Now":"Maintenant","Minimum turn":"Tour minimal","Maximum turn":"Tour maximal",
+  "Pause between modes":"Pause entre les modes","Waiting for its turn":"En attente de son tour",
+  "Its turn":"Son tour","Waiting":"En attente","Heating turn":"Tour de chauffage",
+  "Cooling turn":"Tour de refroidissement","Switching modes":"Changement de mode",
+  "Nobody needs heat or cool":"Aucun besoin de chauffage ou de refroidissement",
+  "Starting…":"Démarrage…",
+  "Shared by every head on this outdoor unit (except the turn-back-on threshold).":"Partagé par toutes les têtes de cette unité extérieure (sauf le seuil de remise en marche).",
+"Kept on while the zone group runs in Tandem.":"Maintenu actif pendant que le groupe est en mode Tandem.",
+  "Every room must be online and up to date first.":"Toutes les pièces doivent d’abord être en ligne et à jour.","Saved":"Enregistré","Save failed":"Échec de l’enregistrement",
   "Turns the head off once the room reaches its target so the fan stops, and back on when the room drifts past it. Heat, cool and dry only. The unit beeps each time it switches.":"Éteint l’unité dès que la pièce atteint la consigne pour arrêter le ventilateur, puis la rallume quand la température s’en écarte. Chauffage, refroidissement et déshumidification uniquement. L’unité émet un bip à chaque changement.",
-  "With the fan stopped the head only senses the air around itself. A short fan run moves room air past the sensor for a true reading.":"Ventilateur arrêté, l’unité ne mesure que l’air qui l’entoure. Une courte ventilation fait passer l’air de la pièce sur le capteur pour une mesure fiable.",
+  "With the fan stopped the head only senses the air around itself. A short, quiet fan run moves room air past the sensor for a true reading.":"Ventilateur arrêté, l’unité ne mesure que l’air qui l’entoure. Une courte ventilation silencieuse fait passer l’air de la pièce sur le capteur pour une mesure fiable.",
   // WiFi settings
   "Other networks":"Autres réseaux","Scan":"Rechercher","Rescan":"Relancer",
   "Scanning…":"Recherche…","Tap Scan to search for networks":"Touchez Rechercher pour trouver des réseaux",
@@ -1487,6 +1540,7 @@ function pkFill(id,vals,label,cur){
 const pkMin=v=>(v%60?(v/60).toFixed(1):(v/60))+' min';
 function pkStatusText(st){
   if(!st||!st.enabled) return i18n('Disabled');
+  if(st.held) return i18n('Waiting for its turn');
   if(st.state==='parked'){
     let t=i18n('Parked');
     if(st.next_probe_s!=null) t+=' \u00b7 '+i18n('air check in')+' '+Math.max(1,Math.ceil(st.next_probe_s/60))+' min';
@@ -1496,6 +1550,14 @@ function pkStatusText(st){
   if(st.state==='running') return i18n('Running');
   return i18n('Off');
 }
+// ⓘ buttons: the title is the hover tooltip on desktop; a tap (touch has no
+// hover) toggles the inline explainer named by aria-controls.
+function toggleInfo(btn){
+  const pop=$(btn.getAttribute('aria-controls'));
+  if(!pop) return;
+  const open=pop.classList.toggle('hidden')===false;
+  btn.setAttribute('aria-expanded',open?'true':'false');
+}
 async function loadPark(force){
   if(pkDirty&&!force) { return; }
   try{
@@ -1503,6 +1565,8 @@ async function loadPark(force){
     if(!r.ok) return;
     const c=await r.json();
     $('pkStatus').textContent=pkStatusText(c.status);
+    $('pkForced').classList.toggle('hidden',!(c.status&&c.status.forced));
+    $('pkShared').classList.toggle('hidden',!c.shared);
     if(pkDirty&&!force) return;
     $('pkEn').checked=!!c.enabled;
     $('pkProbe').checked=!!c.probe_enabled;
@@ -1607,6 +1671,7 @@ function renderClimate(){
   let opTxt;
   const pk=climate.park;
   if(!climate.power){ opTxt='Off'; }
+  else if(pk&&pk.held){ opTxt='Waiting for its turn'; }
   else if(pk&&pk.parked){
     opTxt=i18n('Parked');
     if(pk.next_probe_s!=null) opTxt+=' \u00b7 '+i18n('air check in')+' '+Math.max(1,Math.ceil(pk.next_probe_s/60))+' min';
@@ -1631,7 +1696,9 @@ function renderClimate(){
   op.textContent=i18n(opTxt);
   op.className='op'+(climate.power&&climate.operating?' active':'');
   $('tDec').disabled=$('tInc').disabled=!climate.power;
+  const slicing=!!(pk&&pk.slicing);
   [...document.querySelectorAll('#modePills button')].forEach(b=>{
+    if(b.dataset.mode==='AUTO') b.style.display=(slicing&&!(climate.power&&climate.mode==='AUTO'))?'none':'';
     const m=b.dataset.mode, on=(m==='OFF')?!climate.power:(climate.power&&climate.mode===m);
     b.classList.toggle('on',on);
     b.style.background=on?(m==='OFF'?'#566270':(MODE_COLOR[m]||'#566270')):'';
@@ -2352,6 +2419,8 @@ function memberRow(o){
   if(o.mode) parts.push('<span class="gmstat"><b>'+gEsc(modeCap(o.mode))+'</b></span>');
   if(o.room!=null) parts.push('<span class="gmstat">Current <b>'+fmtTemp(o.room)+unitSym()+'</b></span>');
   if(o.target!=null) parts.push('<span class="gmstat">Target <b>'+fmtTemp(o.target)+unitSym()+'</b></span>');
+  if(o.slice==='run') parts.push('<span class="gmstat"><b>'+gEsc(i18n('Its turn'))+'</b></span>');
+  else if(o.slice==='hold') parts.push('<span class="gmstat"><b>'+gEsc(i18n('Waiting'))+'</b></span>');
   if(parts.length) stats='<div class="gmstats">'+parts.join('')+'</div>';
   // A whole card is a link to that zone's own UI. Buttons live inside and are
   // handled first by the delegated listener (so a tap on ✕/Leave never
@@ -2407,10 +2476,12 @@ function renderGroupPanel(g){
   // flickers. So gate the badge on an actual conflict.
   const inConflict=(g.status==='conflict'||g.status==='pending_conflict');
   const lockMatch=(nm,uid)=>inConflict&&g.locked_by&&(g.locked_by===nm||g.locked_by===uid);
+  const sl=g.slice||{};
+  const slOf=uid=>{ if(!sl.enabled) return null; const m=(sl.members||[]).find(x=>x.uid===uid); return m?m.directive:null; };
   const rows=[ memberRow({
       name:self.name||self.uid, dotcls:'selfdot', tag:'This device',
       isLock:lockMatch(self.name,self.uid), uid:self.uid, isPeer:false,
-      mode:self.mode, room:self.roomTemp, target:self.targetTemp, url:null }) ];
+      mode:self.mode, room:self.roomTemp, target:self.targetTemp, url:null, slice:slOf(self.uid) }) ];
   (g.members||[]).forEach(m=>{
     const known=(m.state==='known');
     // An unreachable peer (no fresh signed poll within ~45s) comes back as
@@ -2421,9 +2492,10 @@ function renderGroupPanel(g){
       name:m.name||m.uid, dotcls:known?'known':'unknown', tag:tag,
       isLock:lockMatch(m.name,m.uid), uid:m.uid, isPeer:true,
       mode:known?m.mode:null, room:known?m.roomTemp:null, target:known?m.targetTemp:null,
-      url:m.ip?('http://'+m.ip+'/'):null }));
+      url:m.ip?('http://'+m.ip+'/'):null, slice:known?slOf(m.uid):null }));
   });
   $('gMembers').innerHTML=rows.join('');
+  renderSlice(sl);
   wireMemberCtrls();
   const ri=$('gRenameInput'); if(ri&&!groupEditing&&document.activeElement!==ri) ri.value=g.group_label||'';
 }
@@ -2446,6 +2518,40 @@ function wireMemberCtrls(){
     if(card && card.dataset.gurl){ window.open(card.dataset.gurl,'_blank','noopener'); }
   });
   memberCtrlsWired=true;
+}
+let slDirty=false;
+function sliceNowText(sl){
+  if(!sl.enabled) return i18n('Off');
+  if(!sl.active) return i18n('Starting…');
+  const mins=' \u00b7 '+Math.floor((sl.elapsed_s||0)/60)+' min';
+  if(sl.phase==='changeover') return i18n('Switching modes')+mins;
+  if(sl.phase==='run') return i18n(sl.mode==='heat'?'Heating turn':'Cooling turn')+mins;
+  return i18n('Nobody needs heat or cool');
+}
+function renderSlice(sl){
+  $('slNow').textContent=sliceNowText(sl);
+  if(slDirty) return;
+  $('slEn').checked=!!sl.enabled;
+  pkFill('slMin',[300,600,900,1200,1800,2700,3600],pkMin,sl.min_slice_s||600);
+  pkFill('slMax',[900,1200,1800,2700,3600,5400,7200],pkMin,sl.max_slice_s||1800);
+  pkFill('slSettle',[30,60,120,180,300,600],pkMin,sl.settle_s||60);
+}
+async function saveSlice(){
+  const msg=$('slMsg');
+  const body={enabled:$('slEn').checked,min_slice_s:parseInt($('slMin').value,10),
+    max_slice_s:parseInt($('slMax').value,10),settle_s:parseInt($('slSettle').value,10)};
+  try{
+    const r=await fetch('/api/group/slice',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    if(r.status===401||r.status===403){ loadAuth(); return; }
+    const j=await r.json().catch(()=>({}));
+    if(r.status===409&&body.enabled){ msg.textContent=i18n('Every room must be online and up to date first.'); msg.className='status err'; msg.classList.remove('hidden'); return; }
+    if(!r.ok) throw 0;
+    slDirty=false;
+    msg.textContent=i18n('Saved');msg.className='status ok';msg.classList.remove('hidden');
+    setTimeout(()=>msg.classList.add('hidden'),2500);
+    renderSlice(j);
+    refresh();
+  }catch(e){ msg.textContent=i18n('Save failed');msg.className='status err';msg.classList.remove('hidden'); }
 }
 async function refreshGroup(){
   if(authState.role!=='admin') return;
@@ -2526,6 +2632,7 @@ async function needsGroupSwitch(m){
   try{ const r=await jget('/api/group'); if(!r.ok) return false; g=await r.json(); }
   catch(e){ return false; }
   if(!g.in_group || (g.member_count||1)<=1) return false;
+  if(g.slice&&g.slice.enabled) return false;  // mixed modes take turns instead
   const opp=(m==='HEAT')?'COOL':'HEAT';
   if(g.locked_mode===opp) return true;
   return (g.members||[]).some(mem=>mem.state==='known' && mem.configured_demand===opp);

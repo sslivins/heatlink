@@ -3,6 +3,7 @@
 
 #include "web_ui.h"
 #include "park_ctl.h"
+#include "slice_ctl.h"
 #include "wifi_manager.h"
 #include "ota.h"
 #include "auth_manager.h"
@@ -318,6 +319,11 @@ cJSON* park_status_json() {
     cJSON_AddBoolToObject(o, "parked", ps.parked);
     cJSON_AddStringToObject(o, "reason", ps.reason.c_str());
     cJSON_AddBoolToObject(o, "unit_on", ps.unit_on);
+    cJSON_AddBoolToObject(o, "satisfied", ps.satisfied);
+    cJSON_AddBoolToObject(o, "held", ps.held);      // waiting for its time slice
+    cJSON_AddBoolToObject(o, "forced", ps.forced);  // enabled by time-slicing
+    cJSON_AddBoolToObject(o, "slicing", ps.slicing);  // group time-slicing is on
+    cJSON_AddBoolToObject(o, "quiet_fan", ps.quiet_fan);  // air check at QUIET fan
     if (ps.next_probe_s >= 0)
         cJSON_AddNumberToObject(o, "next_probe_s", ps.next_probe_s);
     else
@@ -431,6 +437,13 @@ esp_err_t handle_post_settings(httpd_req_t* req) {
 
     using K = hvac_mqtt::Command::Kind;
     const cJSON* v;
+    if ((v = cJSON_GetObjectItem(json, "mode")) && cJSON_IsString(v) &&
+        strcasecmp(v->valuestring, "auto") == 0 && slice_ctl::enabled()) {
+        cJSON_Delete(json);
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST,
+                            "AUTO is not available in Tandem");
+        return ESP_FAIL;
+    }
     std::string who = web_actor_name(req);
     const char* wname = who.empty() ? "" : who.c_str();
     if ((v = cJSON_GetObjectItem(json, "power")) && cJSON_IsString(v)) {
@@ -486,6 +499,8 @@ cJSON* park_config_json(const park::Config& c) {
     cJSON_AddBoolToObject(o, "probe_enabled", c.probe_enabled);
     cJSON_AddNumberToObject(o, "probe_interval_s", c.probe_interval_s);
     cJSON_AddNumberToObject(o, "probe_duration_s", c.probe_duration_s);
+    // Grouped: enable / min-off / probe are the outdoor unit's (all its heads).
+    cJSON_AddBoolToObject(o, "shared", hvac_group::in_group());
     cJSON_AddItemToObject(o, "status", park_status_json());
     return o;
 }
@@ -1107,6 +1122,24 @@ esp_err_t handle_group_state(httpd_req_t* req) {
     cJSON_AddNumberToObject(root, "roomTemp", sta.roomTemperature);
     cJSON_AddNumberToObject(root, "targetTemp", st.temperature);
     cJSON_AddNumberToObject(root, "pv", hvac_group::kProtocolVersion);
+    // Time-slicing (#133). Additive fields (older peers ignore them); "slice_v"
+    // advertises the capability so slicing is only enabled when every member
+    // understands it.
+    {
+        slice_ctl::Publish sp = slice_ctl::publish();
+        cJSON_AddNumberToObject(root, "slice_v", slice::kSliceVersion);
+        cJSON_AddBoolToObject(root, "sat", sp.satisfied);
+        if (sp.has_state) {
+            cJSON* js = cJSON_CreateObject();
+            cJSON_AddNumberToObject(js, "t", (double)sp.state.term);
+            cJSON_AddNumberToObject(js, "s", (double)sp.state.seq);
+            cJSON_AddStringToObject(js, "m", slice::mode_str(sp.state.mode));
+            cJSON_AddStringToObject(js, "p", slice::phase_str(sp.state.phase));
+            cJSON_AddNumberToObject(js, "e", sp.state.elapsed_s);
+            cJSON_AddStringToObject(js, "c", sp.state.coordinator.c_str());
+            cJSON_AddItemToObject(root, "slice", js);
+        }
+    }
     // Ride the replicated group state (label + names + membership CRDT) on the
     // snapshot so the poller can anti-entropy-merge it (Phase 6 gossip).
     std::string rep = hvac_group::replica_json();
@@ -1230,6 +1263,39 @@ bool poll_peer(const std::string& uid, hvac_group::MemberObs& out, bool& incompa
                     out.target_temp = (jtt && cJSON_IsNumber(jtt)) ? (float)jtt->valuedouble : -1000.f;
                     out.ip          = ip;
                     {
+                        slice_ctl::PeerObs so;
+                        const cJSON* jsv = cJSON_GetObjectItem(j, "slice_v");
+                        so.capable = jsv && cJSON_IsNumber(jsv) &&
+                                     jsv->valueint == slice::kSliceVersion;
+                        so.satisfied = cJSON_IsTrue(cJSON_GetObjectItem(j, "sat"));
+                        so.power    = (jpwr  && cJSON_IsString(jpwr))  ? jpwr->valuestring  : "";
+                        so.mode     = (jmode && cJSON_IsString(jmode)) ? jmode->valuestring : "";
+                        so.sub_mode = (jsub  && cJSON_IsString(jsub))  ? jsub->valuestring  : "";
+                        const cJSON* js = cJSON_GetObjectItem(j, "slice");
+                        if (js && cJSON_IsObject(js)) {
+                            const cJSON* jt = cJSON_GetObjectItem(js, "t");
+                            const cJSON* jq = cJSON_GetObjectItem(js, "s");
+                            const cJSON* jm = cJSON_GetObjectItem(js, "m");
+                            const cJSON* jp = cJSON_GetObjectItem(js, "p");
+                            const cJSON* je = cJSON_GetObjectItem(js, "e");
+                            const cJSON* jc = cJSON_GetObjectItem(js, "c");
+                            if (cJSON_IsNumber(jt) && cJSON_IsNumber(jq) && cJSON_IsString(jm) &&
+                                cJSON_IsString(jp) && cJSON_IsNumber(je) && cJSON_IsString(jc) &&
+                                jt->valuedouble >= 0 && jt->valuedouble <= 9007199254740991.0 &&
+                                jq->valuedouble >= 0 && jq->valuedouble <= 9007199254740991.0 &&
+                                je->valuedouble >= 0 && je->valuedouble <= 4294967295.0) {
+                                so.has_state = true;
+                                so.state.term = (uint64_t)jt->valuedouble;
+                                so.state.seq  = (uint64_t)jq->valuedouble;
+                                so.state.mode = slice::parse_mode(jm->valuestring);
+                                so.state.phase = slice::parse_phase(jp->valuestring);
+                                so.state.elapsed_s = (uint32_t)je->valuedouble;
+                                so.state.coordinator = jc->valuestring;
+                            }
+                        }
+                        slice_ctl::observe_peer(uid, so);
+                    }
+                    {
                         std::string pwr = (jpwr  && cJSON_IsString(jpwr))  ? jpwr->valuestring  : "";
                         std::string md  = (jmode && cJSON_IsString(jmode)) ? jmode->valuestring : "";
                         out.mode_str    = (pwr == "OFF" || pwr.empty()) ? std::string("OFF") : md;
@@ -1343,6 +1409,16 @@ hvac_group::GroupView compute_group_view(std::vector<hvac_group::MemberObs>* out
     for (const auto& uid : g.peers) members.push_back(cached_peer_obs(uid));
 
     hvac_group::GroupView view = hvac_group::evaluate_group(members);
+    // Time-slicing (#133) schedules HEAT and COOL in turns, so mixed demands
+    // are expected rather than a conflict to resolve.
+    if (slice_ctl::enabled() &&
+        (view.status == hvac_group::GroupStatus::Conflict ||
+         view.status == hvac_group::GroupStatus::PendingConflict)) {
+        view.status = hvac_group::GroupStatus::Ok;
+        view.locked_mode = hvac_group::Demand::Neutral;
+        view.locked_by.clear();
+        view.conflicts.clear();
+    }
     if (out) *out = std::move(members);
     return view;
 }
@@ -1582,6 +1658,42 @@ bool sync_result_ok(const std::string& r) {
 // a peer with a fresh signed snapshot appears Known/Incompatible, otherwise it
 // is Unknown, which keeps the group Indeterminate (fail-safe) rather than
 // asserting "no conflict". A head with no group reports "standalone".
+// Time-slicing status for GET /api/group and POST /api/group/slice.
+cJSON* slice_status_json() {
+    slice_ctl::Status ss = slice_ctl::status();
+    cJSON* o = cJSON_CreateObject();
+    cJSON_AddBoolToObject(o, "enabled", ss.cfg.enabled);
+    cJSON_AddNumberToObject(o, "min_slice_s", ss.cfg.min_slice_s);
+    cJSON_AddNumberToObject(o, "max_slice_s", ss.cfg.max_slice_s);
+    cJSON_AddNumberToObject(o, "settle_s", ss.cfg.settle_s);
+    cJSON_AddBoolToObject(o, "available", ss.all_capable);
+    cJSON_AddBoolToObject(o, "active", ss.have_state);
+    if (ss.have_state) {
+        cJSON_AddStringToObject(o, "mode", slice::mode_str(ss.state.mode));
+        cJSON_AddStringToObject(o, "phase", slice::phase_str(ss.state.phase));
+        cJSON_AddNumberToObject(o, "elapsed_s", ss.elapsed_s);
+    } else {
+        cJSON_AddNullToObject(o, "mode");
+        cJSON_AddNullToObject(o, "phase");
+        cJSON_AddNullToObject(o, "elapsed_s");
+    }
+    cJSON_AddStringToObject(o, "coordinator", ss.coordinator.c_str());
+    cJSON_AddBoolToObject(o, "is_coordinator", ss.is_coordinator);
+    cJSON* jm = cJSON_CreateArray();
+    for (const auto& m : ss.members) {
+        cJSON* e = cJSON_CreateObject();
+        cJSON_AddStringToObject(e, "uid", m.uid.c_str());
+        cJSON_AddBoolToObject(e, "fresh", m.fresh);
+        cJSON_AddBoolToObject(e, "capable", m.capable);
+        cJSON_AddStringToObject(e, "wants", slice::mode_str(m.wants));
+        cJSON_AddStringToObject(e, "directive", ss.cfg.enabled ? slice::directive_str(m.directive)
+                                                              : "free");
+        cJSON_AddItemToArray(jm, e);
+    }
+    cJSON_AddItemToObject(o, "members", jm);
+    return o;
+}
+
 esp_err_t handle_group_get(httpd_req_t* req) {
     set_cors(req);
     REQUIRE_API_AUTH(req);
@@ -1659,6 +1771,7 @@ esp_err_t handle_group_get(httpd_req_t* req) {
     for (const auto& w : view.warnings)
         cJSON_AddItemToArray(jwarn, cJSON_CreateString(w.c_str()));
     cJSON_AddItemToObject(root, "warnings", jwarn);
+    cJSON_AddItemToObject(root, "slice", slice_status_json());
 
     char* str = cJSON_PrintUnformatted(root);
     httpd_resp_set_type(req, "application/json");
@@ -2066,6 +2179,12 @@ esp_err_t handle_group_sync(httpd_req_t* req) {
     set_cors(req);
     httpd_resp_set_type(req, "application/json");
 
+    if (slice_ctl::enabled()) {
+        httpd_resp_set_status(req, "409 Conflict");
+        httpd_resp_sendstr(req, "{\"error\":\"Tandem is enabled\"}");
+        return ESP_FAIL;
+    }
+
     if (!hvac_group::in_group()) {
         httpd_resp_set_status(req, "403 Forbidden");
         httpd_resp_sendstr(req, "{\"error\":\"not in a group\"}");
@@ -2217,6 +2336,8 @@ bool coordinate_group_to(hvac_group::Demand target, hvac_group::ResolveStrategy 
 esp_err_t handle_group_resolve(httpd_req_t* req) {
     set_cors(req);
     REQUIRE_ADMIN(req);
+    if (slice_ctl::enabled())
+        return send_json_error(req, "409 Conflict", "Tandem is enabled");
     char* body = recv_body(req);
     if (!body) {
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Empty or oversized body");
@@ -2304,6 +2425,68 @@ esp_err_t handle_group_label(httpd_req_t* req) {
     }
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_sendstr(req, "{\"status\":\"ok\"}");
+}
+
+// ── POST /api/group/slice ─ time-slicing settings (admin, #133) ────────
+// Body: any of {"enabled":bool,"min_slice_s":n,"max_slice_s":n,"settle_s":n}.
+// Values are clamped (slice::sanitize). The config replicates to every head.
+// Enabling requires every member to be online and slice-capable.
+esp_err_t handle_group_slice(httpd_req_t* req) {
+    set_cors(req);
+    REQUIRE_ADMIN(req);
+    if (!hvac_group::in_group())
+        return send_json_error(req, "409 Conflict", "not in a group");
+    char* body = recv_body(req);
+    if (!body) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Empty or oversized body");
+        return ESP_FAIL;
+    }
+    cJSON* json = cJSON_Parse(body);
+    free(body);
+    if (!json || !cJSON_IsObject(json)) {
+        if (json) cJSON_Delete(json);
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid JSON");
+        return ESP_FAIL;
+    }
+    slice_ctl::Status cur = slice_ctl::status();
+    slice::Config c = cur.cfg;
+    const bool was = c.enabled;
+    const cJSON* v;
+    if ((v = cJSON_GetObjectItem(json, "enabled")) && cJSON_IsBool(v))
+        c.enabled = cJSON_IsTrue(v);
+    if ((v = cJSON_GetObjectItem(json, "min_slice_s")) && cJSON_IsNumber(v) && v->valuedouble >= 0)
+        c.min_slice_s = (uint32_t)v->valuedouble;
+    if ((v = cJSON_GetObjectItem(json, "max_slice_s")) && cJSON_IsNumber(v) && v->valuedouble >= 0)
+        c.max_slice_s = (uint32_t)v->valuedouble;
+    if ((v = cJSON_GetObjectItem(json, "settle_s")) && cJSON_IsNumber(v) && v->valuedouble >= 0)
+        c.settle_s = (uint32_t)v->valuedouble;
+    cJSON_Delete(json);
+    c = slice::sanitize(c);
+
+    if (c.enabled && !was && !cur.all_capable)
+        return send_json_error(req, "409 Conflict",
+                               "every member must be online and support Tandem");
+    esp_err_t err = hvac_group::set_slice_config(slice::encode_config(c));
+    if (err == ESP_ERR_INVALID_STATE)
+        return send_json_error(req, "409 Conflict", "not in a group");
+    if (err != ESP_OK) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "NVS write failed");
+        return ESP_FAIL;
+    }
+    if (c.enabled != was) {
+        std::string who = web_actor_name(req);
+        events::log(events::Cat::Group, events::Actor::WebUI,
+                    c.enabled ? "Tandem enabled" : "Tandem disabled",
+                    who.empty() ? "" : who.c_str());
+    }
+    slice_ctl::tick();  // apply now rather than on the next 1 Hz tick
+    cJSON* root = slice_status_json();
+    char* str = cJSON_PrintUnformatted(root);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, str);
+    cJSON_free(str);
+    cJSON_Delete(root);
+    return ESP_OK;
 }
 
 // ── POST /api/group/member/remove ─ evict a member (admin) ─────────────
@@ -2675,6 +2858,7 @@ bool try_group_mode_command(const std::string& mode) {
     else if (strcasecmp(mode.c_str(), "cool") == 0) target = hvac_group::Demand::Cool;
     else return false;                       // only HEAT/COOL can conflict
     if (!hvac_group::in_group()) return false;
+    if (slice_ctl::enabled()) return false;  // mixed modes are time-sliced, not switched
 
     std::vector<hvac_group::MemberObs> members;
     hvac_group::GroupView view = compute_group_view(&members);
@@ -2951,6 +3135,7 @@ esp_err_t init(const Hooks& hooks) {
         {"/api/group/sync",          HTTP_POST,     handle_group_sync,        nullptr},
         {"/api/group/resolve",       HTTP_POST,     handle_group_resolve,     nullptr},
         {"/api/group/label",         HTTP_POST,     handle_group_label,       nullptr},
+        {"/api/group/slice",         HTTP_POST,     handle_group_slice,       nullptr},
         {"/api/group/member/remove", HTTP_POST,     handle_group_member_remove, nullptr},
         {"/api/house",               HTTP_GET,      handle_house_get,      nullptr},
         {"/api/house/summary",       HTTP_GET,      handle_house_summary,  nullptr},

@@ -486,7 +486,9 @@ paths:
         Partial update; omitted fields keep their value. Out-of-range values are
         clamped: `delta_c` 0.5–3.0 in 0.5 steps, `min_off_s` 300–3600,
         `probe_interval_s` max(min_off_s)–7200, `probe_duration_s` 60–600.
-        Disabling while parked powers the unit back on.
+        Disabling while parked powers the unit back on. In a zone group,
+        `enabled`, `min_off_s` and the probe settings are the outdoor unit's:
+        they are replicated to every head in the group (`delta_c` stays per head).
       security:
         - ApiKeyAuth: []
         - SessionCookie: []
@@ -621,6 +623,18 @@ paths:
                 type: object
                 properties:
                   pv: { type: integer, description: Protocol version }
+                  slice_v: { type: integer, description: Time-slicing version this head supports (absent on older firmware) }
+                  sat: { type: boolean, description: Parked at setpoint (off-at-setpoint satisfied) }
+                  slice:
+                    type: object
+                    description: Time-slice state this head holds (present only while slicing has state)
+                    properties:
+                      t: { type: integer, description: Coordinator term }
+                      s: { type: integer, description: Sequence within the term }
+                      m: { type: string, enum: [none, heat, cool] }
+                      p: { type: string, enum: [idle, run, changeover] }
+                      e: { type: integer, description: Seconds in the current phase }
+                      c: { type: string, description: Coordinator uid }
                 additionalProperties: true
         '401':
           description: Invalid sender, nonce, group id or signature
@@ -800,6 +814,8 @@ paths:
           description: Invalid sender, nonce, group id or signature
         '403':
           description: Not in a group
+        '409':
+          description: Time-slicing is enabled (mixed modes are scheduled, not switched)
         '500':
           description: Out of memory building the response
   /api/group/resolve:
@@ -826,6 +842,8 @@ paths:
               schema: { $ref: '#/components/schemas/GroupResolveResult' }
         '400':
           description: Empty, oversized or invalid body, or bad target_mode
+        '409':
+          description: Time-slicing is enabled
   /api/group/label:
     post:
       tags: [Groups]
@@ -851,6 +869,44 @@ paths:
           description: Empty, oversized or invalid body
         '409':
           description: Not in a group
+        '500':
+          description: NVS write failed
+  /api/group/slice:
+    post:
+      tags: [Groups]
+      summary: Configure Tandem (time-sliced heat/cool) for the group (admin)
+      description: |
+        Lets heads that share one outdoor unit take turns: the elected
+        coordinator runs HEAT and COOL in alternating slices, and heads whose
+        mode isn't being served are parked (held off) until their slice. The
+        config replicates to every member. While enabled, AUTO is rejected and
+        `/api/group/resolve` / `/api/group/sync` return 409. Off-at-setpoint
+        is forced on for every head. Partial updates are allowed; values are
+        clamped (min slice 300-3600 s, max slice >= min and <= 7200 s,
+        settle 30-600 s).
+      security:
+        - SessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                enabled: { type: boolean }
+                min_slice_s: { type: integer, description: 'Minimum slice before switching to waiting heads (default 600)' }
+                max_slice_s: { type: integer, description: 'Switch even if the current mode is unsatisfied (default 1800)' }
+                settle_s: { type: integer, description: 'All-off pause between HEAT and COOL slices (default 60)' }
+      responses:
+        '200':
+          description: Applied settings and live status
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SliceStatus' }
+        '400':
+          description: Empty, oversized or invalid body
+        '409':
+          description: Not in a group, or enabling while a member is offline or doesn't support time-slicing
         '500':
           description: NVS write failed
   /api/group/member/remove:
@@ -1047,6 +1103,11 @@ components:
         reason: { type: string, description: 'Why parked/probing, e.g. "setpoint reached", "scheduled probe"' }
         next_probe_s: { type: integer, nullable: true, description: Seconds until the next probe while parked, else null }
         unit_on: { type: boolean, description: Physical unit power (false while parked even though power reports ON) }
+        satisfied: { type: boolean, description: Parked because the room reached its setpoint }
+        held: { type: boolean, description: 'Held off waiting for its time slice (reason "waiting_for_slice")' }
+        forced: { type: boolean, description: Off-at-setpoint is forced on by group time-slicing }
+        slicing: { type: boolean, description: Group time-slicing (Tandem) is enabled (AUTO is unavailable) }
+        quiet_fan: { type: boolean, description: An air check is running with the fan at QUIET (settings report the user's fan) }
     ParkConfigUpdate:
       type: object
       properties:
@@ -1061,6 +1122,9 @@ components:
         - $ref: '#/components/schemas/ParkConfigUpdate'
         - type: object
           properties:
+            shared:
+              type: boolean
+              description: In a zone group, so enable / min-off / probe settings are shared by all its heads
             status: { $ref: '#/components/schemas/ParkStatus' }
     SettingsUpdate:
       type: object
@@ -1280,6 +1344,32 @@ components:
         warnings:
           type: array
           items: { type: string }
+        slice: { $ref: '#/components/schemas/SliceStatus' }
+    SliceStatus:
+      type: object
+      description: Group time-slicing settings and live schedule.
+      properties:
+        enabled: { type: boolean }
+        min_slice_s: { type: integer }
+        max_slice_s: { type: integer }
+        settle_s: { type: integer }
+        available: { type: boolean, description: Every member is online and supports time-slicing }
+        active: { type: boolean, description: A slice schedule is in force }
+        mode: { type: string, nullable: true, enum: [none, heat, cool, null] }
+        phase: { type: string, nullable: true, enum: [idle, run, changeover, null] }
+        elapsed_s: { type: integer, nullable: true, description: Seconds in the current phase }
+        coordinator: { type: string, description: Elected coordinator uid (empty if none) }
+        is_coordinator: { type: boolean }
+        members:
+          type: array
+          items:
+            type: object
+            properties:
+              uid: { type: string }
+              fresh: { type: boolean }
+              capable: { type: boolean }
+              wants: { type: string, enum: [none, heat, cool] }
+              directive: { type: string, enum: [free, run, hold] }
     PairStartResult:
       type: object
       properties:

@@ -22,6 +22,7 @@
 #include "capability.h"
 #include "status_led.h"
 #include "park_ctl.h"
+#include "slice_ctl.h"
 
 #include <cstdlib>
 #include <cstdio>
@@ -205,6 +206,7 @@ void cn105_task(void*) {
         if (++loops >= 10) {  // ~1 Hz
             loops = 0;
             park_ctl::tick();
+            slice_ctl::tick();
         }
         vTaskDelay(pdMS_TO_TICKS(100));
     }
@@ -216,9 +218,12 @@ void on_mqtt_command(const hvac_mqtt::Command& cmd) {
     switch (cmd.kind) {
         // Power goes through the off-at-setpoint controller: it owns the
         // physical power while a head is parked (desired ON, unit held off).
-        case K::Power:
-            park_ctl::set_desired_power(strcasecmp(cmd.value.c_str(), "off") != 0);
+        case K::Power: {
+            const bool on = strcasecmp(cmd.value.c_str(), "off") != 0;
+            slice_ctl::Command sc(on, g_hp.getSettings().mode);
+            park_ctl::set_desired_power(on);
             break;
+        }
         case K::Mode: {
             // Home Assistant (and the group coordinator) express "off" as a
             // climate mode, but the CN105 keeps power and mode separate. The
@@ -229,10 +234,22 @@ void on_mqtt_command(const hvac_mqtt::Command& cmd) {
             // "off" powers the unit down; any real mode powers it on (mapping
             // HA's "fan_only" to the native "FAN").
             if (strcasecmp(cmd.value.c_str(), "off") == 0) {
+                slice_ctl::Command sc(false, g_hp.getSettings().mode);
                 park_ctl::set_desired_power(false);
             } else {
                 const char* mode = cmd.value.c_str();
                 if (strcasecmp(mode, "fan_only") == 0) mode = "FAN";
+                // Time-slicing schedules HEAT and COOL; AUTO would pick its
+                // own direction behind the scheduler's back.
+                if (strcasecmp(mode, "auto") == 0 && slice_ctl::enabled()) {
+                    ESP_LOGW(TAG, "AUTO rejected while time-slicing");
+                    cn105::Settings e = park_ctl::overlay(g_hp.getSettings());
+                    hvac_mqtt::publish_settings(e);  // let HA snap back
+                    hvac_mqtt::publish_state(e, g_hp.getStatus());
+                    break;
+                }
+                // Time-slicing: hold before / release after the new mode is recorded.
+                slice_ctl::Command sc(true, mode);
                 bool changed = strcasecmp(g_hp.getSettings().mode.c_str(), mode) != 0;
                 g_hp.setModeSetting(mode);
                 park_ctl::set_desired_power(true);
@@ -247,7 +264,9 @@ void on_mqtt_command(const hvac_mqtt::Command& cmd) {
             if (changed) park_ctl::notify_intent_change();
             break;
         }
-        case K::Fan:         g_hp.setFanSpeed(cmd.value); break;
+        case K::Fan:
+            if (!park_ctl::request_fan(cmd.value)) g_hp.setFanSpeed(cmd.value);
+            break;
         case K::Vane:        g_hp.setVaneSetting(cmd.value); break;
         case K::WideVane:    g_hp.setWideVaneSetting(cmd.value);
                              // A real user/HA wide-vane change must abort any
@@ -293,6 +312,13 @@ void on_mqtt_command_external(const hvac_mqtt::Command& cmd) {
     using K = hvac_mqtt::Command::Kind;
     if (cmd.kind == K::Mode && web_ui::try_group_mode_command(cmd.value)) {
         return;  // handled as a coordinated whole-group switch (already logged)
+    }
+    if (cmd.kind == K::Mode && strcasecmp(cmd.value.c_str(), "auto") == 0 &&
+        slice_ctl::enabled()) {
+        on_mqtt_command(cmd);  // rejects and republishes
+        events::log(events::Cat::Mode, events::Actor::HomeAssistant,
+                    "AUTO rejected \xE2\x80\x94 not available in Tandem");
+        return;
     }
     on_mqtt_command(cmd);
 
@@ -594,12 +620,22 @@ extern "C" void app_main() {
             return in;
         };
         ph.set_power = [](bool on) { g_hp.setPowerSetting(on ? "ON" : "OFF"); };
+        ph.get_fan   = []() -> std::string {
+            return g_hp.isConnected() ? g_hp.getSettings().fan : std::string();
+        };
+        ph.set_fan   = [](const std::string& f) { g_hp.setFanSpeed(f); };
         ph.on_change = [] {
             cn105::Settings e = park_ctl::overlay(g_hp.getSettings());
             hvac_mqtt::publish_settings(e);
             hvac_mqtt::publish_state(e, g_hp.getStatus());
         };
         park_ctl::init(ph);
+
+        slice_ctl::Hooks sh;
+        sh.settings = [] { return park_ctl::overlay(g_hp.getSettings()); };
+        sh.status   = [] { return g_hp.getStatus(); };
+        sh.set_mode = [](const std::string& m) { g_hp.setModeSetting(m.c_str()); };
+        slice_ctl::init(sh);
         hvac_mqtt::set_park_provider([] {
             park_ctl::Snapshot ps = park_ctl::snapshot();
             hvac_mqtt::ParkInfo pi;

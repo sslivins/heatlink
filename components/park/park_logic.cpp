@@ -4,6 +4,8 @@
 #include "park_logic.h"
 
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 
 namespace park {
 
@@ -37,6 +39,40 @@ Config sanitize(const Config& c) {
     o.probe_interval_s = clamp_u32(c.probe_interval_s, o.min_off_s, kMaxProbeIntervalS);
     o.probe_duration_s = clamp_u32(c.probe_duration_s, kMinProbeDurationS, kMaxProbeDurationS);
     return o;
+}
+
+std::string encode_shared(const Config& c) {
+    char buf[48];
+    std::snprintf(buf, sizeof(buf), "%d,%u,%d,%u,%u", c.enabled ? 1 : 0,
+                  static_cast<unsigned>(c.min_off_s), c.probe_enabled ? 1 : 0,
+                  static_cast<unsigned>(c.probe_interval_s),
+                  static_cast<unsigned>(c.probe_duration_s));
+    return buf;
+}
+
+bool decode_shared(const std::string& s, Config& inout) {
+    if (s.empty() || s.size() > 32) return false;
+    unsigned long v[5];
+    size_t pos = 0;
+    for (int i = 0; i < 5; ++i) {
+        size_t start = pos;
+        while (pos < s.size() && s[pos] >= '0' && s[pos] <= '9') ++pos;
+        if (pos == start || pos - start > 6) return false;
+        v[i] = std::strtoul(s.substr(start, pos - start).c_str(), nullptr, 10);
+        if (i < 4) {
+            if (pos >= s.size() || s[pos] != ',') return false;
+            ++pos;
+        }
+    }
+    if (pos != s.size() || v[0] > 1 || v[2] > 1) return false;
+    Config c = inout;
+    c.enabled = v[0] == 1;
+    c.min_off_s = static_cast<uint32_t>(v[1]);
+    c.probe_enabled = v[2] == 1;
+    c.probe_interval_s = static_cast<uint32_t>(v[3]);
+    c.probe_duration_s = static_cast<uint32_t>(v[4]);
+    inout = sanitize(c);
+    return true;
 }
 
 const char* state_str(State s) {
@@ -99,6 +135,27 @@ Action Machine::enter_running(uint32_t now_s, const char* event) {
     return commanded_on_ ? Action::None : command(true, now_s);
 }
 
+Action Machine::set_hold(bool hold, uint32_t now_s) {
+    if (hold == hold_) return Action::None;
+    hold_ = hold;
+    if (!cfg_.enabled || !initialized_) return Action::None;  // applied on first tick
+    if (hold) {
+        switch (state_) {
+            case State::Running:
+            case State::Probing:
+                return enter_parked(now_s, kWaitingForSlice, nullptr);
+            case State::Parked:
+                reason_ = kWaitingForSlice;
+                return Action::None;
+            case State::Off:
+                return Action::None;
+        }
+        return Action::None;
+    }
+    if (state_ == State::Parked) return enter_running(now_s, nullptr);
+    return Action::None;
+}
+
 Action Machine::configure(const Config& c, uint32_t now_s) {
     const bool was = cfg_.enabled;
     const bool was_managed = managed();
@@ -135,17 +192,26 @@ Action Machine::set_desired_power(bool on, uint32_t now_s) {
         return command(false, now_s);
     }
     if (state_ == State::Parked) return Action::None;  // already wants ON
+    if (hold_) {
+        // Wants ON but it isn't this head's slice: desired ON, unit held off.
+        state_ = State::Parked;
+        parked_at_ = now_s;
+        probe_ref_ = now_s;
+        sat_ = false;
+        reason_ = kWaitingForSlice;
+        return commanded_on_ ? command(false, now_s) : Action::None;
+    }
     if (state_ == State::Off) state_ = State::Running;
     return command(true, now_s);
 }
 
 Action Machine::notify_intent_change(uint32_t now_s) {
-    if (!cfg_.enabled || state_ != State::Parked) return Action::None;
+    if (!cfg_.enabled || state_ != State::Parked || hold_) return Action::None;
     return enter_probing(now_s, "settings changed", true);
 }
 
 int32_t Machine::next_probe_s(uint32_t now_s) const {
-    if (!parked() || !cfg_.probe_enabled) return -1;
+    if (!parked() || !cfg_.probe_enabled || hold_) return -1;
     uint32_t since = now_s - probe_ref_;
     return since >= cfg_.probe_interval_s ? 0
                                           : static_cast<int32_t>(cfg_.probe_interval_s - since);
@@ -187,6 +253,14 @@ Action Machine::tick(const Inputs& in, uint32_t now_s) {
         sat_ = false;
         if (restore_managed_) {
             restore_managed_ = false;
+            if (hold_) {
+                if (in.phys_on) return enter_parked(now_s, kWaitingForSlice, nullptr);
+                state_ = State::Parked;
+                parked_at_ = now_s;
+                probe_ref_ = now_s;
+                reason_ = kWaitingForSlice;
+                return Action::None;
+            }
             if (in.phys_on) return enter_probing(now_s, "resumed after restart", false);
             state_ = State::Parked;
             parked_at_ = now_s;
@@ -196,6 +270,7 @@ Action Machine::tick(const Inputs& in, uint32_t now_s) {
         }
         state_ = in.phys_on ? State::Running : State::Off;
         reason_ = "";
+        if (hold_ && in.phys_on) return enter_parked(now_s, kWaitingForSlice, nullptr);
         return Action::None;
     }
 
@@ -212,6 +287,9 @@ Action Machine::tick(const Inputs& in, uint32_t now_s) {
             commanded_on_ = in.phys_on;
             cmd_at_ = now_s;
             if (in.phys_on) {
+                // Not this head's slice: a remote turn-on is adopted as desired
+                // ON but the unit is held off until its slice comes up.
+                if (hold_) return enter_parked(now_s, kWaitingForSlice, nullptr);
                 // A remote press while parked re-evaluates via a probe; while
                 // off it is a plain turn-on.
                 if (state_ == State::Parked) return enter_probing(now_s, "remote", false);
@@ -252,6 +330,9 @@ Action Machine::tick(const Inputs& in, uint32_t now_s) {
         }
 
         case State::Parked: {
+            // A held head stays off whatever its mode (e.g. AUTO from the IR
+            // remote while slicing): the slice controller decides.
+            if (hold_) return Action::None;
             if (!eligible_mode(in.mode)) return enter_running(now_s, nullptr);
             if (now_s - parked_at_ >= cfg_.min_off_s && needs_conditioning(in))
                 return enter_running(now_s, "Resumed \xE2\x80\x94 room drifted from setpoint");
