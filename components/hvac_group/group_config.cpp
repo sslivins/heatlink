@@ -441,6 +441,19 @@ std::string hmac_hex(const std::string& message) {
     return to_hex(out, sizeof(out));
 }
 
+std::string group_fingerprint() {
+    std::string gid;
+    { Lock lk; gid = s_cfg.group_id; }
+    if (gid.empty() || psa_crypto_init() != PSA_SUCCESS) return "";
+    const std::string m = "heatlink-house:" + gid;
+    uint8_t out[32];
+    size_t out_len = 0;
+    if (psa_hash_compute(PSA_ALG_SHA_256, reinterpret_cast<const uint8_t*>(m.data()),
+                         m.size(), out, sizeof(out), &out_len) != PSA_SUCCESS)
+        return "";
+    return to_hex(out, 4);
+}
+
 bool hmac_verify(const std::string& message, const std::string& provided_hex) {
     const std::string expected = hmac_hex(message);
     if (expected.empty() || expected.size() != provided_hex.size()) return false;

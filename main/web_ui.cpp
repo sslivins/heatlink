@@ -66,6 +66,8 @@ void set_cors(httpd_req_t* req) {
     httpd_resp_set_hdr(req, "Cache-Control", "no-store");
 }
 
+void refresh_house_advert();  // defined with the House view below
+
 // ── Auth middleware ────────────────────────────────────────────────────
 constexpr const char* kCookieName = "mitsubishi_session";
 
@@ -894,6 +896,7 @@ esp_err_t handle_device_post(httpd_req_t* req) {
     // Propagate this head's (canonical) display name into the group replica so
     // peers learn it via gossip. No-op when standalone or unchanged.
     if (name_changed) hvac_group::note_self_name(wifi::device_display_name());
+    if (name_changed) refresh_house_advert();
     if (unit_changed) {
         std::string who = web_actor_name(req);
         std::string m = std::string("Display set to ") +
@@ -1161,6 +1164,7 @@ void update_status_led();  // defined below; drives the onboard warning glyph
 void update_group_mqtt();  // defined below; mirrors group status to Home Assistant
 
 void group_poll_task(void*) {
+    refresh_house_advert();
     // Seed our own display name into the replica once at boot so peers learn it
     // even if it was set before this firmware gained name propagation.
     if (hvac_group::in_group())
@@ -1187,6 +1191,7 @@ void group_poll_task(void*) {
         }
         update_status_led();  // reflect the current group status on the LED
         update_group_mqtt();  // mirror the current group status to Home Assistant
+        refresh_house_advert();  // group/label changes arrive via many paths
         vTaskDelay(pdMS_TO_TICKS(kPollIntervalMs));
     }
 }
@@ -2598,13 +2603,204 @@ bool try_group_mode_command(const std::string& mode) {
     return true;
 }
 
+namespace {
+
+// ── House view (issue #131) ────────────────────────────────────────────
+// Lists every head on the LAN across all outdoor units. Cross-group data comes
+// from an unauthenticated, read-only summary: it never touches the group secret
+// and exposes nothing usable for control. The aggregator runs in its own task
+// so the (multi-second) mDNS browse + peer fetches never block the httpd thread.
+
+void refresh_house_advert() {
+    std::string glabel;
+    if (hvac_group::in_group()) glabel = hvac_group::get().group_label;
+    wifi::set_house_advert(wifi::device_display_name(),
+                           hvac_group::group_fingerprint(), glabel);
+}
+
+// Read-only snapshot of this head for the House view.
+cJSON* build_house_summary() {
+    cn105::Settings st  = s_hooks.get_settings ? s_hooks.get_settings() : cn105::Settings{};
+    cn105::Status   sta = s_hooks.get_status   ? s_hooks.get_status()   : cn105::Status{};
+    const bool connected = s_hooks.unit_connected && s_hooks.unit_connected();
+    cJSON* o = cJSON_CreateObject();
+    cJSON_AddStringToObject(o, "uid", wifi::device_uid().c_str());
+    cJSON_AddStringToObject(o, "name", wifi::device_display_name().c_str());
+    cJSON_AddNumberToObject(o, "pv", hvac_group::kProtocolVersion);
+    cJSON_AddStringToObject(o, "version", esp_app_get_description()->version);
+    std::string gh = hvac_group::group_fingerprint();
+    if (!gh.empty()) {
+        cJSON_AddStringToObject(o, "ghash", gh.c_str());
+        cJSON_AddStringToObject(o, "glabel", hvac_group::get().group_label.c_str());
+    }
+    cJSON_AddBoolToObject(o, "unit_connected", connected);
+    if (connected) {
+        cJSON_AddStringToObject(o, "power", st.power.c_str());
+        cJSON_AddStringToObject(o, "mode", st.mode.c_str());
+        cJSON_AddBoolToObject(o, "operating", sta.operating);
+        cJSON_AddNumberToObject(o, "roomTemp", sta.roomTemperature);
+        cJSON_AddNumberToObject(o, "targetTemp", st.temperature);
+    }
+    return o;
+}
+
+// ── GET /api/house/summary — public, read-only ─────────────────────────
+esp_err_t handle_house_summary(httpd_req_t* req) {
+    set_cors(req);
+    cJSON* o = build_house_summary();
+    char* str = cJSON_PrintUnformatted(o);
+    cJSON_Delete(o);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, str ? str : "{}");
+    cJSON_free(str);
+    return ESP_OK;
+}
+
+constexpr int64_t kHouseCacheUs  = 15LL * 1000000;  // rescan when older
+constexpr int     kHouseFetchMs  = 1500;
+constexpr size_t  kHouseBodyMax  = 1024;
+
+struct HouseCache {
+    std::string heads_json = "[]";  // last completed scan (JSON array)
+    int64_t     at_us      = 0;     // 0 = never scanned
+    bool        scanning   = false;
+};
+HouseCache        s_house;
+SemaphoreHandle_t s_house_mtx  = nullptr;
+TaskHandle_t      s_house_task = nullptr;
+
+esp_err_t house_evt(esp_http_client_event_t* evt) {
+    auto* body = static_cast<std::string*>(evt->user_data);
+    if (body && evt->event_id == HTTP_EVENT_ON_DATA && evt->data && evt->data_len > 0 &&
+        body->size() < kHouseBodyMax)
+        body->append(static_cast<const char*>(evt->data), evt->data_len);
+    return ESP_OK;
+}
+
+// Fetch one head's /api/house/summary. Returns the HTTP status (0 = unreachable).
+int fetch_house_summary(const std::string& ip, std::string& body) {
+    std::string url = "http://" + ip + "/api/house/summary";
+    esp_http_client_config_t cfg = {};
+    cfg.url           = url.c_str();
+    cfg.method        = HTTP_METHOD_GET;
+    cfg.timeout_ms    = kHouseFetchMs;
+    cfg.event_handler = house_evt;
+    cfg.user_data     = &body;
+    esp_http_client_handle_t cli = esp_http_client_init(&cfg);
+    if (!cli) return 0;
+    int status = 0;
+    if (esp_http_client_perform(cli) == ESP_OK) status = esp_http_client_get_status_code(cli);
+    esp_http_client_cleanup(cli);
+    return status;
+}
+
+void copy_if(cJSON* dst, const cJSON* src, const char* key) {
+    const cJSON* v = cJSON_GetObjectItem(src, key);
+    if (!v) return;
+    if (cJSON_GetObjectItem(dst, key)) cJSON_DeleteItemFromObject(dst, key);
+    cJSON_AddItemToObject(dst, key, cJSON_Duplicate(v, true));
+}
+
+void house_task(void*) {
+    for (;;) {
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        std::vector<wifi::HeadAdvert> heads;
+        wifi::browse_heads(heads);
+        cJSON* arr = cJSON_CreateArray();
+        const std::string self_gh = hvac_group::group_fingerprint();
+        std::string self_gl;
+        if (!self_gh.empty()) self_gl = hvac_group::get().group_label;
+        for (auto h : heads) {
+            // An enrolled peer is on our outdoor unit by definition; fill gaps
+            // from our own group records (covers peers on older firmware that
+            // don't advertise name/ghash yet).
+            if (!self_gh.empty() && hvac_group::is_peer(h.uid)) {
+                h.ghash = self_gh;
+                h.glabel = self_gl;
+                if (h.name.empty()) h.name = hvac_group::member_display_name(h.uid);
+            }
+            cJSON* o = cJSON_CreateObject();
+            cJSON_AddStringToObject(o, "uid", h.uid.c_str());
+            cJSON_AddStringToObject(o, "name", (h.name.empty() ? h.uid : h.name).c_str());
+            cJSON_AddStringToObject(o, "ip", h.ip.c_str());
+            if (!h.ghash.empty())  cJSON_AddStringToObject(o, "ghash", h.ghash.c_str());
+            if (!h.glabel.empty()) cJSON_AddStringToObject(o, "glabel", h.glabel.c_str());
+            if (h.pv >= 0) cJSON_AddNumberToObject(o, "pv", h.pv);
+            std::string body;
+            int status = fetch_house_summary(h.ip, body);
+            cJSON* sj = (status == 200) ? cJSON_Parse(body.c_str()) : nullptr;
+            const bool ok = sj && cJSON_IsObject(sj);
+            cJSON_AddBoolToObject(o, "reachable", status != 0);
+            cJSON_AddBoolToObject(o, "summary_supported", ok);
+            if (ok) {
+                // The summary is fresher than the mDNS TXT; it wins where present.
+                static const char* keys[] = {"name", "ghash", "glabel", "pv", "version",
+                                             "unit_connected", "power", "mode",
+                                             "operating", "roomTemp", "targetTemp"};
+                for (const char* k : keys) copy_if(o, sj, k);
+            }
+            cJSON_Delete(sj);
+            cJSON_AddItemToArray(arr, o);
+        }
+        char* str = cJSON_PrintUnformatted(arr);
+        cJSON_Delete(arr);
+        xSemaphoreTake(s_house_mtx, portMAX_DELAY);
+        s_house.heads_json = str ? str : "[]";
+        s_house.at_us      = esp_timer_get_time();
+        s_house.scanning   = false;
+        xSemaphoreGive(s_house_mtx);
+        cJSON_free(str);
+    }
+}
+
+// ── GET /api/house — every head on the LAN, across outdoor units ────────
+// Returns the last completed scan immediately and kicks a background rescan
+// when it is stale; "scanning" tells the UI to poll again shortly.
+esp_err_t handle_house_get(httpd_req_t* req) {
+    set_cors(req);
+    REQUIRE_API_AUTH(req);
+    std::string heads;
+    int64_t at = 0;
+    bool scanning = false;
+    if (s_house_mtx) {
+        xSemaphoreTake(s_house_mtx, portMAX_DELAY);
+        const int64_t now = esp_timer_get_time();
+        if (!s_house.scanning && s_house_task &&
+            (s_house.at_us == 0 || now - s_house.at_us > kHouseCacheUs)) {
+            s_house.scanning = true;
+            xTaskNotifyGive(s_house_task);
+        }
+        heads = s_house.heads_json;
+        at = s_house.at_us;
+        scanning = s_house.scanning;
+        xSemaphoreGive(s_house_mtx);
+    }
+    cJSON* root = cJSON_CreateObject();
+    cJSON* self = build_house_summary();
+    cJSON_AddStringToObject(self, "ip", wifi::get_ip());
+    cJSON_AddItemToObject(root, "self", self);
+    cJSON* ha = cJSON_Parse(heads.c_str());
+    cJSON_AddItemToObject(root, "heads", ha ? ha : cJSON_CreateArray());
+    cJSON_AddBoolToObject(root, "scanning", scanning);
+    if (at) cJSON_AddNumberToObject(root, "age_s",
+                                    (double)((esp_timer_get_time() - at) / 1000000));
+    char* str = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, str ? str : "{}");
+    cJSON_free(str);
+    return ESP_OK;
+}
+
+}  // namespace
+
 esp_err_t init(const Hooks& hooks) {
     s_hooks = hooks;
     auth_mgr_init();
 
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
     cfg.uri_match_fn = httpd_uri_match_wildcard;
-    cfg.max_uri_handlers = 46;
+    cfg.max_uri_handlers = 52;  // must exceed the uris[] count below
     cfg.stack_size = 8192;
     // The default 7 sockets reserve 3 for internal use, leaving only 4 for
     // clients — fewer than the 6 keep-alive connections a single browser tab
@@ -2661,6 +2857,8 @@ esp_err_t init(const Hooks& hooks) {
         {"/api/group/resolve",       HTTP_POST,     handle_group_resolve,     nullptr},
         {"/api/group/label",         HTTP_POST,     handle_group_label,       nullptr},
         {"/api/group/member/remove", HTTP_POST,     handle_group_member_remove, nullptr},
+        {"/api/house",               HTTP_GET,      handle_house_get,      nullptr},
+        {"/api/house/summary",       HTTP_GET,      handle_house_summary,  nullptr},
         {"/api/wifi",                HTTP_GET,      handle_wifi_get,       nullptr},
         {"/api/scan",                HTTP_GET,      handle_scan,           nullptr},
         {"/api/wifi",                HTTP_POST,     handle_wifi_post,      nullptr},
@@ -2674,8 +2872,10 @@ esp_err_t init(const Hooks& hooks) {
         {"/api/events",              HTTP_DELETE,   handle_events_clear,   nullptr},
         {"/api/*",                   HTTP_OPTIONS, handle_options,        nullptr},
     };
+    static_assert(sizeof(uris) / sizeof(uris[0]) <= 52, "raise max_uri_handlers");
     for (const auto& u : uris) {
-        httpd_register_uri_handler(s_server, &u);
+        if (httpd_register_uri_handler(s_server, &u) != ESP_OK)
+            ESP_LOGE(TAG, "failed to register %s", u.uri);
     }
 
     ESP_LOGI(TAG, "web server started — http://%s/", wifi::get_ip());
@@ -2688,6 +2888,9 @@ esp_err_t init(const Hooks& hooks) {
     } else {
         ESP_LOGE(TAG, "group poll mutex alloc failed — peer polling disabled");
     }
+    s_house_mtx = xSemaphoreCreateMutex();
+    if (s_house_mtx)
+        xTaskCreate(house_task, "house", 6144, nullptr, 3, &s_house_task);
     return ESP_OK;
 }
 

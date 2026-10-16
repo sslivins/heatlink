@@ -96,6 +96,12 @@ std::string generate_pairing_code();
 /// Returns "" if the head has no valid secret.
 std::string hmac_hex(const std::string& message);
 
+/// Display-only outdoor-unit fingerprint for the House view: the first 8 hex
+/// chars of SHA-256("heatlink-house:" + group_id). Advertised over mDNS so heads
+/// in different groups can be sectioned by outdoor unit without revealing the
+/// group_id. Never trusted for any control decision. "" when standalone.
+std::string group_fingerprint();
+
 /// Constant-time comparison of an expected HMAC hex against a provided one.
 bool hmac_verify(const std::string& message, const std::string& provided_hex);
 

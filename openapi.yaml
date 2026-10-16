@@ -43,6 +43,8 @@ tags:
     description: On-device activity log
   - name: Groups
     description: Shared-compressor mode coordination between paired heads
+  - name: House
+    description: Read-only view of every head on the LAN across all outdoor units
 paths:
   /api/status:
     get:
@@ -831,6 +833,58 @@ paths:
           description: Not in a group
         '500':
           description: NVS write failed
+  /api/house:
+    get:
+      tags: [House]
+      summary: Every HeatLink head on the LAN, across all outdoor units
+      description: |
+        Returns the last completed LAN scan immediately. Heads are discovered via
+        the `_mmhvac._tcp` mDNS service and each one's `/api/house/summary` is
+        fetched in the background. When the cache is older than ~15 s a rescan is
+        started and `scanning` is true; poll again shortly. Heads are sectioned by
+        `ghash` (outdoor-unit fingerprint, display-only). Read-only: changes are
+        made by opening the target head's own UI.
+      security:
+        - ApiKeyAuth: []
+        - SessionCookie: []
+      responses:
+        '200':
+          description: House view
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  self: { $ref: '#/components/schemas/HouseSummary' }
+                  heads:
+                    type: array
+                    items:
+                      allOf:
+                        - $ref: '#/components/schemas/HouseSummary'
+                        - type: object
+                          properties:
+                            reachable: { type: boolean, description: 'Head answered HTTP' }
+                            summary_supported: { type: boolean, description: 'False for offline heads or firmware without /api/house/summary' }
+                  scanning: { type: boolean }
+                  age_s: { type: integer, description: 'Age of the scan result (absent before the first scan completes)' }
+        '401':
+          description: Unauthorized
+  /api/house/summary:
+    get:
+      tags: [House]
+      summary: Public read-only summary of this head (for the House view)
+      description: |
+        Unauthenticated by design so heads in other groups (and heads with web
+        login enabled) can still appear in the House view. Exposes only name,
+        outdoor-unit fingerprint/label and live mode/temperatures; nothing usable
+        for control or group signing.
+      security: []
+      responses:
+        '200':
+          description: Head summary
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HouseSummary' }
 components:
   securitySchemes:
     ApiKeyAuth:
@@ -842,6 +896,22 @@ components:
       in: cookie
       name: mh_session
   schemas:
+    HouseSummary:
+      type: object
+      properties:
+        uid: { type: string }
+        name: { type: string }
+        ip: { type: string, description: 'Present on /api/house entries' }
+        pv: { type: integer, description: 'Group protocol version' }
+        version: { type: string }
+        ghash: { type: string, description: 'Outdoor-unit fingerprint (8 hex); absent when standalone' }
+        glabel: { type: string, description: 'Group label; absent when standalone' }
+        unit_connected: { type: boolean }
+        power: { type: string, description: 'Absent when no unit connected' }
+        mode: { type: string }
+        operating: { type: boolean }
+        roomTemp: { type: number }
+        targetTemp: { type: number }
     StatusOk:
       type: object
       properties:

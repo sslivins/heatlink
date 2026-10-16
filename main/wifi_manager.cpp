@@ -7,9 +7,11 @@
 
 #include <cstring>
 #include <cstdio>
+#include <cstdlib>
 #include <vector>
 #include <string>
 #include <algorithm>
+#include <mutex>
 #include "esp_log.h"
 #include "esp_wifi.h"
 #include "esp_netif.h"
@@ -393,24 +395,62 @@ esp_err_t start_provisioning() {
 // stop offering it promptly. The pairing code itself is NEVER advertised; it is
 // only ever exchanged over the authenticated claim, so pair=1 leaks nothing but
 // "this head is currently accepting one new member".
+// The House-view identity (name/ghash/glabel) is always advertised, so the
+// pairing advert only toggles pair=1 and, while active, the label/name the
+// pairing UI shows; closing the window restores the house values.
+static std::mutex  s_advert_mtx;
+static std::string s_house_name, s_house_ghash, s_house_glabel;
+
+static void txt_set_or_remove(const char* key, const std::string& v) {
+    if (!v.empty()) mdns_service_txt_item_set("_mmhvac", "_tcp", key, v.c_str());
+    else            mdns_service_txt_item_remove("_mmhvac", "_tcp", key);
+}
+
+static bool s_pairing_active = false;
+
 void set_pairing_advert(bool active, const std::string& glabel,
                         const std::string& name) {
+    std::lock_guard<std::mutex> lk(s_advert_mtx);
+    s_pairing_active = active;
     if (active) {
         mdns_service_txt_item_set("_mmhvac", "_tcp", "pair", "1");
-        // Non-empty only; keep the TXT small and avoid empty-value quirks.
-        if (!glabel.empty())
-            mdns_service_txt_item_set("_mmhvac", "_tcp", "glabel", glabel.c_str());
-        else
-            mdns_service_txt_item_remove("_mmhvac", "_tcp", "glabel");
-        if (!name.empty())
-            mdns_service_txt_item_set("_mmhvac", "_tcp", "name", name.c_str());
-        else
-            mdns_service_txt_item_remove("_mmhvac", "_tcp", "name");
+        txt_set_or_remove("glabel", glabel);
+        txt_set_or_remove("name", name);
     } else {
         mdns_service_txt_item_remove("_mmhvac", "_tcp", "pair");
-        mdns_service_txt_item_remove("_mmhvac", "_tcp", "glabel");
-        mdns_service_txt_item_remove("_mmhvac", "_tcp", "name");
+        txt_set_or_remove("glabel", s_house_glabel);
+        txt_set_or_remove("name", s_house_name);
     }
+}
+
+void set_house_advert(const std::string& name, const std::string& ghash,
+                      const std::string& glabel) {
+    std::lock_guard<std::mutex> lk(s_advert_mtx);
+    if (name == s_house_name && ghash == s_house_ghash && glabel == s_house_glabel)
+        return;
+    s_house_name = name;
+    s_house_ghash = ghash;
+    s_house_glabel = glabel;
+    txt_set_or_remove("ghash", ghash);
+    if (!s_pairing_active) {
+        txt_set_or_remove("glabel", glabel);
+        txt_set_or_remove("name", name);
+    }
+}
+
+// First IPv4 address of an mDNS result as dotted quad; "" if none.
+static std::string result_ipv4(const mdns_result_t* r) {
+    for (mdns_ip_addr_t* a = r->addr; a; a = a->next) {
+        if (a->addr.type == ESP_IPADDR_TYPE_V4) {
+            uint32_t v = a->addr.u_addr.ip4.addr;  // LSB = first octet
+            char ip[16];
+            snprintf(ip, sizeof(ip), "%u.%u.%u.%u",
+                     (unsigned)(v & 0xff), (unsigned)((v >> 8) & 0xff),
+                     (unsigned)((v >> 16) & 0xff), (unsigned)((v >> 24) & 0xff));
+            return ip;
+        }
+    }
+    return "";
 }
 
 // Browse the LAN for heads currently advertising pair=1 and return a JSON array
@@ -441,24 +481,14 @@ esp_err_t discover_pairing(std::string& out_json) {
         if (!pairing) continue;
         if (!uid.empty() && uid == self_uid) continue;  // never offer ourselves
 
-        // First IPv4 address wins.
-        char ip[16] = {0};
-        for (mdns_ip_addr_t* a = r->addr; a; a = a->next) {
-            if (a->addr.type == ESP_IPADDR_TYPE_V4) {
-                uint32_t v = a->addr.u_addr.ip4.addr;  // LSB = first octet
-                snprintf(ip, sizeof(ip), "%u.%u.%u.%u",
-                         (unsigned)(v & 0xff), (unsigned)((v >> 8) & 0xff),
-                         (unsigned)((v >> 16) & 0xff), (unsigned)((v >> 24) & 0xff));
-                break;
-            }
-        }
-        if (ip[0] == '\0') continue;  // no usable address
+        std::string ip = result_ipv4(r);
+        if (ip.empty()) continue;  // no usable address
 
         cJSON* o = cJSON_CreateObject();
         cJSON_AddStringToObject(o, "uid",    uid.c_str());
         cJSON_AddStringToObject(o, "name",   name.c_str());
         cJSON_AddStringToObject(o, "glabel", glabel.c_str());
-        cJSON_AddStringToObject(o, "host",   ip);
+        cJSON_AddStringToObject(o, "host",   ip.c_str());
         cJSON_AddItemToArray(arr, o);
     }
     mdns_query_results_free(results);
@@ -468,6 +498,36 @@ esp_err_t discover_pairing(std::string& out_json) {
     if (!s) return ESP_ERR_NO_MEM;
     out_json = s;
     cJSON_free(s);
+    return ESP_OK;
+}
+
+esp_err_t browse_heads(std::vector<HeadAdvert>& out) {
+    out.clear();
+    mdns_result_t* results = nullptr;
+    esp_err_t err = mdns_query_ptr("_mmhvac", "_tcp", 2500, 20, &results);
+    if (err != ESP_OK) return err;
+
+    const std::string self_uid = device_uid();
+    for (mdns_result_t* r = results; r; r = r->next) {
+        HeadAdvert h;
+        for (size_t i = 0; i < r->txt_count; i++) {
+            const char* k = r->txt[i].key;
+            const char* v = r->txt[i].value ? r->txt[i].value : "";
+            if (!k) continue;
+            if (!strcmp(k, "uid"))         h.uid = v;
+            else if (!strcmp(k, "name"))   h.name = v;
+            else if (!strcmp(k, "ghash"))  h.ghash = v;
+            else if (!strcmp(k, "glabel")) h.glabel = v;
+            else if (!strcmp(k, "pv"))     h.pv = atoi(v);
+        }
+        if (h.uid.empty() || h.uid == self_uid) continue;
+        h.ip = result_ipv4(r);
+        if (h.ip.empty()) continue;
+        bool dup = false;
+        for (const auto& e : out) if (e.uid == h.uid) { dup = true; break; }
+        if (!dup) out.push_back(std::move(h));
+    }
+    mdns_query_results_free(results);
     return ESP_OK;
 }
 
