@@ -20,6 +20,8 @@ esp_err_t PMIC::init(i2c_master_bus_handle_t bus) {
         .dev_addr_length = I2C_ADDR_BIT_LEN_7,
         .device_address  = kI2CAddr,
         .scl_speed_hz     = 100000,
+        .scl_wait_us      = 0,
+        .flags            = {},
     };
     esp_err_t err = i2c_master_bus_add_device(bus, &dev_cfg, &dev_);
     if (err != ESP_OK) { dev_ = nullptr; return err; }

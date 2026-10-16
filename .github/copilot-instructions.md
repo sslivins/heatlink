@@ -21,7 +21,7 @@ ESP-IDF firmware for an **M5Stack Stamp-S3Bat (ESP32-S3)** that controls a
 to **Home Assistant over MQTT**. Successor to the Arduino/ESP8266
 `gysmo38/mitsubishi2MQTT`; preserves that project's MQTT topic contract.
 
-- **Framework**: ESP-IDF v5.4.3 (CI), `>=5.3` accepted
+- **Framework**: ESP-IDF v6.1 (CI), `>=6.0` required (cJSON/esp-mqtt are managed components)
 - **Target**: ESP32-S3 (`idf.py set-target esp32s3`)
 - **Language**: C++ (`app_main` is `extern "C"`)
 - **Transport**: esp-mqtt; small local web UI is for provisioning/diagnostics only
@@ -74,7 +74,7 @@ implemented.
 
 ## After Changes — Checklist
 
-- [ ] `idf.py build` passes (CI runs the same in `espressif/idf:v5.4.3`).
+- [ ] `idf.py build` passes (CI runs the same in `espressif/idf:v6.1`).
 - [ ] Update `README.md` if behavior/architecture/MQTT contract changed.
 - [ ] Bump `PROJECT_VER` in `CMakeLists.txt` for a release.
 - [ ] Conventional commit messages; one logical change per commit.

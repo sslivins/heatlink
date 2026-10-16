@@ -190,7 +190,7 @@ automate on.
 
 ## Build / flash
 
-ESP-IDF **v5.4.3** (matches CI).
+ESP-IDF **v6.1** (matches CI; `>=6.0` required).
 
 ```bash
 # one-time, or after cleaning
