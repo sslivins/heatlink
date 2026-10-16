@@ -76,6 +76,6 @@ implemented.
 
 - [ ] `idf.py build` passes (CI runs the same in `espressif/idf:v6.1`).
 - [ ] Update `README.md` if behavior/architecture/MQTT contract changed.
-- [ ] Bump `PROJECT_VER` in `CMakeLists.txt` for a release.
+- [ ] Releases are manual (run the **Create Release** workflow); it tags `PROJECT_VER` and auto-bumps the patch afterwards.
 - [ ] Conventional commit messages; one logical change per commit.
 - [ ] Don't break the MQTT topic contract without intent — HA entities depend on it.
