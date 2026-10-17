@@ -588,6 +588,57 @@ paths:
                 type: object
                 properties:
                   ok: { type: boolean, example: true }
+  /api/history:
+    get:
+      tags: [Activity]
+      summary: Recorded climate history (admin only)
+      description: |
+        One sample every 30 s is kept on flash for 14 days. Windows longer
+        than 4 h are averaged into `bucket`-second buckets (24 h → 60 s,
+        7 d → 420 s, 14 d → 840 s). Temperatures are deci-°C; `null` = no
+        reading. `flags` bits: 1 connected, 2 power, 4 operating, 8 defrost,
+        16 parked. `mode`: 0 none, 1 heat, 2 cool, 3 dry, 4 fan, 5 auto.
+        `fan`: 0 auto, 1 quiet, 2-5 speeds 1-4, 255 unknown. `freq` is the
+        outdoor unit's compressor frequency (shared by every head).
+      security:
+        - SessionCookie: []
+      parameters:
+        - name: window
+          in: query
+          description: Window length in seconds (3600 to 1209600).
+          schema: { type: integer, default: 86400 }
+        - name: end
+          in: query
+          description: Window end (unix seconds). Omit for the latest window.
+          schema: { type: integer }
+      responses:
+        '200':
+          description: History window
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  clock_valid: { type: boolean }
+                  now: { type: integer }
+                  start: { type: integer }
+                  end: { type: integer }
+                  window: { type: integer }
+                  interval: { type: integer, example: 30 }
+                  bucket: { type: integer, example: 60 }
+                  earliest: { type: integer, description: Oldest stored sample (0 if none) }
+                  latest_end: { type: integer, description: End of the newest window }
+                  fields:
+                    type: array
+                    items: { type: string }
+                    example: [t, room, target, outdoor, sensor, freq, mode, flags, fan]
+                  samples:
+                    type: array
+                    items:
+                      type: array
+                      items: { type: [integer, 'null'] }
+        '403':
+          description: Admin role required
   /api/group:
     get:
       tags: [Groups]

@@ -297,10 +297,13 @@ unit without knowing the hostname.
 
 Once connected to WiFi the device serves a responsive touch dashboard at
 `http://<ip>/` (or `http://heatlink-<id>.local/` via mDNS, where `<id>` is the
-unit's MAC suffix shown on the Status tab). It has four tabs — **Climate**
+unit's MAC suffix shown on the Status tab). It has five tabs — **Climate**
 (temperature dial, mode, fan & vanes), **Zones** (multi-head pairing &
 coordination with live Tandem status, plus a **House** view listing every head on the LAN grouped by
-outdoor unit when you have more than one), **Status** (live diagnostics — WiFi, controller power, heat-pump
+outdoor unit when you have more than one), **History** (admin only — a chart of
+room/target/outdoor temperature, heating/cooling/defrost/parked bands and compressor
+frequency over 4 h, 24 h or 7 days; one sample every 30 s is kept on flash for
+14 days and survives reboots and OTA), **Status** (live diagnostics — WiFi, controller power, heat-pump
 sensors, activity log), and **Settings** (display, wide-vane, off at setpoint,
 Tandem, WiFi, MQTT/HA,
 firmware, web/API access, device reset). It works standalone as a thermostat, or
@@ -337,6 +340,7 @@ access**). Optional per-endpoint API-key auth can be enabled there.
 | `POST` | `/api/park` | (admin) update off-at-setpoint config (partial; values are clamped) |
 | `GET`  | `/api/events` | activity log (who changed what, paginated) |
 | `DELETE` | `/api/events` | clear the activity log |
+| `GET`  | `/api/history?window=&end=` | (admin) recorded history window (14 days at 30 s, bucketed for long windows) |
 
 ### Diagnostics
 
