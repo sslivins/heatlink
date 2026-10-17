@@ -210,6 +210,9 @@ cursor:pointer;user-select:none;transition:.15s}
 .hist-chart.dragging{cursor:grabbing}
 .hist-hint-touch{display:none}
 @media (hover:none){.hist-hint-mouse{display:none}.hist-hint-touch{display:block}}
+/* 7 d bands turn into a barcode on a phone; keep it to wider screens.
+   Keep in sync with histNarrowMQ. */
+@media (max-width:640px){#histSeg button[data-w="604800"]{display:none}}
 .hist-axis{fill:var(--fg-3);font-size:11px;font-family:inherit}
 .hist-tip{display:none;position:absolute;top:8px;pointer-events:none;background:var(--surface);border:1px solid var(--border-strong);
   border-radius:8px;padding:7px 10px;font-size:.78em;line-height:1.6;white-space:nowrap;box-shadow:0 4px 14px rgba(0,0,0,.3);z-index:2}
@@ -2989,10 +2992,20 @@ const HIST_MODES=['','Heat','Cool','Dry','Fan','Auto'];
 const HIST_FAN=['Auto','Quiet','1','2','3','4'];
 let hist={window:86400,end:null,data:null,loading:false,loadedAt:0,error:''};
 let histTabActive=false, histGeom=null, histDrag=null, histWired=false;
+const histNarrowMQ=window.matchMedia('(max-width:640px)');
+// 7 d is hidden on phones; fall back to the live 24 h view.
+function histFitWindow(){
+  if(!histNarrowMQ.matches||hist.window!==604800) return false;
+  hist.window=86400; hist.end=null;
+  return true;
+}
+histNarrowMQ.addEventListener('change',()=>{ if(histFitWindow()&&histTabActive) histLoad(); });
 
 async function histLoad(){
   if(hist.loading) return;
+  histFitWindow();
   hist.loading=true;
+  const win=hist.window;
   try{
     const r=await jget('/api/history?window='+hist.window+(hist.end?'&end='+hist.end:''));
     if(r.ok){
@@ -3004,6 +3017,7 @@ async function histLoad(){
   }catch(e){ hist.error='Could not load history.'; }
   hist.loadedAt=Date.now();
   hist.loading=false;
+  if(hist.window!==win){ histLoad(); return; }
   histRender();
 }
 function histDateLocale(){ return LANG==='fr'?'fr':[]; }
