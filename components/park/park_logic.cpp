@@ -207,11 +207,15 @@ Action Machine::set_desired_power(bool on, uint32_t now_s) {
 
 Action Machine::notify_intent_change(uint32_t now_s) {
     if (!cfg_.enabled || state_ != State::Parked || hold_) return Action::None;
+    if (external_) {
+        reeval_ = true;  // the room sensor already knows the room: no air needed
+        return Action::None;
+    }
     return enter_probing(now_s, "settings changed", true);
 }
 
 int32_t Machine::next_probe_s(uint32_t now_s) const {
-    if (!parked() || !cfg_.probe_enabled || hold_) return -1;
+    if (!parked() || !cfg_.probe_enabled || hold_ || external_) return -1;
     uint32_t since = now_s - probe_ref_;
     return since >= cfg_.probe_interval_s ? 0
                                           : static_cast<int32_t>(cfg_.probe_interval_s - since);
@@ -228,6 +232,9 @@ Action Machine::tick(const Inputs& in, uint32_t now_s) {
     if (dt > 5) dt = 5;  // a stalled task must not fast-forward a probe
     have_tick_ = true;
     last_tick_ = now_s;
+    external_ = in.room_external;
+    const bool reeval = reeval_;
+    reeval_ = false;
 
     if (!cfg_.enabled) {
         // A reboot can restore a parked flag after the feature was switched
@@ -334,9 +341,16 @@ Action Machine::tick(const Inputs& in, uint32_t now_s) {
             // remote while slicing): the slice controller decides.
             if (hold_) return Action::None;
             if (!eligible_mode(in.mode)) return enter_running(now_s, nullptr);
+            // New target with a room sensor: like the probe it replaces, a
+            // user's change isn't held back by the minimum off time.
+            if (reeval && in.room_external && !satisfied(in))
+                return enter_running(now_s, "Resumed \xE2\x80\x94 new target not reached (room sensor)");
             if (now_s - parked_at_ >= cfg_.min_off_s && needs_conditioning(in))
                 return enter_running(now_s, "Resumed \xE2\x80\x94 room drifted from setpoint");
-            if (cfg_.probe_enabled && now_s - probe_ref_ >= cfg_.probe_interval_s)
+            // A room sensor reads the room without airflow. If it goes quiet the
+            // overdue probe runs at once (probe_ref_ isn't advanced meanwhile).
+            if (cfg_.probe_enabled && !in.room_external &&
+                now_s - probe_ref_ >= cfg_.probe_interval_s)
                 return enter_probing(now_s, "scheduled probe", true);
             return Action::None;
         }

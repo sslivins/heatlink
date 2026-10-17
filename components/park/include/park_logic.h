@@ -72,6 +72,9 @@ struct Inputs {
     float       room      = 0.0f;
     bool        operating = false;   ///< compressor running for this head
     std::string sub_mode;            ///< NORMAL/WARMUP/DEFROST/PREHEAT/STANDBY/OFF
+    /// `room` comes from a fresh wireless room sensor (#142), not the head's
+    /// return-air sensor: it is accurate while the fan is off, so no air checks.
+    bool        room_external = false;
 };
 
 /// True for modes that park (HEAT, COOL, DRY — DRY is treated as COOL).
@@ -92,7 +95,8 @@ public:
     Action set_desired_power(bool on, uint32_t now_s);
 
     /// The user changed mode or setpoint. While parked this starts a probe so
-    /// the new target is evaluated with real airflow.
+    /// the new target is evaluated with real airflow; with a room sensor the new
+    /// target is evaluated against its reading on the next tick instead.
     Action notify_intent_change(uint32_t now_s);
 
     /// Time-sliced heat/cool (#133): while held, a head whose desired power is
@@ -119,7 +123,8 @@ public:
     /// slice scheduler's "this head is satisfied" signal.
     bool  parked_satisfied() const { return parked() && !hold_; }
     const char* reason() const { return reason_; }
-    /// Seconds until the next probe while parked with probing on, else -1.
+    /// Seconds until the next probe while parked with probing on, else -1
+    /// (also -1 while a room sensor makes probes unnecessary).
     int32_t next_probe_s(uint32_t now_s) const;
 
     /// A park/wake transition worth an activity-log entry since the last call,
@@ -149,6 +154,8 @@ private:
     uint32_t probe_start_ = 0;
     uint32_t probe_airflow_s_ = 0;
     bool     hold_ = false;
+    bool     external_ = false;      ///< last tick's room came from a room sensor
+    bool     reeval_ = false;        ///< target changed while parked with a sensor
     bool     have_tick_ = false;
     uint32_t last_tick_ = 0;
     const char* reason_ = "";

@@ -512,6 +512,58 @@ paths:
           description: Not authorized
         '403':
           description: Admin access required
+  /api/sensor:
+    get:
+      tags: [Climate]
+      summary: Wireless room sensor (Shelly BLU H&T / BTHome)
+      description: |
+        A paired Bluetooth room sensor's latest reading. While fresh, its
+        temperature is sent to the unit as the remote room temperature (Home
+        Assistant's `remote_temp/set` is ignored meanwhile) and off-at-setpoint
+        uses it instead of air checks. After `stale_after_s` without a reading
+        the remote temperature is cleared and the head uses its own sensor.
+      security:
+        - ApiKeyAuth: []
+        - SessionCookie: []
+      responses:
+        '200':
+          description: Paired sensor, reading and pairing state
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RoomSensor' }
+    post:
+      tags: [Climate]
+      summary: Pair, select or remove the room sensor (admin)
+      description: |
+        `pair` opens a 60 s window: pressing the button on an unencrypted BTHome
+        sensor pairs it (replacing any current sensor). `cancel` closes the
+        window. `select` pairs `addr` from the window's `nearby` list. `remove`
+        unpairs.
+      security:
+        - ApiKeyAuth: []
+        - SessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action]
+              properties:
+                action: { type: string, enum: [pair, cancel, select, remove] }
+                addr: { type: string, description: 'Required for select, e.g. "7C:C6:B6:12:34:56"' }
+      responses:
+        '200':
+          description: Updated state
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RoomSensor' }
+        '400':
+          description: Missing/unknown action, or the selected sensor wasn't heard recently or is encrypted
+        '401':
+          description: Not authorized
+        '403':
+          description: Admin access required
   /api/device:
     post:
       tags: [System]
@@ -1168,6 +1220,42 @@ components:
         forced: { type: boolean, description: Off-at-setpoint is forced on by group time-slicing }
         slicing: { type: boolean, description: Group time-slicing (Tandem) is enabled (AUTO is unavailable) }
         quiet_fan: { type: boolean, description: An air check is running with the fan at QUIET (settings report the user's fan) }
+        room_sensor: { type: boolean, description: 'A fresh wireless room sensor supplies the room temperature, so no air checks run (next_probe_s is null)' }
+    RoomSensor:
+      type: object
+      properties:
+        paired: { type: boolean }
+        addr: { type: string, nullable: true, description: 'Bluetooth address "AA:BB:CC:DD:EE:FF" of the paired sensor' }
+        name: { type: string, description: Advertised name, if heard (may be empty) }
+        fresh: { type: boolean, description: A temperature was received within stale_after_s }
+        active: { type: boolean, description: The sensor's temperature is being sent to the unit as its room temperature }
+        temp: { type: number, nullable: true, description: Last temperature, °C }
+        humidity: { type: number, nullable: true, description: '%RH' }
+        battery: { type: integer, nullable: true, description: '%' }
+        rssi: { type: integer, nullable: true, description: dBm of the last advertisement }
+        temp_age_s: { type: integer, nullable: true, description: Seconds since the last temperature }
+        seen_age_s: { type: integer, nullable: true, description: Seconds since the last advertisement of any kind }
+        stale_after_s: { type: integer, description: 'Without a temperature this long the head falls back to its own sensor' }
+        pairing: { type: boolean, description: The press-the-button window is open }
+        pairing_remaining_s: { type: integer }
+        nearby:
+          type: array
+          description: BTHome devices heard during the pairing window, strongest first
+          items:
+            type: object
+            properties:
+              addr: { type: string }
+              name: { type: string }
+              rssi: { type: integer }
+              encrypted: { type: boolean, description: Encrypted BTHome can't be decoded (not selectable) }
+              temp: { type: number, nullable: true }
+              age_s: { type: integer }
+        ble:
+          type: object
+          properties:
+            scanning: { type: boolean, description: Bluetooth is up and scanning }
+            error: { type: string, description: Non-empty if the Bluetooth stack failed to start }
+            adverts: { type: integer, description: 'Advertisements heard since boot from any device (diagnostics)' }
     ParkConfigUpdate:
       type: object
       properties:
