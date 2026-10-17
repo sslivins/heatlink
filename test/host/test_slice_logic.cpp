@@ -93,10 +93,12 @@ static void test_config() {
 
     Config e = on_cfg();
     e.min_slice_s = 900;
-    CHECK(encode_config(e) == "1,900,1800,60");
+    CHECK(encode_config(e) == "1,900,1800,180");
     Config d;
-    CHECK(decode_config("1,900,1800,60", d));
-    CHECK(d.enabled && d.min_slice_s == 900 && d.max_slice_s == 1800 && d.settle_s == 60);
+    CHECK(decode_config("1,900,1800,240", d));
+    CHECK(d.enabled && d.min_slice_s == 900 && d.max_slice_s == 1800 && d.settle_s == 240);
+    // A pause saved by older firmware is raised to the 3 min floor.
+    CHECK(decode_config("1,900,1800,30", d) && d.settle_s == kMinSettleS);
     CHECK(decode_config("0,1,1,1", d) && !d.enabled && d.min_slice_s == kMinSliceFloorS);
     CHECK(!decode_config("", d));
     CHECK(!decode_config("2,600,1800,60", d));
@@ -161,7 +163,9 @@ static void test_max_slice_forces_switch() {
     CHECK(n.state().mode == Mode::Cool);
     CHECK(n.directive(Mode::Heat, now) == Directive::Hold);
     CHECK(n.directive(Mode::Cool, now) == Directive::Hold);  // settle first
-    run(n, ms, now + 1801, now + 1801 + 61);
+    run(n, ms, now + 1801, now + 1801 + 170);
+    CHECK(n.state().phase == Phase::Changeover);  // 3 min minimum pause
+    run(n, ms, now + 1801 + 170, now + 1801 + 181);
     CHECK(n.state().phase == Phase::Run);
     CHECK(n.state().mode == Mode::Cool);
     CHECK(n.directive(Mode::Cool, now) == Directive::Run);
@@ -246,7 +250,7 @@ static void test_changeover_retargets_without_demand() {
     CHECK(n.state().phase == Phase::Changeover);
     // Cool demand vanishes mid-changeover while heat comes back.
     std::vector<Member> back = {mem("a", Mode::Heat), mem("b", Mode::None)};
-    run(n, back, now + 2, now + 100);
+    run(n, back, now + 2, now + 200);
     CHECK(n.state().phase == Phase::Run);
     CHECK(n.state().mode == Mode::Heat);
 }

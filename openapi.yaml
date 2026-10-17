@@ -934,7 +934,7 @@ paths:
         `/api/group/resolve` / `/api/group/sync` return 409. Off-at-setpoint
         is forced on for every head. Partial updates are allowed; values are
         clamped (min slice 300-3600 s, max slice >= min and <= 7200 s,
-        settle 30-600 s).
+        settle 180-600 s).
       security:
         - SessionCookie: []
       requestBody:
@@ -947,7 +947,7 @@ paths:
                 enabled: { type: boolean }
                 min_slice_s: { type: integer, description: 'Minimum slice before switching to waiting heads (default 600)' }
                 max_slice_s: { type: integer, description: 'Switch even if the current mode is unsatisfied (default 1800)' }
-                settle_s: { type: integer, description: 'All-off pause between HEAT and COOL slices (default 60)' }
+                settle_s: { type: integer, description: 'All-off pause between HEAT and COOL slices (default and minimum 180)' }
       responses:
         '200':
           description: Applied settings and live status

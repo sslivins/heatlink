@@ -248,8 +248,9 @@ on firmware that supports it), the group instead takes turns heating and cooling
   the outdoor unit from short cycling). After that it hands over once every
   head in the current mode is satisfied, or at the **maximum turn** (default
   30 min) regardless. A mode nobody wants any more ends its turn at once.
-  Between modes every head is parked for the **pause between modes** (default
-  60 s). The turn clock pauses during defrost and never switches mid-defrost.
+  Between modes every head is parked for the **pause between modes** (3–10 min,
+  default 3; a safety margin in case the outdoor unit has no restart delay of
+  its own). The turn clock pauses during defrost and never switches mid-defrost.
 - Off-at-setpoint is forced on for every head while Tandem is enabled. DRY
   counts as cooling; OFF and FAN heads are unaffected.
 - AUTO is not available: the UI hides it, `/api/settings` rejects it, Home
