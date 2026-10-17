@@ -234,7 +234,7 @@ Limitations:
 
 All heads on one outdoor unit share its direction: it can heat or cool, not
 both. Normally a zone group resolves a mixed request by switching every zone to
-one mode. With **Zones → Tandem** enabled (admin, needs every head online and
+one mode. With **Settings → Tandem** enabled (admin, needs every head online and
 on firmware that supports it), the group instead takes turns heating and cooling
 (time-slicing):
 
@@ -299,9 +299,10 @@ Once connected to WiFi the device serves a responsive touch dashboard at
 `http://<ip>/` (or `http://heatlink-<id>.local/` via mDNS, where `<id>` is the
 unit's MAC suffix shown on the Status tab). It has four tabs — **Climate**
 (temperature dial, mode, fan & vanes), **Zones** (multi-head pairing &
-coordination, plus a **House** view listing every head on the LAN grouped by
+coordination with live Tandem status, plus a **House** view listing every head on the LAN grouped by
 outdoor unit when you have more than one), **Status** (live diagnostics — WiFi, controller power, heat-pump
-sensors, activity log), and **Settings** (display, wide-vane, WiFi, MQTT/HA,
+sensors, activity log), and **Settings** (display, wide-vane, off at setpoint,
+Tandem, WiFi, MQTT/HA,
 firmware, web/API access, device reset). It works standalone as a thermostat, or
 alongside MQTT/Home Assistant.
 
