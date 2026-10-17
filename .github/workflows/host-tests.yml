@@ -97,7 +97,8 @@ jobs:
           g++ -std=c++17 -Wall -Wextra -fsanitize=address,undefined \
             -I components/room_sensor/include \
             components/room_sensor/bthome.cpp \
-            components/room_sensor/sensor_tracker.cpp \
+            components/room_sensor/sensor_set.cpp \
+            components/room_sensor/shelly_ht.cpp \
             test/host/test_room_sensor.cpp \
             -o room_sensor_tests
           ./room_sensor_tests

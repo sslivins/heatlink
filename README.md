@@ -259,23 +259,37 @@ on firmware that supports it), the group instead takes turns heating and cooling
 - `/api/group/resolve`, `/api/group/sync` and the "switch all zones" prompt are
   disabled; mixed modes are expected rather than a conflict.
 
-## Room sensor (Shelly BLU H&T)
+## Room sensors
 
-Each head can use a battery-powered Bluetooth sensor on the wall as its room
-temperature instead of the air at the head. Supported: any **unencrypted
-BTHome v2** sensor, e.g. the Shelly BLU H&T (Shelly H&T Gen3 over Wi-Fi is
-planned, #142).
+Each head can use up to **4** battery-powered sensors on the wall as its room
+temperature instead of the air at the head; with several, it uses the average
+of those that are fresh. Sensors come from drivers by transport:
 
-- **Pairing** (Settings → Room sensor, admin): tap *Add sensor*, then press the
-  button on the sensor within 60 s, or pick it from the sensors heard nearby.
-  Bluetooth only scans while a sensor is paired or pairing.
-- While readings are fresh the head sends the sensor's temperature to the unit
+| Driver | Devices | How readings arrive |
+| --- | --- | --- |
+| Bluetooth (BTHome) | any **unencrypted BTHome v2** sensor, e.g. Shelly BLU H&T | passive scan of its adverts (about every minute) |
+| Shelly Wi-Fi | Shelly Gen2+ devices with a temperature sensor, e.g. Shelly H&T Gen3 | webhooks the head installs on the sensor call `GET /api/sensors/report` |
+
+- **Pairing** (Settings → Room sensors, admin): tap *Add sensor* and pick the type.
+  - *Bluetooth*: press the button on the sensor within 60 s, or pick it from
+    the sensors heard nearby. Bluetooth only scans while a Bluetooth sensor is
+    paired or pairing.
+  - *Wi-Fi*: wake the sensor (open its back cover, press the button) and pick
+    it from the list found on the network, or type its IP address. The sensor
+    must have no password. The head replaces any earlier HeatLink webhooks on
+    the sensor, so a sensor feeds one head.
+- **Report step** (Wi-Fi sensors): a battery Shelly H&T sleeps and reports
+  only when the temperature moves by this much (default 0.5 °C) or at least
+  every 2 h. Changes apply the next time the sensor wakes; press its button to
+  apply at once. Webhooks are re-pointed automatically if the head's IP changes.
+- While any reading is fresh the head sends the room temperature to the unit
   as its remote room temperature (Home Assistant's `remote_temp/set` is ignored
   meanwhile), and off-at-setpoint uses it directly, so no fan air checks run.
-  Changing the target while parked re-evaluates against the sensor at once.
-- If no reading arrives for **10 minutes**, the head clears the remote
-  temperature, goes back to its own sensor and air checks, and shows a warning.
-  It switches back automatically when readings resume.
+  Changing the target while parked re-evaluates against the sensors at once.
+- A sensor is stale after **10 minutes** (Bluetooth) or **2 h 15 min** (Wi-Fi)
+  without a reading. With none fresh, the head clears the remote temperature,
+  goes back to its own sensor and air checks, and shows a warning. It switches
+  back automatically when readings resume.
 - Encrypted BTHome sensors can't be read; turn encryption off in the Shelly app.
 
 ## Build / flash

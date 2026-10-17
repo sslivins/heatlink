@@ -1,16 +1,19 @@
 /// @file room_sensor_ctl.h
-/// @brief Firmware glue for wireless room sensors (#142): NimBLE passive
-/// scanning for BTHome adverts (Shelly BLU H&T), the paired sensor in NVS,
-/// and feeding its reading to the unit as the remote room temperature.
+/// @brief Firmware glue for wireless room sensors (#142).
 ///
-/// While the paired sensor is fresh its temperature is sent to the unit
-/// (CN105 remote temperature) and used by off-at-setpoint instead of air
-/// checks. If it goes quiet for room_sensor::kStaleS the remote temperature
-/// is cleared and the head falls back to its own sensor.
+/// Up to room_sensor::kMaxSensors sensors per head, from two drivers:
+///   - BTHome: NimBLE passive scan (Shelly BLU H&T, ...).
+///   - Shelly RPC: Shelly Gen2+ Wi-Fi sensors; at pairing the head installs
+///     webhooks that call GET /api/sensors/report on every report.
+/// While any sensor is fresh, their average is sent to the unit as the
+/// remote room temperature and used by off-at-setpoint instead of air
+/// checks. With none fresh the remote temperature is cleared and the head
+/// falls back to its own sensor.
 
 #pragma once
 
-#include "sensor_tracker.h"
+#include "sensor_set.h"
+#include "shelly_rpc.h"
 
 #include <cstdint>
 #include <functional>
@@ -26,40 +29,66 @@ struct Hooks {
     std::function<void()> on_change;
 };
 
-/// Load the paired sensor from NVS and start the worker task. BLE itself
-/// starts only once a sensor is paired or pairing begins.
+/// Load the sensors from NVS and start the worker task. BLE starts only once
+/// a BTHome sensor is paired or Bluetooth pairing begins.
 void init(const Hooks& hooks);
 
-/// The paired sensor's temperature while it is fresh.
+/// The room temperature (average of fresh sensors), if any is fresh.
 bool fresh_temp(float* out);
 
-/// The sensor currently owns the unit's remote temperature (HA's
+/// The sensors currently own the unit's remote temperature (HA's
 /// remote_temp/set is ignored meanwhile).
 bool active();
 
+struct SensorView {
+    room_sensor::Sensor s;
+    bool     fresh = false;
+    int32_t  temp_age_s = -1;  ///< -1 = no temperature yet
+    int32_t  seen_age_s = -1;
+    uint32_t stale_s = 0;
+};
+
 struct Snapshot {
-    bool        paired = false;
-    std::string addr;
-    std::string name;
-    bool        fresh = false;
-    room_sensor::Sample sample;
-    int32_t     temp_age_s = -1;   ///< seconds since the last temperature, -1 none
-    int32_t     seen_age_s = -1;   ///< seconds since any advert, -1 none
-    bool        pairing = false;
-    uint32_t    pairing_remaining_s = 0;
+    std::vector<SensorView> sensors;
+    bool   has_temp = false;     ///< room temperature available (any fresh)
+    float  temp = 0.0f;
+    size_t n_fresh = 0;
+    // Bluetooth pairing window.
+    bool     ble_pairing = false;
+    uint32_t ble_remaining_s = 0;
     std::vector<room_sensor::Nearby> nearby;
     std::vector<int32_t> nearby_age_s;
-    bool        ble_ready = false; ///< stack up and scanning
-    std::string ble_error;         ///< non-empty if the stack failed to start
-    uint32_t    ble_adverts = 0;   ///< advertisements heard since boot (any device)
+    // Wi-Fi pairing window.
+    bool     wifi_pairing = false;
+    uint32_t wifi_remaining_s = 0;
+    std::vector<shelly_rpc::Found> found;
+    std::string pair_state = "idle";  ///< idle / working / ok / error
+    std::string pair_message;
+    // Bluetooth stack.
+    bool        ble_scanning = false;
+    std::string ble_error;
+    uint32_t    ble_adverts = 0;
 };
 Snapshot snapshot();
 
-/// Open the 60 s "press the button on the sensor" window.
-void start_pairing();
+enum class Res { Ok, Full, NotFound, Invalid, Busy };
+
+/// Open the 60 s "press the button on the sensor" Bluetooth window.
+Res start_ble_pairing();
+/// Look for awake Shelly sensors on the network for 3 minutes.
+Res start_wifi_pairing();
 void cancel_pairing();
-/// Pair a sensor from the nearby list. False if unknown or encrypted.
-bool select(const std::string& addr);
-void unpair();
+/// Pair a BTHome sensor from the nearby list.
+Res select(const std::string& addr);
+/// Pair the Shelly at host (IP or name); runs in the background, result in
+/// Snapshot::pair_state / pair_message.
+Res pair_wifi(const std::string& host);
+Res remove(const std::string& id);
+/// Rename (name != nullptr) and/or set a Shelly report step (step_c > 0).
+Res configure(const std::string& id, const std::string* name, float step_c);
+
+/// A webhook call: query string and the caller's IP. False if the token
+/// doesn't match any sensor.
+bool on_report(const std::string& query, const std::string& peer_ip);
 
 }  // namespace room_sensor_ctl

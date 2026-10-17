@@ -512,33 +512,44 @@ paths:
           description: Not authorized
         '403':
           description: Admin access required
-  /api/sensor:
+  /api/sensors:
     get:
       tags: [Climate]
-      summary: Wireless room sensor (Shelly BLU H&T / BTHome)
+      summary: Wireless room sensors (BTHome over Bluetooth, Shelly over Wi-Fi)
       description: |
-        A paired Bluetooth room sensor's latest reading. While fresh, its
-        temperature is sent to the unit as the remote room temperature (Home
-        Assistant's `remote_temp/set` is ignored meanwhile) and off-at-setpoint
-        uses it instead of air checks. After `stale_after_s` without a reading
-        the remote temperature is cleared and the head uses its own sensor.
+        Up to `max` paired room sensors and their latest readings. While any is
+        fresh, the average of the fresh sensors (`temp`) is sent to the unit as
+        the remote room temperature (Home Assistant's `remote_temp/set` is
+        ignored meanwhile) and off-at-setpoint uses it instead of air checks.
+        A sensor is stale after `stale_after_s` without a temperature (10 min
+        for Bluetooth, 2 h 15 min for Shelly Wi-Fi sensors, which sleep and
+        report on change or at least every 2 h). With none fresh the remote
+        temperature is cleared and the head uses its own sensor.
       security:
         - ApiKeyAuth: []
         - SessionCookie: []
       responses:
         '200':
-          description: Paired sensor, reading and pairing state
+          description: Sensors, room temperature and pairing state
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/RoomSensor' }
+              schema: { $ref: '#/components/schemas/RoomSensors' }
     post:
       tags: [Climate]
-      summary: Pair, select or remove the room sensor (admin)
+      summary: Pair, configure or remove room sensors (admin)
       description: |
-        `pair` opens a 60 s window: pressing the button on an unencrypted BTHome
-        sensor pairs it (replacing any current sensor). `cancel` closes the
-        window. `select` pairs `addr` from the window's `nearby` list. `remove`
-        unpairs.
+        - `pair_ble` opens a 60 s window: pressing the button on an unencrypted
+          BTHome sensor pairs it. `select` pairs `addr` from the window's
+          `nearby` list.
+        - `discover` looks for awake Shelly sensors (mDNS) for 3 minutes;
+          `pair_wifi` pairs the Shelly at `host` in the background (progress in
+          `pairing.wifi.state`). Pairing installs webhooks on the sensor that
+          call `/api/sensors/report`; the sensor must be awake (press its
+          button) and have no password.
+        - `cancel` closes the windows. `remove` unpairs `id`.
+        - `set` renames `id` and/or sets a Shelly's `report_step` (°C change
+          that triggers a report, 0.1–5.0). The sensor applies it when it
+          next wakes (`pending`).
       security:
         - ApiKeyAuth: []
         - SessionCookie: []
@@ -550,20 +561,47 @@ paths:
               type: object
               required: [action]
               properties:
-                action: { type: string, enum: [pair, cancel, select, remove] }
-                addr: { type: string, description: 'Required for select, e.g. "7C:C6:B6:12:34:56"' }
+                action: { type: string, enum: [pair_ble, discover, pair_wifi, select, cancel, remove, set] }
+                addr: { type: string, description: 'select: Bluetooth address, e.g. "7C:C6:B6:12:34:56"' }
+                host: { type: string, description: 'pair_wifi: the sensor IP address or host name' }
+                id: { type: string, description: 'remove / set: sensor id' }
+                name: { type: string, description: 'set: display name' }
+                report_step: { type: number, description: 'set: Shelly report threshold, °C' }
       responses:
         '200':
           description: Updated state
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/RoomSensor' }
+              schema: { $ref: '#/components/schemas/RoomSensors' }
         '400':
-          description: Missing/unknown action, or the selected sensor wasn't heard recently or is encrypted
+          description: Missing/unknown action, invalid value, already 4 sensors, or a pairing is in progress
         '401':
           description: Not authorized
         '403':
           description: Admin access required
+        '404':
+          description: No such sensor, or the selected Bluetooth sensor wasn't heard recently or is encrypted
+  /api/sensors/report:
+    get:
+      tags: [Climate]
+      summary: Webhook from a paired Shelly sensor
+      description: |
+        Called by the webhooks installed at pairing. No login: the per-sensor
+        token `k` is the credential. The caller's IP becomes the sensor's
+        address, so DHCP changes are followed.
+      parameters:
+        - { name: k, in: query, required: true, schema: { type: string }, description: Sensor token }
+        - { name: t, in: query, schema: { type: number }, description: Temperature, °C }
+        - { name: h, in: query, schema: { type: number }, description: Humidity, %RH }
+        - { name: b, in: query, schema: { type: integer }, description: Battery, % }
+        - { name: r, in: query, schema: { type: integer }, description: Wi-Fi RSSI, dBm }
+      responses:
+        '200':
+          description: Accepted
+        '400':
+          description: Malformed report
+        '403':
+          description: Unknown token
   /api/device:
     post:
       tags: [System]
@@ -1221,35 +1259,67 @@ components:
         slicing: { type: boolean, description: Group time-slicing (Tandem) is enabled (AUTO is unavailable) }
         quiet_fan: { type: boolean, description: An air check is running with the fan at QUIET (settings report the user's fan) }
         room_sensor: { type: boolean, description: 'A fresh wireless room sensor supplies the room temperature, so no air checks run (next_probe_s is null)' }
-    RoomSensor:
+    RoomSensors:
       type: object
       properties:
-        paired: { type: boolean }
-        addr: { type: string, nullable: true, description: 'Bluetooth address "AA:BB:CC:DD:EE:FF" of the paired sensor' }
-        name: { type: string, description: Advertised name, if heard (may be empty) }
-        fresh: { type: boolean, description: A temperature was received within stale_after_s }
-        active: { type: boolean, description: The sensor's temperature is being sent to the unit as its room temperature }
-        temp: { type: number, nullable: true, description: Last temperature, °C }
-        humidity: { type: number, nullable: true, description: '%RH' }
-        battery: { type: integer, nullable: true, description: '%' }
-        rssi: { type: integer, nullable: true, description: dBm of the last advertisement }
-        temp_age_s: { type: integer, nullable: true, description: Seconds since the last temperature }
-        seen_age_s: { type: integer, nullable: true, description: Seconds since the last advertisement of any kind }
-        stale_after_s: { type: integer, description: 'Without a temperature this long the head falls back to its own sensor' }
-        pairing: { type: boolean, description: The press-the-button window is open }
-        pairing_remaining_s: { type: integer }
-        nearby:
+        active: { type: boolean, description: The sensors' temperature is being sent to the unit as its room temperature }
+        temp: { type: number, nullable: true, description: Average of the fresh sensors, °C }
+        n_fresh: { type: integer }
+        max: { type: integer, description: Sensors allowed per head }
+        sensors:
           type: array
-          description: BTHome devices heard during the pairing window, strongest first
           items:
             type: object
             properties:
-              addr: { type: string }
+              id: { type: string, description: 'Bluetooth address, or Shelly device id' }
+              kind: { type: string, enum: [bthome, shelly] }
               name: { type: string }
-              rssi: { type: integer }
-              encrypted: { type: boolean, description: Encrypted BTHome can't be decoded (not selectable) }
-              temp: { type: number, nullable: true }
-              age_s: { type: integer }
+              fresh: { type: boolean, description: A temperature was received within stale_after_s }
+              temp: { type: number, nullable: true, description: °C }
+              humidity: { type: number, nullable: true, description: '%RH' }
+              battery: { type: integer, nullable: true, description: '%' }
+              rssi: { type: integer, nullable: true, description: dBm }
+              temp_age_s: { type: integer, nullable: true }
+              seen_age_s: { type: integer, nullable: true }
+              stale_after_s: { type: integer }
+              host: { type: string, description: 'shelly: sensor IP' }
+              report_step: { type: number, description: 'shelly: report threshold, °C' }
+              pending: { type: boolean, description: 'shelly: webhooks/report step not yet applied (sensor asleep)' }
+              sync_error: { type: string, description: 'shelly: last error applying them' }
+        pairing:
+          type: object
+          properties:
+            ble:
+              type: object
+              properties:
+                open: { type: boolean }
+                remaining_s: { type: integer }
+                nearby:
+                  type: array
+                  description: BTHome devices heard during the window, strongest first
+                  items:
+                    type: object
+                    properties:
+                      addr: { type: string }
+                      name: { type: string }
+                      rssi: { type: integer }
+                      encrypted: { type: boolean, description: Encrypted BTHome can't be decoded (not selectable) }
+                      temp: { type: number, nullable: true }
+                      age_s: { type: integer }
+            wifi:
+              type: object
+              properties:
+                open: { type: boolean }
+                remaining_s: { type: integer }
+                found:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      name: { type: string }
+                      ip: { type: string }
+                state: { type: string, enum: [idle, working, ok, error] }
+                message: { type: string, description: 'Sensor name when ok; reason when error ("full" = already 4 sensors)' }
         ble:
           type: object
           properties:

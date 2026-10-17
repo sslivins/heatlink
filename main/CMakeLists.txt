@@ -27,6 +27,7 @@ idf_component_register(
          "slice_ctl.cpp"
          "history_ctl.cpp"
          "room_sensor_ctl.cpp"
+         "shelly_rpc.cpp"
     INCLUDE_DIRS "."
     EMBED_FILES "web/index.html.gz"
                 "web/portal.html.gz"
