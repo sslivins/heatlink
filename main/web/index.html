@@ -589,34 +589,9 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
       <div id="gRenameMsg" class="status hidden" style="margin:2px 0 8px"></div>
       <div id="gMembers"></div>
 
-      <!-- Time-slicing (#133): heads on one outdoor unit take turns heating
-           and cooling instead of fighting over its direction. -->
-      <div class="gjoincard" id="gSlice">
-        <div class="row" style="margin:0">
-          <span class="gjoin-t" style="margin:0;display:flex;align-items:center">Tandem<button type="button" class="info-btn" aria-label="What is Tandem?" aria-expanded="false" aria-controls="slInfo"
-            title="Tandem lets heads on one outdoor unit heat some rooms and cool others. The outdoor unit can only heat or cool at one time, so the heads take turns: rooms that want the current mode run, and the rest stay off until their turn. Each turn lasts between the minimum and maximum turn, with a short pause between modes." onclick="toggleInfo(this)">i</button></span>
-          <div class="toggle"><input type="checkbox" id="slEn" onchange="slDirty=true"><span class="slider" onclick="document.getElementById('slEn').click()"></span></div>
-        </div>
-        <div class="role-desc" style="margin:4px 0 6px">Heat some rooms and cool others: when rooms want different modes, the
-          outdoor unit serves one mode at a time. Rooms waiting for the other mode stay off
-          until their turn. Auto mode isn't available while this is on.</div>
-        <div id="slInfo" class="info-pop hidden">Tandem lets heads on one outdoor unit heat some rooms and cool others. The outdoor unit can only heat or cool at one time, so the heads take turns: rooms that want the current mode run, and the rest stay off until their turn. Each turn lasts between the minimum and maximum turn, with a short pause between modes.</div>
-        <div class="row"><label>Now</label><span class="v" id="slNow">--</span></div>
-        <div class="row">
-          <label for="slMin">Minimum turn</label>
-          <select id="slMin" onchange="slDirty=true"></select>
-        </div>
-        <div class="row">
-          <label for="slMax">Maximum turn</label>
-          <select id="slMax" onchange="slDirty=true"></select>
-        </div>
-        <div class="row">
-          <label for="slSettle">Pause between modes</label>
-          <select id="slSettle" onchange="slDirty=true"></select>
-        </div>
-        <div id="slMsg" class="status hidden" style="margin:8px 0"></div>
-        <button class="btn gwide" onclick="saveSlice()">Save</button>
-      </div>
+      <!-- Tandem status (#133); the controls live in Settings → Tandem. -->
+      <div class="row" id="gSliceRow" style="margin:6px 0"><label>Tandem</label>
+        <span class="v"><span id="gSliceNow">--</span> · <a href="#" onclick="openTandemSettings();return false">Settings</a></span></div>
 
       <!-- Owner: open a pairing window so a new head can join this group -->
       <button class="btn btn-accent gwide" onclick="groupAddZone()">+ Add a zone</button>
@@ -664,6 +639,7 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
     <button onclick="jumpTo('sec-display')">Display</button>
     <button onclick="jumpTo('sec-widevane')">Wide vane</button>
     <button onclick="jumpTo('sec-park')">Off at setpoint</button>
+    <button onclick="jumpTo('sec-tandem')">Tandem</button>
     <button onclick="jumpTo('sec-wifi')">WiFi</button>
     <button onclick="jumpTo('sec-mqtt')">MQTT</button>
     <button onclick="jumpTo('sec-firmware')">Firmware</button>
@@ -783,6 +759,40 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
       group runs in Tandem.</div>
     <div id="pkMsg" class="status hidden" style="margin:10px 0"></div>
     <button class="btn" onclick="savePark()">Save</button>
+  </div>
+
+  <!-- Tandem (#133): heads on one outdoor unit take turns heating and cooling.
+       Shared per outdoor unit (zone group); editable from any of its heads. -->
+  <div class="card" data-grp="settings" id="sec-tandem">
+    <h2 style="display:flex;align-items:center">Tandem<button type="button" class="info-btn" aria-label="What is Tandem?" aria-expanded="false" aria-controls="slInfo"
+            title="Tandem lets heads on one outdoor unit heat some rooms and cool others. The outdoor unit can only heat or cool at one time, so the heads take turns: rooms that want the current mode run, and the rest stay off until their turn. Each turn lasts between the minimum and maximum turn, with a short pause between modes." onclick="toggleInfo(this)">i</button></h2>
+    <div class="sub" style="margin:-4px 0 8px">Heat some rooms and cool others: when rooms want different modes, the
+          outdoor unit serves one mode at a time. Rooms waiting for the other mode stay off
+          until their turn. Auto mode isn't available while this is on.</div>
+    <div id="slInfo" class="info-pop hidden">Tandem lets heads on one outdoor unit heat some rooms and cool others. The outdoor unit can only heat or cool at one time, so the heads take turns: rooms that want the current mode run, and the rest stay off until their turn. Each turn lasts between the minimum and maximum turn, with a short pause between modes.</div>
+    <div class="row"><label>Outdoor unit</label><span class="v" id="slUnit">--</span></div>
+    <div id="slNoGroup" class="sub hidden" style="margin:0 0 8px">Pair this head with the other
+      heads on its outdoor unit in the Zones tab to use Tandem.</div>
+    <div class="row">
+      <label>Enabled</label>
+      <div class="toggle"><input type="checkbox" id="slEn" onchange="slDirty=true"><span class="slider" onclick="document.getElementById('slEn').click()"></span></div>
+    </div>
+    <div class="row">
+      <label for="slMin">Minimum turn</label>
+      <select id="slMin" onchange="slDirty=true"></select>
+    </div>
+    <div class="row">
+      <label for="slMax">Maximum turn</label>
+      <select id="slMax" onchange="slDirty=true"></select>
+    </div>
+    <div class="row">
+      <label for="slSettle">Pause between modes</label>
+      <select id="slSettle" onchange="slDirty=true"></select>
+    </div>
+    <div id="slShared" class="sub hidden" style="margin:0 0 8px">Shared by every head on this outdoor unit.</div>
+    <div class="row"><label>Now</label><span class="v" id="slNow">--</span></div>
+    <div id="slMsg" class="status hidden" style="margin:10px 0"></div>
+    <button class="btn" id="slSave" onclick="saveSlice()">Save</button>
   </div>
 
   <div class="card" data-grp="settings" id="sec-wifi">
@@ -1042,6 +1052,11 @@ const I18N = { fr: {
   "Cooling turn":"Tour de refroidissement","Switching modes":"Changement de mode",
   "Nobody needs heat or cool":"Aucun besoin de chauffage ou de refroidissement",
   "Starting…":"Démarrage…",
+  "Outdoor unit":"Unité extérieure",
+  "Not paired":"Non jumelé",
+  "(unnamed group)":"(groupe sans nom)",
+  "Pair this head with the other heads on its outdoor unit in the Zones tab to use Tandem.":"Jumelez cette tête avec les autres têtes de son unité extérieure dans l'onglet Zones pour utiliser Tandem.",
+  "Shared by every head on this outdoor unit.":"Partagé par toutes les têtes de cette unité extérieure.",
   "Shared by every head on this outdoor unit (except the turn-back-on threshold).":"Partagé par toutes les têtes de cette unité extérieure (sauf le seuil de remise en marche).",
 "Kept on while the zone group runs in Tandem.":"Maintenu actif pendant que le groupe est en mode Tandem.",
   "Every room must be online and up to date first.":"Toutes les pièces doivent d’abord être en ligne et à jour.","Saved":"Enregistré","Save failed":"Échec de l’enregistrement",
@@ -1278,9 +1293,14 @@ async function jget(url,opts){
   finally{ clearTimeout(t); }
 }
 
+// Scroll a card into view below the sticky section nav, which wraps to several
+// rows on a phone (so a fixed scroll-margin would hide the card's title).
 function jumpTo(id){
   const el=document.getElementById(id);
-  if(el) el.scrollIntoView({behavior:'smooth',block:'start'});
+  if(!el) return;
+  const nav=[...document.querySelectorAll('.secnav')].find(n=>n.offsetParent!==null);
+  const off=(nav?nav.getBoundingClientRect().height:0)+16;
+  window.scrollTo({top:el.getBoundingClientRect().top+window.scrollY-off,behavior:'smooth'});
 }
 function showTab(name){
   // Climate and Zones are their own panels. Status (read-only telemetry) and
@@ -2495,7 +2515,6 @@ function renderGroupPanel(g){
       url:m.ip?('http://'+m.ip+'/'):null, slice:known?slOf(m.uid):null }));
   });
   $('gMembers').innerHTML=rows.join('');
-  renderSlice(sl);
   wireMemberCtrls();
   const ri=$('gRenameInput'); if(ri&&!groupEditing&&document.activeElement!==ri) ri.value=g.group_label||'';
 }
@@ -2528,8 +2547,17 @@ function sliceNowText(sl){
   if(sl.phase==='run') return i18n(sl.mode==='heat'?'Heating turn':'Cooling turn')+mins;
   return i18n('Nobody needs heat or cool');
 }
-function renderSlice(sl){
-  $('slNow').textContent=sliceNowText(sl);
+// Tandem is a per-outdoor-unit (zone group) setting: shown in Settings with the
+// group's name, and as a read-only status line in Zones.
+function renderSlice(g){
+  const inG=!!(g&&g.in_group), sl=(inG&&g.slice)||{};
+  const now=inG?sliceNowText(sl):i18n('Off');
+  $('slNow').textContent=now;
+  $('gSliceNow').textContent=now;
+  $('slUnit').textContent=inG?(g.group_label||i18n('(unnamed group)')):i18n('Not paired');
+  $('slNoGroup').classList.toggle('hidden',inG);
+  $('slShared').classList.toggle('hidden',!inG);
+  ['slEn','slMin','slMax','slSettle','slSave'].forEach(id=>{ $(id).disabled=!inG; });
   if(slDirty) return;
   $('slEn').checked=!!sl.enabled;
   pkFill('slMin',[300,600,900,1200,1800,2700,3600],pkMin,sl.min_slice_s||600);
@@ -2549,7 +2577,7 @@ async function saveSlice(){
     slDirty=false;
     msg.textContent=i18n('Saved');msg.className='status ok';msg.classList.remove('hidden');
     setTimeout(()=>msg.classList.add('hidden'),2500);
-    renderSlice(j);
+    refreshGroup();
     refresh();
   }catch(e){ msg.textContent=i18n('Save failed');msg.className='status err';msg.classList.remove('hidden'); }
 }
@@ -2560,6 +2588,11 @@ async function refreshGroup(){
   catch(e){ return; }
   renderGroupBanner(g);
   renderGroupPanel(g);
+  renderSlice(g);
+}
+function openTandemSettings(){
+  showTab('settings');
+  setTimeout(()=>jumpTo('sec-tandem'),50);
 }
 function modeCap(m){ return m.charAt(0)+m.slice(1).toLowerCase(); }
 // ── House view (all heads across outdoor units) ─────────────────────────
