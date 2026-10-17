@@ -11,6 +11,7 @@
 #include "group_proto.h"
 #include "status_led.h"
 #include "events.h"
+#include "history_ctl.h"
 #include "capability.h"
 #include "factory_reset.h"
 #include "diag.h"
@@ -2833,6 +2834,80 @@ esp_err_t handle_events_clear(httpd_req_t* req) {
     return ESP_OK;
 }
 
+// ── GET /api/history (admin) ───────────────────────────────────────────
+// Samples for the History chart. Query: window=<s> (default 24 h, 1 h..14 d),
+// end=<unix s> (default now). Long windows are averaged into buckets so at
+// most history::kMaxPoints rows come back. Streamed in chunks.
+esp_err_t handle_history_get(httpd_req_t* req) {
+    set_cors(req);
+    REQUIRE_ADMIN(req);
+    uint32_t end_q = 0, window = 0;
+    size_t qlen = httpd_req_get_url_query_len(req);
+    if (qlen > 0 && qlen < 128) {
+        char q[128];
+        if (httpd_req_get_url_query_str(req, q, sizeof(q)) == ESP_OK) {
+            char val[16];
+            if (httpd_query_key_value(q, "end", val, sizeof(val)) == ESP_OK)
+                end_q = (uint32_t)strtoul(val, nullptr, 10);
+            if (httpd_query_key_value(q, "window", val, sizeof(val)) == ESP_OK)
+                window = (uint32_t)strtoul(val, nullptr, 10);
+        }
+    }
+    window = history::clamp_window(window);
+    const uint32_t bucket = history::bucket_for(window);
+    time_t now = time(nullptr);
+    const bool clock_valid = now > 1700000000;
+    const uint32_t latest_end = clock_valid
+        ? (uint32_t)now - (uint32_t)now % history::kIntervalS + history::kIntervalS : 0;
+    const uint32_t end = (end_q && end_q < latest_end) ? end_q : latest_end;
+    const uint32_t start = end > window ? end - window : 0;
+
+    httpd_resp_set_type(req, "application/json");
+    std::string buf;
+    buf.reserve(3072);
+    bool ok = true;
+    auto send = [&](bool force) {
+        if (!ok || buf.empty() || (!force && buf.size() < 2048)) return;
+        ok = httpd_resp_send_chunk(req, buf.data(), buf.size()) == ESP_OK;
+        buf.clear();
+    };
+    char row[96];
+    snprintf(row, sizeof(row),
+             "{\"clock_valid\":%s,\"now\":%lu,\"start\":%lu,\"end\":%lu,\"window\":%lu,",
+             clock_valid ? "true" : "false", (unsigned long)(clock_valid ? now : 0),
+             (unsigned long)start, (unsigned long)end, (unsigned long)window);
+    buf += row;
+    snprintf(row, sizeof(row),
+             "\"interval\":%lu,\"bucket\":%lu,\"earliest\":%lu,\"latest_end\":%lu,",
+             (unsigned long)history::kIntervalS, (unsigned long)bucket,
+             (unsigned long)history_ctl::earliest(), (unsigned long)latest_end);
+    buf += row;
+    buf += "\"fields\":";
+    buf += history::kFieldsJson;
+    buf += ",\"samples\":[";
+
+    bool first = true;
+    auto emit = [&](const history::Record& r) {
+        history::format_row(r, row, sizeof(row));
+        if (!first) buf += ',';
+        first = false;
+        buf += row;
+        send(false);
+    };
+    if (clock_valid) {
+        history::Bucketer b(bucket);
+        history::Record out;
+        history_ctl::query(start, end, [&](const history::Record& r) {
+            if (b.add(r, out)) emit(out);
+        });
+        if (b.finish(out)) emit(out);
+    }
+    buf += "]}";
+    send(true);
+    if (ok) httpd_resp_send_chunk(req, nullptr, 0);
+    return ok ? ESP_OK : ESP_FAIL;
+}
+
 // ── OPTIONS /api/* (CORS preflight) ────────────────────────────────────
 esp_err_t handle_options(httpd_req_t* req) {
     httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
@@ -3150,6 +3225,7 @@ esp_err_t init(const Hooks& hooks) {
         {"/api/auth",                HTTP_POST,     handle_auth_post,      nullptr},
         {"/api/events",              HTTP_GET,      handle_events_get,     nullptr},
         {"/api/events",              HTTP_DELETE,   handle_events_clear,   nullptr},
+        {"/api/history",             HTTP_GET,      handle_history_get,    nullptr},
         {"/api/*",                   HTTP_OPTIONS, handle_options,        nullptr},
     };
     static_assert(sizeof(uris) / sizeof(uris[0]) <= 56, "raise max_uri_handlers");

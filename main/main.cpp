@@ -23,6 +23,7 @@
 #include "status_led.h"
 #include "park_ctl.h"
 #include "slice_ctl.h"
+#include "history_ctl.h"
 
 #include <cstdlib>
 #include <cstdio>
@@ -644,6 +645,29 @@ extern "C" void app_main() {
             pi.state   = park::state_str(ps.state);
             return pi;
         });
+    }
+
+    // History chart: one sample every 30 s, 14 days on SPIFFS.
+    {
+        history_ctl::Hooks hh;
+        hh.sample = [](history::Record& r) {
+            if (!g_hp.isConnected()) return;
+            cn105::Settings s = park_ctl::overlay(g_hp.getSettings());
+            cn105::Status st = g_hp.getStatus();
+            r.flags |= history::kFlagConnected;
+            if (s.power == "ON")         r.flags |= history::kFlagPower;
+            if (st.operating)            r.flags |= history::kFlagOperating;
+            if (st.subMode == "DEFROST") r.flags |= history::kFlagDefrost;
+            if (park_ctl::snapshot().parked) r.flags |= history::kFlagParked;
+            r.room   = history::to_deci(st.roomTemperature);
+            r.target = history::to_deci(s.temperature);
+            if (st.has_outsideTemp) r.outdoor = history::to_deci(st.outsideTemp);
+            int f = st.compressorFrequency;
+            r.freq = (uint8_t)(f < 0 ? 0 : f > 255 ? 255 : f);
+            r.mode = history::mode_code(s.mode);
+            r.fan  = history::fan_code(s.fan);
+        };
+        history_ctl::init(hh);
     }
 
     // Heat pump protocol.

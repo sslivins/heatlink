@@ -11,6 +11,7 @@ on:
       - 'components/cn105/**'
       - 'components/park/**'
       - 'components/slice/**'
+      - 'components/history/**'
       - 'test/host/**'
       - 'test/ui/**'
       - 'test/api/**'
@@ -78,6 +79,16 @@ jobs:
             test/host/test_slice_logic.cpp \
             -o slice_tests
           ./slice_tests
+
+      - name: Build and run host history tests
+        shell: bash
+        run: |
+          g++ -std=c++17 -Wall -Wextra -fsanitize=address,undefined \
+            -I components/history/include \
+            components/history/history_logic.cpp \
+            test/host/test_history.cpp \
+            -o history_tests
+          ./history_tests
 
       - name: Run Node host tests (web UI + API contract)
         shell: bash

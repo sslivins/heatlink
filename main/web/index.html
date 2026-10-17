@@ -23,6 +23,9 @@
   --info-bg:#0d1a2a; --info-border:#1a3a5a; --pbar-bg:#222b36;
   --dial-track:#30363d; --dial-fill:#3a4150; --dial-btn:#30363d;
   --dial-btn-hover:#3a4250; --dial-btn-border:#484f58; --dial-off:#566270;
+  --hist-room:#e6edf3; --hist-target:#3fb950; --hist-out:#a371f7; --hist-heat:#f0883e;
+  --hist-cool:#58a6ff; --hist-dry:#2dd4bf; --hist-auto:#d29922; --hist-defrost:#9ecbff;
+  --hist-park:#8b949e; --hist-freq:#db61a2;
 }
 @media (prefers-color-scheme:light){
   :root{
@@ -34,6 +37,9 @@
     --info-bg:#ddf4ff; --info-border:#b6e3ff; --pbar-bg:#eaeef2;
     --dial-track:#d0d7de; --dial-fill:#afb8c1; --dial-btn:#eaeef2;
     --dial-btn-hover:#d8dee4; --dial-btn-border:#d0d7de; --dial-off:#8c959f;
+    --hist-room:#1f2328; --hist-target:#1a7f37; --hist-out:#8250df; --hist-heat:#f97316;
+    --hist-cool:#3b82f6; --hist-dry:#0d9488; --hist-auto:#bf8700; --hist-defrost:#54aeff;
+    --hist-park:#6e7781; --hist-freq:#bf3989;
   }
 }
 
@@ -181,6 +187,31 @@ cursor:pointer;user-select:none;transition:.15s}
 .tab.active{background:var(--accent);color:#fff}
 .panel{display:none}
 .panel.active{display:block}
+/* History tab: the chart gets the full window width on a desktop. */
+.wrap.wide{max-width:1100px}
+.hist-head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px}
+.hist-seg{display:inline-flex;gap:3px;padding:3px;border:1px solid var(--border);border-radius:9px;background:var(--bg)}
+.hist-seg button{border:0;background:none;color:var(--fg-3);padding:6px 14px;border-radius:7px;font-size:.82em;cursor:pointer}
+.hist-seg button.active{background:var(--accent);color:#fff}
+.hist-range{font-size:.85em;font-weight:600;color:var(--fg-2)}
+.hist-legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:.78em;color:var(--fg-3);margin-bottom:8px}
+.hist-legend span,.hist-legend label{display:inline-flex;align-items:center;gap:6px}
+.hist-legend i{width:14px;height:3px;border-radius:2px;display:inline-block}
+.hist-legend i.band{width:11px;height:11px;border-radius:3px}
+.hist-legend label{cursor:pointer}
+.hist-wrap{position:relative;width:100%;overflow-x:clip;min-height:240px}
+.hist-chart{width:100%;height:auto;display:block;touch-action:pan-y;user-select:none}
+.hist-chart.dragging{cursor:grabbing}
+.hist-axis{fill:var(--fg-3);font-size:11px;font-family:inherit}
+.hist-tip{display:none;position:absolute;top:8px;pointer-events:none;background:var(--surface);border:1px solid var(--border-strong);
+  border-radius:8px;padding:7px 10px;font-size:.78em;line-height:1.6;white-space:nowrap;box-shadow:0 4px 14px rgba(0,0,0,.3);z-index:2}
+.hist-tip i{width:10px;height:3px;border-radius:2px;display:inline-block;margin-right:6px;vertical-align:middle}
+.hist-tip strong{margin-left:6px}
+.hist-tip .tt{color:var(--fg-3);font-size:.92em}
+.hist-nav{display:flex;justify-content:space-between;gap:8px;margin-top:12px}
+.hist-nav .btn{width:auto;background:var(--chip);color:var(--fg);border:1px solid var(--border-strong)}
+.hist-nav .btn:disabled{opacity:.45;cursor:default}
+.hist-empty{padding:40px 10px;text-align:center;color:var(--fg-3);font-size:.88em}
 /* Status-tab section jump bar: sticky chips that scroll to each card. */
 .secnav{position:sticky;top:6px;z-index:5;display:flex;flex-wrap:wrap;gap:6px;
   background:var(--bg);padding:8px 0;margin-bottom:8px}
@@ -459,6 +490,7 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
   <div class="tabs">
     <div class="tab active" data-tab="climate" onclick="showTab('climate')">Climate</div>
     <div class="tab" data-tab="group" onclick="showTab('group')">Zones</div>
+    <div class="tab" data-tab="history" onclick="showTab('history')">History</div>
     <div class="tab" data-tab="status" onclick="showTab('status')">Status</div>
     <div class="tab" data-tab="settings" onclick="showTab('settings')">Settings</div>
   </div>
@@ -621,6 +653,38 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
     <div id="hMembers"></div>
   </div>
   </div><!-- /panel-group -->
+
+  <div class="panel" id="panel-history">
+  <div class="card">
+    <div class="hist-head">
+      <h2 style="margin:0">History</h2>
+      <div class="hist-seg" id="histSeg">
+        <button data-w="14400" onclick="histSetWindow(14400)">4 h</button>
+        <button data-w="86400" class="active" onclick="histSetWindow(86400)">24 h</button>
+        <button data-w="604800" onclick="histSetWindow(604800)">7 d</button>
+      </div>
+    </div>
+    <div class="hist-legend">
+      <span><i style="background:var(--hist-room)"></i>Room</span>
+      <span><i style="background:var(--hist-target)"></i>Target</span>
+      <span id="histLegOut"><i style="background:var(--hist-out)"></i>Outdoor</span>
+      <span><i class="band" style="background:var(--hist-heat);opacity:.5"></i>Heating</span>
+      <span><i class="band" style="background:var(--hist-cool);opacity:.5"></i>Cooling</span>
+      <span><i class="band" style="background:var(--hist-dry);opacity:.5"></i>Drying</span>
+      <span><i class="band" style="background:var(--hist-defrost);opacity:.6"></i>Defrost</span>
+      <span><i class="band" style="background:var(--hist-park);opacity:.4"></i>Parked</span>
+      <label><input type="checkbox" id="histFreq" checked onchange="histRender()">Compressor</label>
+    </div>
+    <div class="hist-range" id="histRange"></div>
+    <div class="hist-wrap" id="histWrap"><div class="hist-empty">Loading…</div></div>
+    <div class="hist-nav">
+      <button class="btn" id="histPrev" onclick="histStep(-1)">‹ Earlier</button>
+      <button class="btn" id="histLatest" onclick="histGoto(null)">Latest</button>
+      <button class="btn" id="histNext" onclick="histStep(1)">Later ›</button>
+    </div>
+    <p class="hint" style="text-align:center;margin-top:10px">Double-click the chart to centre it on that moment, or drag it sideways. The compressor reading is for the whole outdoor unit.</p>
+  </div>
+  </div><!-- /panel-history -->
 
   <div class="panel" id="panel-system">
   <div class="badges" id="statusBadges" data-grp="status">
@@ -1118,6 +1182,14 @@ const I18N = { fr: {
   "Create group & show code":"Créer le groupe et afficher le code",
   "+ Add a zone":"+ Ajouter une zone","Add a zone to this group":"Ajouter une zone à ce groupe",
   "Save":"Enregistrer","Save failed":"Échec de l’enregistrement",
+  // History
+  "History":"Historique","7 d":"7 j","Room":"Pièce","Target":"Consigne","Outdoor":"Extérieur",
+  "Defrost":"Dégivrage","Quiet":"Silencieux","Room sensor":"Capteur de pièce",
+  "‹ Earlier":"‹ Plus tôt","Later ›":"Plus tard ›","Latest":"Actuel",
+  "Double-click the chart to centre it on that moment, or drag it sideways. The compressor reading is for the whole outdoor unit.":"Double-cliquez sur le graphique pour le centrer sur ce moment, ou faites-le glisser latéralement. La valeur du compresseur concerne toute l’unité extérieure.",
+  "Could not load history.":"Impossible de charger l’historique.",
+  "Waiting for the clock to be set…":"En attente de la mise à l’heure…",
+  "Nothing recorded for this period yet. A sample is taken every 30 seconds.":"Rien d’enregistré pour cette période. Un relevé est pris toutes les 30 secondes.",
   // Common dynamic toasts (parameterised with {n})
   "Applied {n} dBm":"{n} dBm appliqué",
 }
@@ -1311,6 +1383,8 @@ function showTab(name){
   document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.dataset.tab===name));
   $('panel-climate').classList.toggle('active',name==='climate');
   $('panel-group').classList.toggle('active',name==='group');
+  $('panel-history').classList.toggle('active',name==='history');
+  $('appWrap').classList.toggle('wide',name==='history');
   $('panel-system').classList.toggle('active',inSys);
   if(inSys){
     document.querySelectorAll('#panel-system [data-grp]').forEach(c=>{
@@ -1331,6 +1405,8 @@ function showTab(name){
   groupTabActive=(name==='group');
   if(name==='group' && authState.role==='admin'){ refreshGroup(); }
   if(groupTabActive){ refreshHouse(); }
+  histTabActive=(name==='history');
+  if(histTabActive && authState.role==='admin'){ hist.end=null; histLoad(); }
 }
 
 function badge(el,on){el.className='badge '+(on?'on':'off')}
@@ -2893,6 +2969,377 @@ function onGroupNameKey(e){
   if(e.key==='Enter'){e.preventDefault();groupRename();}
   else if(e.key==='Escape'){e.preventDefault();groupNameEditCancel();}
 }
+// ── History chart (History tab, admin-only) ───────────────────────────
+// /api/history rows are [t, room, target, outdoor, sensor, freq, mode, flags,
+// fan] with temperatures in deci-°C; long windows arrive averaged into
+// d.bucket-second buckets. Drawn as SVG at the wrap's real pixel width so text
+// keeps its CSS size on a phone.
+const HF={CONN:1,POWER:2,OPER:4,DEFROST:8,PARKED:16};
+const HIST_SNAP={14400:900,86400:3600,604800:21600};
+const HIST_MODES=['','Heat','Cool','Dry','Fan','Auto'];
+const HIST_FAN=['Auto','Quiet','1','2','3','4'];
+let hist={window:86400,end:null,data:null,loading:false,loadedAt:0,error:''};
+let histTabActive=false, histGeom=null, histDrag=null, histWired=false;
+
+async function histLoad(){
+  if(hist.loading) return;
+  hist.loading=true;
+  try{
+    const r=await jget('/api/history?window='+hist.window+(hist.end?'&end='+hist.end:''));
+    if(r.ok){
+      const d=await r.json();
+      d.rows=(d.samples||[]).map(a=>({t:a[0],room:a[1],target:a[2],out:a[3],sensor:a[4],
+                                     freq:a[5],mode:a[6],flags:a[7],fan:a[8]}));
+      hist.data=d; hist.error='';
+    }else{ hist.error='Could not load history.'; }
+  }catch(e){ hist.error='Could not load history.'; }
+  hist.loadedAt=Date.now();
+  hist.loading=false;
+  histRender();
+}
+function histDateLocale(){ return LANG==='fr'?'fr':[]; }
+function histFmt(ts,withDate){
+  const d=new Date(ts*1000);
+  const time=d.toLocaleTimeString(histDateLocale(),{hour:'numeric',minute:'2-digit'});
+  return withDate ? d.toLocaleDateString(histDateLocale(),{weekday:'short',month:'short',day:'numeric'})+' '+time : time;
+}
+function histState(r){
+  if(!(r.flags&HF.CONN)) return i18n('Disconnected');
+  if(!(r.flags&HF.POWER)) return i18n('Off');
+  const mode=i18n(HIST_MODES[r.mode]||'');
+  let st;
+  if(r.flags&HF.DEFROST) st=i18n('Defrost');
+  else if(r.flags&HF.PARKED) st=i18n('Parked');
+  else if(r.flags&HF.OPER) st=i18n(({1:'Heating',2:'Cooling',3:'Drying'})[r.mode]||'Running');
+  else st=i18n('Idle');
+  return mode ? mode+' \u00B7 '+st : st;
+}
+function histBand(r){
+  if(!(r.flags&HF.CONN)||!(r.flags&HF.POWER)) return null;
+  if(r.flags&HF.PARKED) return 'park';
+  if(r.flags&HF.OPER) return ({1:'heat',2:'cool',3:'dry',5:'auto'})[r.mode]||null;
+  return null;
+}
+function histSvg(d,W){
+  W=Math.max(280,W);
+  const narrow=W<600, rows=d.rows, n=rows.length, bucket=d.bucket||30, gapMax=bucket*2.5;
+  const plotL=narrow?38:46, plotR=W-8, plotT=10, plotW=plotR-plotL;
+  const plotH=narrow?190:Math.round(Math.min(300,Math.max(200,W*0.28))), plotB=plotT+plotH;
+  const showFreq=!!($('histFreq')&&$('histFreq').checked) && rows.some(r=>r.freq>0);
+  const fT=plotB+26, fB=showFreq?fT+(narrow?56:72):plotB;
+  const bottom=fB, H=bottom+26;
+  const start=d.start, end=d.end, span=Math.max(1,end-start);
+  const mapX=t=>plotL+(Math.min(Math.max(t,start),end)-start)/span*plotW;
+  const midX=r=>mapX(r.t+bucket/2);
+  const disp=v=>v==null?null:(isF()?cToF(v/10):v/10);
+  const isNum=v=>v!==null&&v!==undefined;
+  const contig=k=>k+1<n && rows[k+1].t-rows[k].t<=gapMax;
+
+  let lo=Infinity, hi=-Infinity;
+  for(const r of rows) for(const v of [r.room,r.target,r.out,r.sensor]){
+    if(v==null) continue;
+    const x=disp(v); if(x<lo) lo=x; if(x>hi) hi=x;
+  }
+  if(!isFinite(lo)){ lo=15; hi=25; }
+  if(hi-lo<4){ const m=(hi+lo)/2; lo=m-2; hi=m+2; }
+  let ax=null;
+  for(const step of [1,2,5,10,20]){
+    ax={lo:Math.floor(lo/step)*step, hi:Math.ceil(hi/step)*step, step};
+    if((ax.hi-ax.lo)/step<=6) break;
+  }
+  const mapY=v=>plotB-(v-ax.lo)/(ax.hi-ax.lo)*plotH;
+  const f1=v=>v.toFixed(1);
+
+  let svg=`<svg class="hist-chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="History chart">`+
+    `<defs><clipPath id="histClip"><rect x="${plotL}" y="0" width="${plotW}" height="${H}"/></clipPath>`+
+    `<pattern id="histHatch" patternUnits="userSpaceOnUse" width="8" height="8" patternTransform="rotate(45)">`+
+    `<line x1="0" y1="0" x2="0" y2="8" stroke="var(--hist-park)" stroke-width="2" opacity=".45"/></pattern></defs>`;
+  const hline=(y,label)=>`<line x1="${plotL}" y1="${f1(y)}" x2="${plotR}" y2="${f1(y)}" stroke="var(--border-strong)" stroke-width="1"/>`+
+    `<text x="${plotL-6}" y="${f1(y+4)}" text-anchor="end" class="hist-axis">${label}</text>`;
+  for(let v=ax.lo; v<=ax.hi+1e-9; v+=ax.step) svg+=hline(mapY(v), v+'°');
+  let mapF=null;
+  if(showFreq){
+    const mx=Math.max(10,...rows.map(r=>r.freq||0));
+    let fa=null;
+    for(const step of [5,10,20,25,50,100]){ fa={hi:Math.ceil(mx/step)*step, step}; if(fa.hi/step<=2) break; }
+    mapF=f=>fB-Math.min(f,fa.hi)/fa.hi*(fB-fT);
+    for(let v=0; v<=fa.hi; v+=fa.step) svg+=hline(mapF(v), String(v));
+  }
+
+  // Everything time-dependent pans together while dragging.
+  svg+=`<g class="hist-pan">`;
+  const BAND={heat:'var(--hist-heat)',cool:'var(--hist-cool)',dry:'var(--hist-dry)',auto:'var(--hist-auto)'};
+  const runs=(key,fn)=>{
+    for(let i=0;i<n;){
+      const k=key(rows[i]);
+      if(!k){ i++; continue; }
+      let j=i+1;
+      while(j<n && key(rows[j])===k && contig(j-1)) j++;
+      const x1=mapX(rows[i].t), x2=mapX(rows[j-1].t+bucket);
+      fn(k,x1,Math.max(1,x2-x1));
+      i=j;
+    }
+  };
+  runs(histBand,(k,x,w)=>{
+    svg+= k==='park'
+      ? `<rect x="${f1(x)}" y="${plotT}" width="${f1(w)}" height="${bottom-plotT}" fill="url(#histHatch)"/>`
+      : `<rect x="${f1(x)}" y="${plotT}" width="${f1(w)}" height="${bottom-plotT}" fill="${BAND[k]}" opacity=".16"/>`;
+  });
+  runs(r=>(r.flags&HF.DEFROST)?'d':null,(k,x,w)=>{
+    w=Math.max(2,w);
+    svg+=`<rect x="${f1(x)}" y="${plotT}" width="${f1(w)}" height="${bottom-plotT}" fill="var(--hist-defrost)" opacity=".35"/>`+
+         `<rect x="${f1(x)}" y="${plotT}" width="${f1(w)}" height="3" fill="var(--hist-defrost)"/>`;
+  });
+
+  // Vertical gridlines on round local times.
+  const step=[900,1800,3600,7200,10800,21600,43200,86400].find(s=>span/s<=(narrow?5:8))||86400;
+  const tick=new Date(start*1000); tick.setHours(0,0,0,0);
+  for(let ts=tick.getTime()/1000; ts<=end; ts+=step){
+    if(ts<start) continue;
+    const x=mapX(ts), t=new Date(ts*1000);
+    const midnight=t.getHours()===0&&t.getMinutes()===0;
+    const label=(step>=86400||midnight)
+      ? t.toLocaleDateString(histDateLocale(),step>=86400?{weekday:'short',day:'numeric'}:{month:'short',day:'numeric'})
+      : t.toLocaleTimeString(histDateLocale(),{hour:'numeric',minute:'2-digit'});
+    svg+=`<line x1="${f1(x)}" y1="${plotT}" x2="${f1(x)}" y2="${bottom}" stroke="var(--border-strong)" stroke-width="1"/>`+
+         `<text x="${f1(x)}" y="${bottom+18}" text-anchor="middle" class="hist-axis">${label}</text>`;
+  }
+
+  // Room readings come in 0.5-1 degree steps, so a raw line staircases. Each
+  // run of equal readings is drawn through its midpoint instead (the real
+  // temperature crossed that value somewhere inside it); a gap breaks the line.
+  const interp=key=>{
+    const vals=new Array(n).fill(null);
+    let a=0;
+    while(a<n){
+      if(!isNum(rows[a][key])){ a++; continue; }
+      let b=a;
+      while(contig(b) && isNum(rows[b+1][key])) b++;
+      const pts=[{t:rows[a].t,v:rows[a][key]}];
+      for(let i=a;i<=b;){
+        let j=i;
+        while(j+1<=b && rows[j+1][key]===rows[i][key]) j++;
+        pts.push({t:(rows[i].t+rows[j].t)/2, v:rows[i][key]});
+        i=j+1;
+      }
+      pts.push({t:rows[b].t,v:rows[b][key]});
+      let p=0;
+      for(let k=a;k<=b;k++){
+        const t=rows[k].t;
+        while(p+1<pts.length-1 && pts[p+1].t<=t) p++;
+        const p0=pts[p], p1=pts[p+1];
+        vals[k]=p1.t>p0.t ? p0.v+(p1.v-p0.v)*(t-p0.t)/(p1.t-p0.t) : p1.v;
+      }
+      a=b+1;
+    }
+    return vals;
+  };
+  const ser={
+    room:interp('room'), out:interp('out'), sensor:interp('sensor'),
+    target:rows.map(r=>(r.flags&HF.POWER)?r.target:null),
+    freq:rows.map(r=>(r.flags&HF.CONN)?r.freq:null),
+  };
+  const path=(vals,color,stepped,extra)=>{
+    let dstr='', pen=false;
+    for(let k=0;k<n;k++){
+      const v=vals[k];
+      if(!isNum(v)){ pen=false; continue; }
+      if(pen && !contig(k-1)) pen=false;
+      const x=midX(rows[k]), y=mapY(disp(v));
+      if(!pen){ dstr+=`M${f1(x)} ${f1(y)}`; pen=true; }
+      else if(stepped) dstr+=`H${f1(x)}V${f1(y)}`;
+      else dstr+=`L${f1(x)} ${f1(y)}`;
+    }
+    return dstr?`<path d="${dstr}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"${extra||''}/>`:'';
+  };
+  svg+=path(ser.out,'var(--hist-out)',false,' stroke-dasharray="5 4" opacity=".85"');
+  svg+=path(ser.target,'var(--hist-target)',true);
+  svg+=path(ser.sensor,'var(--hist-room)',false,' stroke-dasharray="2 3"');
+  svg+=path(ser.room,'var(--hist-room)',false);
+
+  // Compressor frequency (outdoor unit wide): a filled step under the plot.
+  if(showFreq){
+    let area='', edge='', run=null;
+    const flush=()=>{
+      if(!run) return;
+      const seg=run.map(([x2,y])=>`V${f1(y)}H${f1(x2)}`).join('');
+      area+=`M${f1(run.x0)} ${fB}`+seg+`V${fB}Z`;
+      edge+=`M${f1(run.x0)} ${f1(run[0][1])}`+seg;
+      run=null;
+    };
+    for(let k=0;k<n;k++){
+      const v=ser.freq[k];
+      if(!isNum(v) || (run && !contig(k-1))) flush();
+      if(!isNum(v)) continue;
+      if(!run){ run=[]; run.x0=mapX(rows[k].t); }
+      run.push([mapX(rows[k].t+bucket), mapF(v)]);
+    }
+    flush();
+    svg+=`<path d="${area}" fill="var(--hist-freq)" opacity=".22"/>`+
+         `<path d="${edge}" fill="none" stroke="var(--hist-freq)" stroke-width="1.5" stroke-linejoin="round"/>`;
+  }
+  svg+=`</g>`;
+
+  svg+=`<g class="hist-hover" style="display:none">`+
+    `<line class="hist-hover-line" y1="${plotT}" y2="${bottom}" stroke="var(--fg-3)" stroke-width="1" stroke-dasharray="4 3"/>`+
+    `<circle data-key="room" r="4" fill="var(--hist-room)"/><circle data-key="target" r="4" fill="var(--hist-target)"/>`+
+    `<circle data-key="out" r="4" fill="var(--hist-out)"/><circle data-key="sensor" r="4" fill="var(--hist-room)"/>`+
+    (showFreq?`<circle data-key="freq" r="4" fill="var(--hist-freq)"/>`:'')+`</g></svg>`;
+  histGeom={W,plotL,plotR,mapX,midX,mapY:v=>mapY(disp(v)),mapF,rows,ser,start,end};
+  return svg;
+}
+function histRender(){
+  const wrap=$('histWrap'); if(!wrap) return;
+  histWire();
+  document.querySelectorAll('#histSeg button').forEach(b=>b.classList.toggle('active',+b.dataset.w===hist.window));
+  const d=hist.data;
+  const atLatest=!d||d.end>=d.latest_end;
+  $('histNext').disabled=atLatest;
+  $('histLatest').disabled=atLatest;
+  $('histPrev').disabled=!d||!d.earliest||d.start<=d.earliest;
+  $('histRange').textContent=(d&&d.clock_valid)?histFmt(d.start,true)+' \u2014 '+histFmt(d.end,true):'';
+  $('histLegOut').style.display=(d&&d.rows.some(r=>r.out!=null))?'':'none';
+  let msg='';
+  if(!d) msg=hist.error||'Loading…';
+  else if(!d.clock_valid) msg='Waiting for the clock to be set…';
+  else if(!d.rows.length) msg='Nothing recorded for this period yet. A sample is taken every 30 seconds.';
+  if(msg){
+    histGeom=null;
+    const e=document.createElement('div'); e.className='hist-empty'; e.textContent=i18n(msg);
+    wrap.textContent=''; wrap.appendChild(e);
+    return;
+  }
+  wrap.innerHTML=histSvg(d,Math.round(wrap.clientWidth)||440)+'<div class="hist-tip"></div>';
+}
+// Show the window ending at `end` (unix s), kept within the stored range; null
+// (or the newest window) is the live view.
+function histGoto(end){
+  const d=hist.data;
+  if(end==null||!d){ hist.end=null; }
+  else{
+    const lo=(d.earliest||d.start)+hist.window;
+    end=Math.max(lo,Math.min(Math.round(end),d.latest_end));
+    hist.end=end>=d.latest_end?null:end;
+  }
+  histLoad();
+}
+function histStep(dir){ if(hist.data) histGoto(hist.data.end+dir*hist.window/2); }
+function histSetWindow(w){
+  const d=hist.data;
+  hist.window=w;
+  // Keep the same centre when zooming a past window.
+  histGoto(hist.end&&d ? (d.start+d.end)/2+w/2 : null);
+}
+function histTimeAt(svg,clientX){
+  const g=histGeom, rect=svg.getBoundingClientRect();
+  const vx=(clientX-rect.left)/rect.width*g.W;
+  if(vx<g.plotL||vx>g.plotR) return null;
+  return g.start+(vx-g.plotL)/(g.plotR-g.plotL)*(g.end-g.start);
+}
+function histHide(){
+  document.querySelectorAll('#histWrap .hist-hover, #histWrap .hist-tip').forEach(el=>{ el.style.display='none'; });
+}
+function histHover(ev){
+  if(histDrag&&histDrag.moved) return;
+  const svg=ev.target.closest&&ev.target.closest('.hist-chart'), g=histGeom;
+  if(!svg||!g||!g.rows.length){ histHide(); return; }
+  const rect=svg.getBoundingClientRect();
+  const vx=(ev.clientX-rect.left)/rect.width*g.W;
+  if(vx<g.plotL||vx>g.plotR){ histHide(); return; }
+  let best=-1, bestDx=Infinity;
+  g.rows.forEach((r,k)=>{ const dx=Math.abs(g.midX(r)-vx); if(dx<bestDx){ bestDx=dx; best=k; } });
+  if(best<0||bestDx>24){ histHide(); return; }
+  const r=g.rows[best], x=g.midX(r);
+  const hover=svg.querySelector('.hist-hover');
+  hover.style.display='';
+  const ln=hover.querySelector('.hist-hover-line');
+  ln.setAttribute('x1',x.toFixed(1)); ln.setAttribute('x2',x.toFixed(1));
+  hover.querySelectorAll('circle').forEach(c=>{
+    const v=g.ser[c.dataset.key][best];
+    if(v===null||v===undefined){ c.style.display='none'; return; }
+    c.style.display=''; c.setAttribute('cx',x.toFixed(1));
+    c.setAttribute('cy',(c.dataset.key==='freq'?g.mapF(v):g.mapY(v)).toFixed(1));
+  });
+  const T=v=>v==null?'--':fmtTemp(v/10)+unitSym();
+  const line=(color,label,val)=>`<div><i style="background:${color}"></i>${i18n(label)}<strong>${val}</strong></div>`;
+  let html=`<div class="tt">${histFmt(r.t,true)}</div>`;
+  html+=line('var(--hist-room)','Room',T(r.room));
+  if(r.sensor!=null) html+=line('var(--hist-room)','Room sensor',T(r.sensor));
+  if(r.flags&HF.POWER) html+=line('var(--hist-target)','Target',T(r.target));
+  if(r.out!=null) html+=line('var(--hist-out)','Outdoor',T(r.out));
+  if(r.flags&HF.CONN) html+=line('var(--hist-freq)','Compressor',String(r.freq));
+  html+=`<div>${histState(r)}</div>`;
+  if((r.flags&HF.POWER)&&HIST_FAN[r.fan]) html+=`<div>${i18n('Fan')}: ${i18n(HIST_FAN[r.fan])}</div>`;
+  const tip=svg.parentElement.querySelector('.hist-tip');
+  tip.innerHTML=html;
+  tip.style.display='block';
+  const px=x/g.W*rect.width;
+  const left=px+14+tip.offsetWidth>rect.width ? px-14-tip.offsetWidth : px+14;
+  tip.style.left=Math.max(0,left)+'px';
+}
+function histPanPreview(svg,dx){
+  const units=dx*histGeom.W/svg.getBoundingClientRect().width;
+  svg.querySelectorAll('.hist-pan').forEach(g=>{
+    if(dx){ g.setAttribute('transform',`translate(${units.toFixed(1)} 0)`); g.setAttribute('clip-path','url(#histClip)'); }
+    else{ g.removeAttribute('transform'); g.removeAttribute('clip-path'); }
+  });
+}
+// Mouse drag pans; touch keeps its drag for the hover readout.
+function histWire(){
+  if(histWired) return;
+  const wrap=$('histWrap'); if(!wrap) return;
+  histWired=true;
+  wrap.addEventListener('pointermove',ev=>{
+    if(histDrag){
+      histDrag.dx=ev.clientX-histDrag.x0;
+      if(!histDrag.moved && Math.abs(histDrag.dx)<5) return;
+      if(!histDrag.moved){ histDrag.moved=true; histDrag.svg.classList.add('dragging'); histHide(); }
+      histPanPreview(histDrag.svg,histDrag.dx);
+      return;
+    }
+    histHover(ev);
+  });
+  wrap.addEventListener('pointerleave',()=>{ if(!histDrag) histHide(); });
+  wrap.addEventListener('pointerdown',ev=>{
+    const svg=ev.target.closest&&ev.target.closest('.hist-chart');
+    if(!svg||ev.pointerType!=='mouse'||ev.button!==0||!histGeom) return;
+    histDrag={svg,x0:ev.clientX,dx:0,moved:false};
+  });
+  window.addEventListener('pointerup',()=>{
+    const drag=histDrag, d=hist.data, g=histGeom;
+    histDrag=null;
+    if(!drag||!drag.moved||!d||!g) return;
+    const rect=drag.svg.getBoundingClientRect();
+    const plotPx=rect.width*(g.plotR-g.plotL)/g.W;
+    const snap=HIST_SNAP[hist.window]||900;
+    const target=Math.round((d.end-drag.dx/plotPx*(g.end-g.start))/snap)*snap;
+    if(target===d.end || Math.abs(target-d.end)<snap/2){ histPanPreview(drag.svg,0); drag.svg.classList.remove('dragging'); return; }
+    histGoto(target);
+  });
+  wrap.addEventListener('dblclick',ev=>{
+    const svg=ev.target.closest&&ev.target.closest('.hist-chart');
+    if(!svg||!histGeom) return;
+    const t=histTimeAt(svg,ev.clientX);
+    if(t===null) return;
+    const snap=HIST_SNAP[hist.window]||900;
+    histGoto(Math.round((t+hist.window/2)/snap)*snap);
+  });
+  let frame=0, lastW=0;
+  window.addEventListener('resize',()=>{
+    if(!histTabActive||frame) return;
+    frame=requestAnimationFrame(()=>{
+      frame=0;
+      const w=Math.round(wrap.clientWidth);
+      if(w&&w!==lastW){ lastW=w; histRender(); }
+    });
+  });
+  // Live view: slide the newest window forward once a minute.
+  setInterval(()=>{
+    if(histTabActive && !hist.end && !hist.loading && !document.hidden &&
+       Date.now()-hist.loadedAt>=60000) histLoad();
+  },10000);
+}
+
 // ── Activity log (Status tab, admin-only) ─────────────────────────────
 // cat: 0 Mode,1 Power,2 Setpoint,3 Fan,4 Group,5 Membership,6 Ota,7 Net,8 Unit,9 Fault,10 System
 const ACT_ICONS=['\u{1F504}','\u23FB','\u{1F321}\uFE0F','\u{1F4A8}','\u{1F465}',
