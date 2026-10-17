@@ -11,6 +11,7 @@ on:
       - 'components/cn105/**'
       - 'components/park/**'
       - 'components/slice/**'
+      - 'components/room_sensor/**'
       - 'test/host/**'
       - 'test/ui/**'
       - 'test/api/**'
@@ -78,6 +79,17 @@ jobs:
             test/host/test_slice_logic.cpp \
             -o slice_tests
           ./slice_tests
+
+      - name: Build and run host room-sensor tests
+        shell: bash
+        run: |
+          g++ -std=c++17 -Wall -Wextra -fsanitize=address,undefined \
+            -I components/room_sensor/include \
+            components/room_sensor/bthome.cpp \
+            components/room_sensor/sensor_tracker.cpp \
+            test/host/test_room_sensor.cpp \
+            -o room_sensor_tests
+          ./room_sensor_tests
 
       - name: Run Node host tests (web UI + API contract)
         shell: bash

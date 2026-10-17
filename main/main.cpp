@@ -22,6 +22,7 @@
 #include "capability.h"
 #include "status_led.h"
 #include "park_ctl.h"
+#include "room_sensor_ctl.h"
 #include "slice_ctl.h"
 
 #include <cstdlib>
@@ -274,7 +275,13 @@ void on_mqtt_command(const hvac_mqtt::Command& cmd) {
                              // as a unit-initiated revert.
                              capability::notify_user_wide_vane_change();
                              break;
-        case K::RemoteTemp:  g_hp.setRemoteTemperature(strtof(cmd.value.c_str(), nullptr)); break;
+        case K::RemoteTemp:
+            // A paired, fresh room sensor (#142) owns the remote temperature.
+            if (room_sensor_ctl::active())
+                ESP_LOGI(TAG, "remote_temp ignored: room sensor is active");
+            else
+                g_hp.setRemoteTemperature(strtof(cmd.value.c_str(), nullptr));
+            break;
         case K::System:      ESP_LOGI(TAG, "system cmd: %s", cmd.value.c_str()); break;
         case K::Ota:         ota::start_url(cmd.value); break;
         case K::UpdateInstall: ota::install_latest(); break;
@@ -617,6 +624,11 @@ extern "C" void app_main() {
             in.room      = st.roomTemperature;
             in.operating = st.operating;
             in.sub_mode  = st.subMode;
+            float ext = 0.0f;
+            if (room_sensor_ctl::fresh_temp(&ext)) {
+                in.room = ext;  // full precision (the unit snaps to 0.5 °C)
+                in.room_external = true;
+            }
             return in;
         };
         ph.set_power = [](bool on) { g_hp.setPowerSetting(on ? "ON" : "OFF"); };
@@ -630,6 +642,10 @@ extern "C" void app_main() {
             hvac_mqtt::publish_state(e, g_hp.getStatus());
         };
         park_ctl::init(ph);
+
+        room_sensor_ctl::Hooks rh;
+        rh.set_remote = [](float c) { g_hp.setRemoteTemperature(c); };
+        room_sensor_ctl::init(rh);
 
         slice_ctl::Hooks sh;
         sh.settings = [] { return park_ctl::overlay(g_hp.getSettings()); };

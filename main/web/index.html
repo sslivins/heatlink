@@ -638,6 +638,7 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
   <div class="secnav" data-grp="settings">
     <button onclick="jumpTo('sec-display')">Display</button>
     <button onclick="jumpTo('sec-widevane')">Wide vane</button>
+    <button onclick="jumpTo('sec-sensor')">Room sensor</button>
     <button onclick="jumpTo('sec-park')">Off at setpoint</button>
     <button onclick="jumpTo('sec-tandem')">Tandem</button>
     <button onclick="jumpTo('sec-wifi')">WiFi</button>
@@ -718,6 +719,35 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
       not detected on your unit and may have no effect.</div>
     <div id="wvMsg" class="status hidden" style="margin:10px 0"></div>
     <button class="btn" id="wvDetectBtn" onclick="detectWideVane()">Detect now</button>
+  </div>
+
+  <!-- Wireless room sensor (#142): a Shelly BLU H&T heard over Bluetooth. -->
+  <div class="card" data-grp="settings" id="sec-sensor">
+    <h2 style="display:flex;align-items:center">Room sensor<button type="button" class="info-btn" aria-label="What is a room sensor?" aria-expanded="false" aria-controls="rsInfo"
+            title="A battery-powered Shelly BLU H&amp;T on the wall reports the real room temperature over Bluetooth. The unit heats or cools to that reading instead of the air at the head, and Off at setpoint no longer needs fan air checks. If the sensor goes quiet for 10 minutes the head goes back to its own sensor." onclick="toggleInfo(this)">i</button></h2>
+    <div class="sub" style="margin:-4px 0 8px">Use a wireless sensor on the wall as this room's temperature.</div>
+    <div id="rsInfo" class="info-pop hidden">A battery-powered Shelly BLU H&amp;T on the wall reports the real room temperature over Bluetooth. The unit heats or cools to that reading instead of the air at the head, and Off at setpoint no longer needs fan air checks. If the sensor goes quiet for 10 minutes the head goes back to its own sensor.</div>
+    <div id="rsPaired" class="hidden">
+      <div class="row"><label>Sensor</label><span class="v" id="rsName">--</span></div>
+      <div class="row"><label>Temperature</label><span class="v" id="rsTemp">--</span></div>
+      <div class="row"><label>Humidity</label><span class="v" id="rsHum">--</span></div>
+      <div class="row"><label>Battery</label><span class="v" id="rsBat">--</span></div>
+      <div class="row"><label>Signal</label><span class="v" id="rsSig">--</span></div>
+      <div class="row"><label>Last reading</label><span class="v" id="rsAge">--</span></div>
+      <div id="rsStale" class="status err hidden" style="margin:8px 0"></div>
+    </div>
+    <div id="rsNone" class="row"><label>Status</label><span class="v">No sensor</span></div>
+    <div id="rsPair" class="hidden">
+      <div class="status info" style="margin:8px 0" id="rsPairMsg">Press the button on the sensor</div>
+      <div class="sub" style="margin:0 0 6px">Or pick it from the sensors heard nearby:</div>
+      <div id="rsNearby" class="sub" style="margin:0 0 8px">Listening…</div>
+    </div>
+    <div id="rsMsg" class="status hidden" style="margin:10px 0"></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn" id="rsAdd" onclick="sensorAction('pair')">Add sensor</button>
+      <button class="btn" id="rsCancel" onclick="sensorAction('cancel')">Cancel</button>
+      <button class="btn" id="rsRemove" onclick="sensorRemove()">Remove</button>
+    </div>
   </div>
 
   <div class="card" data-grp="settings" id="sec-park">
@@ -1052,6 +1082,34 @@ const I18N = { fr: {
   "Cooling turn":"Tour de refroidissement","Switching modes":"Changement de mode",
   "Nobody needs heat or cool":"Aucun besoin de chauffage ou de refroidissement",
   "Starting…":"Démarrage…",
+  // Room sensor (#142)
+  "Room sensor":"Capteur de pièce",
+  "What is a room sensor?":"Qu’est-ce qu’un capteur de pièce ?",
+  "A battery-powered Shelly BLU H&T on the wall reports the real room temperature over Bluetooth. The unit heats or cools to that reading instead of the air at the head, and Off at setpoint no longer needs fan air checks. If the sensor goes quiet for 10 minutes the head goes back to its own sensor.":"Un Shelly BLU H&T à piles fixé au mur transmet la vraie température de la pièce par Bluetooth. L’unité chauffe ou refroidit selon cette mesure plutôt que selon l’air près de l’unité, et Arrêt à la consigne n’a plus besoin de ventilations de contrôle. Si le capteur reste muet pendant 10 minutes, l’unité revient à son propre capteur.",
+  "Use a wireless sensor on the wall as this room's temperature.":"Utiliser un capteur sans fil au mur comme température de cette pièce.",
+  "Sensor":"Capteur",
+  "Humidity":"Humidité",
+  "Last reading":"Dernière mesure",
+  "No sensor":"Aucun capteur",
+  "Press the button on the sensor":"Appuyez sur le bouton du capteur",
+  "Or pick it from the sensors heard nearby:":"Ou choisissez-le parmi les capteurs détectés à proximité :",
+  "Listening…":"Écoute…",
+  "Add sensor":"Ajouter un capteur",
+  "Replace sensor":"Remplacer le capteur",
+  "Remove":"Retirer",
+  "Use":"Utiliser",
+  "Encrypted":"Chiffré",
+  "just now":"à l’instant",
+  "{n} min ago":"il y a {n} min",
+  "Strong":"Fort",
+  "Good":"Bon",
+  "Weak":"Faible",
+  "Waiting for a reading":"En attente d’une mesure",
+  "No reading yet — the head is using its own sensor.":"Pas encore de mesure — l’unité utilise son propre capteur.",
+  "Not heard for {n} min — the head is using its own sensor.":"Muet depuis {n} min — l’unité utilise son propre capteur.",
+  "Bluetooth failed to start":"Échec du démarrage du Bluetooth",
+  "Remove the room sensor? The head will go back to its own sensor.":"Retirer le capteur de pièce ? L’unité reviendra à son propre capteur.",
+  "room sensor":"capteur de pièce",
   "Outdoor unit":"Unité extérieure",
   "Not paired":"Non jumelé",
   "(unnamed group)":"(groupe sans nom)",
@@ -1322,7 +1380,7 @@ function showTab(name){
   netTabActive=(name==='settings');
   statusTabActive=(name==='status');
   if(statusTabActive && authState.role==='admin'){ refreshActivity(true); }
-  if(netTabActive && authState.role==='admin'){ loadPark(); }
+  if(netTabActive && authState.role==='admin'){ loadPark(); loadSensor(); }
   mqEditing=false;   // switching tabs commits/abandons any in-progress MQTT edit
   if(netTabActive && authState.role==='admin'){ closeJoin(); }
   // Re-sync stored auth state when opening Settings so the pending-change gate
@@ -1563,7 +1621,8 @@ function pkStatusText(st){
   if(st.held) return i18n('Waiting for its turn');
   if(st.state==='parked'){
     let t=i18n('Parked');
-    if(st.next_probe_s!=null) t+=' \u00b7 '+i18n('air check in')+' '+Math.max(1,Math.ceil(st.next_probe_s/60))+' min';
+    if(st.room_sensor) t+=' \u00b7 '+i18n('room sensor');
+    else if(st.next_probe_s!=null) t+=' \u00b7 '+i18n('air check in')+' '+Math.max(1,Math.ceil(st.next_probe_s/60))+' min';
     return t;
   }
   if(st.state==='probing') return i18n('Checking room');
@@ -1612,6 +1671,79 @@ async function savePark(){
     await loadPark(true);
     refresh();
   }catch(e){ msg.textContent=i18n('Save failed');msg.className='status err';msg.classList.remove('hidden'); }
+}
+
+// ── Room sensor (Settings, #142) ───────────────────────────────────────
+let rsTimer=null;
+const rsAgo=s=>s==null?'--':s<60?i18n('just now'):i18n('{n} min ago',{n:Math.floor(s/60)});
+const rsSig=r=>r==null?'--':(r>=-65?i18n('Strong'):r>=-80?i18n('Good'):i18n('Weak'))+' ('+r+' dBm)';
+const rsEsc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function renderSensor(d){
+  $('rsPaired').classList.toggle('hidden',!d.paired);
+  $('rsNone').classList.toggle('hidden',d.paired||d.pairing);
+  $('rsPair').classList.toggle('hidden',!d.pairing);
+  $('rsAdd').classList.toggle('hidden',d.pairing);
+  $('rsAdd').textContent=d.paired?i18n('Replace sensor'):i18n('Add sensor');
+  $('rsCancel').classList.toggle('hidden',!d.pairing);
+  $('rsRemove').classList.toggle('hidden',!d.paired||d.pairing);
+  if(d.paired){
+    $('rsName').textContent=(d.name?d.name+' \u00b7 ':'')+d.addr;
+    $('rsTemp').textContent=d.temp==null?i18n('Waiting for a reading'):fmtTemp(d.temp)+' '+unitSym();
+    $('rsHum').textContent=d.humidity==null?'--':Math.round(d.humidity)+' %';
+    $('rsBat').textContent=d.battery==null?'--':d.battery+' %';
+    $('rsSig').textContent=rsSig(d.rssi);
+    $('rsAge').textContent=rsAgo(d.temp_age_s);
+    const stale=!d.fresh&&!d.pairing;
+    const st=$('rsStale');
+    st.classList.toggle('hidden',!stale);
+    if(stale) st.textContent=d.temp_age_s==null
+      ?i18n('No reading yet \u2014 the head is using its own sensor.')
+      :i18n('Not heard for {n} min \u2014 the head is using its own sensor.',{n:Math.floor(d.temp_age_s/60)});
+  }
+  if(d.pairing){
+    $('rsPairMsg').textContent=i18n('Press the button on the sensor')+' ('+d.pairing_remaining_s+' s)';
+    const nb=d.nearby||[];
+    $('rsNearby').innerHTML=nb.length?nb.map(n=>{
+      const label=rsEsc(n.name||n.addr)+(n.name?' <span style="color:var(--fg-3)">'+rsEsc(n.addr)+'</span>':'');
+      const right=n.encrypted?'<span>'+i18n('Encrypted')+'</span>'
+        :'<button class="btn" style="padding:4px 10px" onclick="sensorSelect(\''+rsEsc(n.addr)+'\')">'+i18n('Use')+'</button>';
+      const tmp=n.temp==null?'':' \u00b7 '+fmtTemp(n.temp)+' '+unitSym();
+      return '<div class="row"><label>'+label+'<br><span style="color:var(--fg-3)">'+rsSig(n.rssi)+tmp+'</span></label>'+right+'</div>';
+    }).join(''):i18n('Listening…');
+  }
+  if(d.ble&&d.ble.error){
+    const m=$('rsMsg');m.textContent=i18n('Bluetooth failed to start')+': '+d.ble.error;
+    m.className='status err';m.classList.remove('hidden');
+  }
+  // Poll fast while the pairing window is open, then settle back.
+  clearTimeout(rsTimer);
+  if(d.pairing&&netTabActive) rsTimer=setTimeout(loadSensor,1000);
+}
+async function loadSensor(){
+  try{
+    const r=await fetch('/api/sensor');
+    if(!r.ok) return;
+    const d=await r.json();
+    const was=$('rsCancel').offsetParent!==null;
+    renderSensor(d);
+    if(was&&!d.pairing&&d.paired) refresh();
+  }catch(e){}
+}
+async function postSensor(body){
+  const msg=$('rsMsg');
+  try{
+    const r=await fetch('/api/sensor',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    if(r.status===401||r.status===403){ loadAuth(); return; }
+    if(!r.ok){ msg.textContent=(await r.text())||i18n('Save failed');msg.className='status err';msg.classList.remove('hidden'); return; }
+    msg.classList.add('hidden');
+    renderSensor(await r.json());
+  }catch(e){ msg.textContent=i18n('Save failed');msg.className='status err';msg.classList.remove('hidden'); }
+}
+function sensorAction(a){ return postSensor({action:a}); }
+function sensorSelect(addr){ return postSensor({action:'select',addr}); }
+function sensorRemove(){
+  if(!confirm(i18n('Remove the room sensor? The head will go back to its own sensor.'))) return;
+  return postSensor({action:'remove'});
 }
 
 const WV_STATUS={supported:'Powered (detected)',unsupported:'Manual louver (no motor)',
@@ -2997,7 +3129,7 @@ async function pollOnce(){
   if(tickN%6===0){ await refreshUpdate(); await loadMqtt(); }
   if(tickN%2===0) await refreshGroup();
   if(statusTabActive && tickN%2===0) await refreshActivity(false);
-  if(netTabActive && tickN%2===0) await loadPark();
+  if(netTabActive && tickN%2===0){ await loadPark(); await loadSensor(); }
   tickN++;
 }
 function schedule(ms){ clearTimeout(pollTimer); pollTimer=setTimeout(tick,ms); }

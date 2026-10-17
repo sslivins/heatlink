@@ -3,6 +3,7 @@
 
 #include "web_ui.h"
 #include "park_ctl.h"
+#include "room_sensor_ctl.h"
 #include "slice_ctl.h"
 #include "wifi_manager.h"
 #include "ota.h"
@@ -324,6 +325,8 @@ cJSON* park_status_json() {
     cJSON_AddBoolToObject(o, "forced", ps.forced);  // enabled by time-slicing
     cJSON_AddBoolToObject(o, "slicing", ps.slicing);  // group time-slicing is on
     cJSON_AddBoolToObject(o, "quiet_fan", ps.quiet_fan);  // air check at QUIET fan
+    // A fresh room sensor (#142) reads the room: air checks aren't needed.
+    cJSON_AddBoolToObject(o, "room_sensor", room_sensor_ctl::active());
     if (ps.next_probe_s >= 0)
         cJSON_AddNumberToObject(o, "next_probe_s", ps.next_probe_s);
     else
@@ -564,6 +567,105 @@ esp_err_t handle_park_post(httpd_req_t* req) {
                     who.empty() ? "" : who.c_str());
     }
     return send_park(req, applied);
+}
+
+// ── GET /api/sensor ────────────────────────────────────────────────────
+// Wireless room sensor (#142): the paired sensor, its latest reading, and the
+// pairing window with the BTHome devices heard during it.
+static void add_num_or_null(cJSON* o, const char* k, bool has, double v) {
+    if (has) cJSON_AddNumberToObject(o, k, v);
+    else cJSON_AddNullToObject(o, k);
+}
+
+esp_err_t send_sensor(httpd_req_t* req) {
+    room_sensor_ctl::Snapshot s = room_sensor_ctl::snapshot();
+    cJSON* root = cJSON_CreateObject();
+    cJSON_AddBoolToObject(root, "paired", s.paired);
+    if (s.paired) cJSON_AddStringToObject(root, "addr", s.addr.c_str());
+    else cJSON_AddNullToObject(root, "addr");
+    cJSON_AddStringToObject(root, "name", s.name.c_str());
+    cJSON_AddBoolToObject(root, "fresh", s.fresh);
+    cJSON_AddBoolToObject(root, "active", room_sensor_ctl::active());
+    add_num_or_null(root, "temp", s.sample.valid, s.sample.temp_c);
+    add_num_or_null(root, "humidity", s.sample.has_humidity, s.sample.humidity);
+    add_num_or_null(root, "battery", s.sample.has_battery, s.sample.battery);
+    add_num_or_null(root, "rssi", s.sample.seen, s.sample.rssi);
+    add_num_or_null(root, "temp_age_s", s.temp_age_s >= 0, s.temp_age_s);
+    add_num_or_null(root, "seen_age_s", s.seen_age_s >= 0, s.seen_age_s);
+    cJSON_AddNumberToObject(root, "stale_after_s", room_sensor::kStaleS);
+    cJSON_AddBoolToObject(root, "pairing", s.pairing);
+    cJSON_AddNumberToObject(root, "pairing_remaining_s", s.pairing_remaining_s);
+    cJSON* nb = cJSON_AddArrayToObject(root, "nearby");
+    for (size_t i = 0; i < s.nearby.size(); ++i) {
+        const auto& n = s.nearby[i];
+        cJSON* e = cJSON_CreateObject();
+        cJSON_AddStringToObject(e, "addr", n.addr.c_str());
+        cJSON_AddStringToObject(e, "name", n.name.c_str());
+        cJSON_AddNumberToObject(e, "rssi", n.rssi);
+        cJSON_AddBoolToObject(e, "encrypted", n.encrypted);
+        add_num_or_null(e, "temp", n.has_temp, n.temp_c);
+        cJSON_AddNumberToObject(e, "age_s", s.nearby_age_s[i]);
+        cJSON_AddItemToArray(nb, e);
+    }
+    cJSON* ble = cJSON_AddObjectToObject(root, "ble");
+    cJSON_AddBoolToObject(ble, "scanning", s.ble_ready);
+    cJSON_AddStringToObject(ble, "error", s.ble_error.c_str());
+    cJSON_AddNumberToObject(ble, "adverts", s.ble_adverts);
+    char* str = cJSON_PrintUnformatted(root);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, str);
+    cJSON_free(str);
+    cJSON_Delete(root);
+    return ESP_OK;
+}
+
+esp_err_t handle_sensor_get(httpd_req_t* req) {
+    set_cors(req);
+    REQUIRE_API_AUTH(req);
+    return send_sensor(req);
+}
+
+// ── POST /api/sensor ───────────────────────────────────────────────────
+// Admin. Body {"action":"pair"} opens the 60 s press-the-button window,
+// "cancel" closes it, {"action":"select","addr":"AA:BB:.."} pairs a sensor
+// from the nearby list, "remove" unpairs. Responds with GET /api/sensor.
+esp_err_t handle_sensor_post(httpd_req_t* req) {
+    set_cors(req);
+    REQUIRE_ADMIN(req);
+    char* body = recv_body(req);
+    if (!body) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Empty or oversized body");
+        return ESP_FAIL;
+    }
+    cJSON* json = cJSON_Parse(body);
+    free(body);
+    const cJSON* a = json ? cJSON_GetObjectItem(json, "action") : nullptr;
+    if (!a || !cJSON_IsString(a)) {
+        if (json) cJSON_Delete(json);
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing action");
+        return ESP_FAIL;
+    }
+    const std::string action = a->valuestring;
+    const cJSON* ad = cJSON_GetObjectItem(json, "addr");
+    const std::string addr = (ad && cJSON_IsString(ad)) ? ad->valuestring : "";
+    cJSON_Delete(json);
+    if (action == "pair") {
+        room_sensor_ctl::start_pairing();
+    } else if (action == "cancel") {
+        room_sensor_ctl::cancel_pairing();
+    } else if (action == "remove") {
+        room_sensor_ctl::unpair();
+    } else if (action == "select") {
+        if (!room_sensor_ctl::select(addr)) {
+            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST,
+                                "Sensor not heard recently or encrypted");
+            return ESP_FAIL;
+        }
+    } else {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Unknown action");
+        return ESP_FAIL;
+    }
+    return send_sensor(req);
 }
 
 // ── GET /api/capabilities ──────────────────────────────────────────────
@@ -3111,6 +3213,8 @@ esp_err_t init(const Hooks& hooks) {
         {"/api/capabilities",        HTTP_POST,    handle_capabilities_post, nullptr},
         {"/api/park",                HTTP_GET,     handle_park_get,       nullptr},
         {"/api/park",                HTTP_POST,    handle_park_post,      nullptr},
+        {"/api/sensor",              HTTP_GET,     handle_sensor_get,     nullptr},
+        {"/api/sensor",              HTTP_POST,    handle_sensor_post,    nullptr},
         {"/api/ota",                 HTTP_POST,    handle_ota_upload,     nullptr},
         {"/api/ota/url",             HTTP_POST,    handle_ota_url,        nullptr},
         {"/api/ota/status",          HTTP_GET,     handle_ota_status,     nullptr},

@@ -49,3 +49,17 @@ CONFIG_HTTPD_MAX_REQ_HDR_LEN=2048
 # open up to 6 keep-alive connections per tab). Raise the lwip ceiling so the
 # httpd pool plus MQTT, mDNS and the OTA HTTPS check all fit. 16 is the max.
 CONFIG_LWIP_MAX_SOCKETS=16
+
+# Bluetooth LE (NimBLE), observer only: passive scanning for wireless room
+# sensors (Shelly BLU H&T / BTHome, #142). The stack starts only once a sensor
+# is paired or pairing begins. No connections, advertising or pairing/bonding.
+# Host memory comes from PSRAM.
+CONFIG_BT_ENABLED=y
+CONFIG_BT_NIMBLE_ENABLED=y
+CONFIG_BT_NIMBLE_ROLE_OBSERVER=y
+CONFIG_BT_NIMBLE_ROLE_CENTRAL=n
+CONFIG_BT_NIMBLE_ROLE_PERIPHERAL=n
+CONFIG_BT_NIMBLE_ROLE_BROADCASTER=n
+CONFIG_BT_NIMBLE_SECURITY_ENABLE=n
+CONFIG_BT_NIMBLE_MAX_CONNECTIONS=1
+CONFIG_BT_NIMBLE_MEM_ALLOC_MODE_EXTERNAL=y
