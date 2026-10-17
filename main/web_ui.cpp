@@ -569,33 +569,49 @@ esp_err_t handle_park_post(httpd_req_t* req) {
     return send_park(req, applied);
 }
 
-// ── GET /api/sensor ────────────────────────────────────────────────────
-// Wireless room sensor (#142): the paired sensor, its latest reading, and the
-// pairing window with the BTHome devices heard during it.
+// ── GET /api/sensors ───────────────────────────────────────────────────
+// Wireless room sensors (#142): the paired sensors and their readings, the
+// averaged room temperature, and the Bluetooth / Wi-Fi pairing windows.
 static void add_num_or_null(cJSON* o, const char* k, bool has, double v) {
     if (has) cJSON_AddNumberToObject(o, k, v);
     else cJSON_AddNullToObject(o, k);
 }
 
-esp_err_t send_sensor(httpd_req_t* req) {
+esp_err_t send_sensors(httpd_req_t* req) {
     room_sensor_ctl::Snapshot s = room_sensor_ctl::snapshot();
     cJSON* root = cJSON_CreateObject();
-    cJSON_AddBoolToObject(root, "paired", s.paired);
-    if (s.paired) cJSON_AddStringToObject(root, "addr", s.addr.c_str());
-    else cJSON_AddNullToObject(root, "addr");
-    cJSON_AddStringToObject(root, "name", s.name.c_str());
-    cJSON_AddBoolToObject(root, "fresh", s.fresh);
     cJSON_AddBoolToObject(root, "active", room_sensor_ctl::active());
-    add_num_or_null(root, "temp", s.sample.valid, s.sample.temp_c);
-    add_num_or_null(root, "humidity", s.sample.has_humidity, s.sample.humidity);
-    add_num_or_null(root, "battery", s.sample.has_battery, s.sample.battery);
-    add_num_or_null(root, "rssi", s.sample.seen, s.sample.rssi);
-    add_num_or_null(root, "temp_age_s", s.temp_age_s >= 0, s.temp_age_s);
-    add_num_or_null(root, "seen_age_s", s.seen_age_s >= 0, s.seen_age_s);
-    cJSON_AddNumberToObject(root, "stale_after_s", room_sensor::kStaleS);
-    cJSON_AddBoolToObject(root, "pairing", s.pairing);
-    cJSON_AddNumberToObject(root, "pairing_remaining_s", s.pairing_remaining_s);
-    cJSON* nb = cJSON_AddArrayToObject(root, "nearby");
+    add_num_or_null(root, "temp", s.has_temp, s.temp);
+    cJSON_AddNumberToObject(root, "n_fresh", s.n_fresh);
+    cJSON_AddNumberToObject(root, "max", room_sensor::kMaxSensors);
+    cJSON* arr = cJSON_AddArrayToObject(root, "sensors");
+    for (const auto& v : s.sensors) {
+        const auto& x = v.s;
+        cJSON* e = cJSON_CreateObject();
+        cJSON_AddStringToObject(e, "id", x.id.c_str());
+        cJSON_AddStringToObject(e, "kind", room_sensor::kind_str(x.kind));
+        cJSON_AddStringToObject(e, "name", x.name.c_str());
+        cJSON_AddBoolToObject(e, "fresh", v.fresh);
+        add_num_or_null(e, "temp", x.sample.valid, x.sample.temp_c);
+        add_num_or_null(e, "humidity", x.sample.has_humidity, x.sample.humidity);
+        add_num_or_null(e, "battery", x.sample.has_battery, x.sample.battery);
+        add_num_or_null(e, "rssi", x.sample.has_rssi, x.sample.rssi);
+        add_num_or_null(e, "temp_age_s", v.temp_age_s >= 0, v.temp_age_s);
+        add_num_or_null(e, "seen_age_s", v.seen_age_s >= 0, v.seen_age_s);
+        cJSON_AddNumberToObject(e, "stale_after_s", v.stale_s);
+        if (x.kind == room_sensor::Kind::ShellyRpc) {
+            cJSON_AddStringToObject(e, "host", x.host.c_str());
+            cJSON_AddNumberToObject(e, "report_step", x.step_c);
+            cJSON_AddBoolToObject(e, "pending", x.sync_pending);
+            cJSON_AddStringToObject(e, "sync_error", x.sync_error.c_str());
+        }
+        cJSON_AddItemToArray(arr, e);
+    }
+    cJSON* pairing = cJSON_AddObjectToObject(root, "pairing");
+    cJSON* pb = cJSON_AddObjectToObject(pairing, "ble");
+    cJSON_AddBoolToObject(pb, "open", s.ble_pairing);
+    cJSON_AddNumberToObject(pb, "remaining_s", s.ble_remaining_s);
+    cJSON* nb = cJSON_AddArrayToObject(pb, "nearby");
     for (size_t i = 0; i < s.nearby.size(); ++i) {
         const auto& n = s.nearby[i];
         cJSON* e = cJSON_CreateObject();
@@ -607,8 +623,20 @@ esp_err_t send_sensor(httpd_req_t* req) {
         cJSON_AddNumberToObject(e, "age_s", s.nearby_age_s[i]);
         cJSON_AddItemToArray(nb, e);
     }
+    cJSON* pw = cJSON_AddObjectToObject(pairing, "wifi");
+    cJSON_AddBoolToObject(pw, "open", s.wifi_pairing);
+    cJSON_AddNumberToObject(pw, "remaining_s", s.wifi_remaining_s);
+    cJSON* fd = cJSON_AddArrayToObject(pw, "found");
+    for (const auto& f : s.found) {
+        cJSON* e = cJSON_CreateObject();
+        cJSON_AddStringToObject(e, "name", f.name.c_str());
+        cJSON_AddStringToObject(e, "ip", f.ip.c_str());
+        cJSON_AddItemToArray(fd, e);
+    }
+    cJSON_AddStringToObject(pw, "state", s.pair_state.c_str());
+    cJSON_AddStringToObject(pw, "message", s.pair_message.c_str());
     cJSON* ble = cJSON_AddObjectToObject(root, "ble");
-    cJSON_AddBoolToObject(ble, "scanning", s.ble_ready);
+    cJSON_AddBoolToObject(ble, "scanning", s.ble_scanning);
     cJSON_AddStringToObject(ble, "error", s.ble_error.c_str());
     cJSON_AddNumberToObject(ble, "adverts", s.ble_adverts);
     char* str = cJSON_PrintUnformatted(root);
@@ -619,17 +647,23 @@ esp_err_t send_sensor(httpd_req_t* req) {
     return ESP_OK;
 }
 
-esp_err_t handle_sensor_get(httpd_req_t* req) {
+esp_err_t handle_sensors_get(httpd_req_t* req) {
     set_cors(req);
     REQUIRE_API_AUTH(req);
-    return send_sensor(req);
+    return send_sensors(req);
 }
 
-// ── POST /api/sensor ───────────────────────────────────────────────────
-// Admin. Body {"action":"pair"} opens the 60 s press-the-button window,
-// "cancel" closes it, {"action":"select","addr":"AA:BB:.."} pairs a sensor
-// from the nearby list, "remove" unpairs. Responds with GET /api/sensor.
-esp_err_t handle_sensor_post(httpd_req_t* req) {
+// ── POST /api/sensors ──────────────────────────────────────────────────
+// Admin. {"action": ...}:
+//   pair_ble              open the 60 s press-the-button Bluetooth window
+//   discover              look for awake Shelly Wi-Fi sensors for 3 min
+//   pair_wifi {host}      pair the Shelly at host (runs in the background)
+//   select {addr}         pair a Bluetooth sensor from the nearby list
+//   cancel                close the pairing windows
+//   remove {id}           unpair a sensor
+//   set {id, name?, report_step?}
+// Responds with GET /api/sensors.
+esp_err_t handle_sensors_post(httpd_req_t* req) {
     set_cors(req);
     REQUIRE_ADMIN(req);
     char* body = recv_body(req);
@@ -645,27 +679,93 @@ esp_err_t handle_sensor_post(httpd_req_t* req) {
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing action");
         return ESP_FAIL;
     }
+    auto str = [&](const char* k, std::string* out) {
+        const cJSON* v = cJSON_GetObjectItem(json, k);
+        if (!v || !cJSON_IsString(v)) return false;
+        *out = v->valuestring;
+        return true;
+    };
     const std::string action = a->valuestring;
-    const cJSON* ad = cJSON_GetObjectItem(json, "addr");
-    const std::string addr = (ad && cJSON_IsString(ad)) ? ad->valuestring : "";
+    std::string addr, host, id, name;
+    str("addr", &addr);
+    str("host", &host);
+    str("id", &id);
+    const bool has_name = str("name", &name);
+    float step = 0.0f;
+    const cJSON* rs = cJSON_GetObjectItem(json, "report_step");
+    if (rs && cJSON_IsNumber(rs)) step = static_cast<float>(rs->valuedouble);
     cJSON_Delete(json);
-    if (action == "pair") {
-        room_sensor_ctl::start_pairing();
-    } else if (action == "cancel") {
-        room_sensor_ctl::cancel_pairing();
-    } else if (action == "remove") {
-        room_sensor_ctl::unpair();
-    } else if (action == "select") {
-        if (!room_sensor_ctl::select(addr)) {
-            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST,
-                                "Sensor not heard recently or encrypted");
-            return ESP_FAIL;
-        }
+
+    using room_sensor_ctl::Res;
+    Res r;
+    if (action == "pair_ble") r = room_sensor_ctl::start_ble_pairing();
+    else if (action == "discover") r = room_sensor_ctl::start_wifi_pairing();
+    else if (action == "pair_wifi") r = room_sensor_ctl::pair_wifi(host);
+    else if (action == "select") r = room_sensor_ctl::select(addr);
+    else if (action == "cancel") { room_sensor_ctl::cancel_pairing(); r = Res::Ok; }
+    else if (action == "remove") r = room_sensor_ctl::remove(id);
+    else if (action == "set") {
+        if (rs && step <= 0.0f) r = Res::Invalid;
+        else r = room_sensor_ctl::configure(id, has_name ? &name : nullptr, step);
     } else {
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Unknown action");
         return ESP_FAIL;
     }
-    return send_sensor(req);
+    switch (r) {
+        case Res::Ok: break;
+        case Res::Full:
+            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "This head already has 4 sensors");
+            return ESP_FAIL;
+        case Res::NotFound:
+            httpd_resp_send_err(req, HTTPD_404_NOT_FOUND,
+                                action == "select" ? "Sensor not heard recently or encrypted"
+                                                   : "No such sensor");
+            return ESP_FAIL;
+        case Res::Invalid:
+            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid value");
+            return ESP_FAIL;
+        case Res::Busy:
+            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Already pairing a sensor");
+            return ESP_FAIL;
+    }
+    return send_sensors(req);
+}
+
+// ── GET /api/sensors/report ────────────────────────────────────────────
+// Webhook from a paired Shelly Wi-Fi sensor. No login: the per-sensor token
+// in the query (k=) is the credential.
+static std::string peer_ipv4(httpd_req_t* req) {
+    int fd = httpd_req_to_sockfd(req);
+    if (fd < 0) return "";
+    struct sockaddr_storage ss;
+    socklen_t l = sizeof(ss);
+    if (getpeername(fd, (struct sockaddr*)&ss, &l) != 0) return "";
+    char ip[16] = "";
+    if (ss.ss_family == AF_INET) {
+        inet_ntop(AF_INET, &((struct sockaddr_in*)&ss)->sin_addr, ip, sizeof(ip));
+    } else if (ss.ss_family == AF_INET6) {
+        const uint8_t* b = ((struct sockaddr_in6*)&ss)->sin6_addr.s6_addr;
+        static const uint8_t kMapped[12] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff};
+        if (memcmp(b, kMapped, 12) == 0) inet_ntop(AF_INET, b + 12, ip, sizeof(ip));
+    }
+    return ip;
+}
+
+esp_err_t handle_sensors_report(httpd_req_t* req) {
+    size_t qlen = httpd_req_get_url_query_len(req);
+    if (qlen == 0 || qlen > 256) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Bad report");
+        return ESP_FAIL;
+    }
+    std::string q(qlen + 1, '\0');
+    httpd_req_get_url_query_str(req, &q[0], q.size());
+    q.resize(qlen);
+    if (!room_sensor_ctl::on_report(q, peer_ipv4(req))) {
+        httpd_resp_send_err(req, HTTPD_403_FORBIDDEN, "Unknown sensor");
+        return ESP_FAIL;
+    }
+    httpd_resp_set_type(req, "text/plain");
+    return httpd_resp_sendstr(req, "ok");
 }
 
 // ── GET /api/capabilities ──────────────────────────────────────────────
@@ -3179,7 +3279,7 @@ esp_err_t init(const Hooks& hooks) {
 
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
     cfg.uri_match_fn = httpd_uri_match_wildcard;
-    cfg.max_uri_handlers = 56;  // must exceed the uris[] count below
+    cfg.max_uri_handlers = 60;  // must exceed the uris[] count below
     cfg.stack_size = 8192;
     // The default 7 sockets reserve 3 for internal use, leaving only 4 for
     // clients — fewer than the 6 keep-alive connections a single browser tab
@@ -3213,8 +3313,9 @@ esp_err_t init(const Hooks& hooks) {
         {"/api/capabilities",        HTTP_POST,    handle_capabilities_post, nullptr},
         {"/api/park",                HTTP_GET,     handle_park_get,       nullptr},
         {"/api/park",                HTTP_POST,    handle_park_post,      nullptr},
-        {"/api/sensor",              HTTP_GET,     handle_sensor_get,     nullptr},
-        {"/api/sensor",              HTTP_POST,    handle_sensor_post,    nullptr},
+        {"/api/sensors",             HTTP_GET,     handle_sensors_get,    nullptr},
+        {"/api/sensors",             HTTP_POST,    handle_sensors_post,   nullptr},
+        {"/api/sensors/report",      HTTP_GET,     handle_sensors_report, nullptr},
         {"/api/ota",                 HTTP_POST,    handle_ota_upload,     nullptr},
         {"/api/ota/url",             HTTP_POST,    handle_ota_url,        nullptr},
         {"/api/ota/status",          HTTP_GET,     handle_ota_status,     nullptr},
@@ -3256,7 +3357,7 @@ esp_err_t init(const Hooks& hooks) {
         {"/api/events",              HTTP_DELETE,   handle_events_clear,   nullptr},
         {"/api/*",                   HTTP_OPTIONS, handle_options,        nullptr},
     };
-    static_assert(sizeof(uris) / sizeof(uris[0]) <= 56, "raise max_uri_handlers");
+    static_assert(sizeof(uris) / sizeof(uris[0]) <= 60, "raise max_uri_handlers");
     for (const auto& u : uris) {
         if (httpd_register_uri_handler(s_server, &u) != ESP_OK)
             ESP_LOGE(TAG, "failed to register %s", u.uri);

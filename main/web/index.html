@@ -120,6 +120,7 @@ background:#fff;border-radius:50%;transition:.2s}
 .info-pop{font-size:.82em;color:var(--fg-2);background:var(--chip);border:1px solid var(--border);
   border-radius:8px;padding:8px 10px;margin:6px 0}
 .btn{cursor:pointer;border:none;border-radius:8px;padding:9px 14px;font-size:.88em;width:100%}
+.btn.sm{width:auto;flex:none;padding:5px 12px}
 .btn-warn{background:var(--chip);color:var(--orange);border:1px solid var(--border-strong);margin-top:8px}
 .btn-warn:hover{background:var(--hover)}
 .adv{align-self:stretch;margin-top:14px;border-top:1px solid var(--border);padding-top:12px}
@@ -638,7 +639,7 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
   <div class="secnav" data-grp="settings">
     <button onclick="jumpTo('sec-display')">Display</button>
     <button onclick="jumpTo('sec-widevane')">Wide vane</button>
-    <button onclick="jumpTo('sec-sensor')">Room sensor</button>
+    <button onclick="jumpTo('sec-sensor')">Room sensors</button>
     <button onclick="jumpTo('sec-park')">Off at setpoint</button>
     <button onclick="jumpTo('sec-tandem')">Tandem</button>
     <button onclick="jumpTo('sec-wifi')">WiFi</button>
@@ -721,32 +722,41 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
     <button class="btn" id="wvDetectBtn" onclick="detectWideVane()">Detect now</button>
   </div>
 
-  <!-- Wireless room sensor (#142): a Shelly BLU H&T heard over Bluetooth. -->
+  <!-- Wireless room sensors (#142): BTHome over Bluetooth, Shelly over Wi-Fi. -->
   <div class="card" data-grp="settings" id="sec-sensor">
-    <h2 style="display:flex;align-items:center">Room sensor<button type="button" class="info-btn" aria-label="What is a room sensor?" aria-expanded="false" aria-controls="rsInfo"
-            title="A battery-powered Shelly BLU H&amp;T on the wall reports the real room temperature over Bluetooth. The unit heats or cools to that reading instead of the air at the head, and Off at setpoint no longer needs fan air checks. If the sensor goes quiet for 10 minutes the head goes back to its own sensor." onclick="toggleInfo(this)">i</button></h2>
-    <div class="sub" style="margin:-4px 0 8px">Use a wireless sensor on the wall as this room's temperature.</div>
-    <div id="rsInfo" class="info-pop hidden">A battery-powered Shelly BLU H&amp;T on the wall reports the real room temperature over Bluetooth. The unit heats or cools to that reading instead of the air at the head, and Off at setpoint no longer needs fan air checks. If the sensor goes quiet for 10 minutes the head goes back to its own sensor.</div>
-    <div id="rsPaired" class="hidden">
-      <div class="row"><label>Sensor</label><span class="v" id="rsName">--</span></div>
-      <div class="row"><label>Temperature</label><span class="v" id="rsTemp">--</span></div>
-      <div class="row"><label>Humidity</label><span class="v" id="rsHum">--</span></div>
-      <div class="row"><label>Battery</label><span class="v" id="rsBat">--</span></div>
-      <div class="row"><label>Signal</label><span class="v" id="rsSig">--</span></div>
-      <div class="row"><label>Last reading</label><span class="v" id="rsAge">--</span></div>
-      <div id="rsStale" class="status err hidden" style="margin:8px 0"></div>
-    </div>
+    <h2 style="display:flex;align-items:center">Room sensors<button type="button" class="info-btn" aria-label="What is a room sensor?" aria-expanded="false" aria-controls="rsInfo"
+            title="Battery-powered sensors on the wall report the real room temperature, over Bluetooth (BTHome, e.g. Shelly BLU H&amp;T) or Wi-Fi (Shelly H&amp;T Gen3). With up to 4 sensors the head uses their average. The unit heats or cools to that reading instead of the air at the head, and Off at setpoint no longer needs fan air checks. If every sensor goes quiet the head goes back to its own sensor." onclick="toggleInfo(this)">i</button></h2>
+    <div class="sub" style="margin:-4px 0 8px">Use wireless sensors on the wall as this room's temperature.</div>
+    <div id="rsInfo" class="info-pop hidden">Battery-powered sensors on the wall report the real room temperature, over Bluetooth (BTHome, e.g. Shelly BLU H&amp;T) or Wi-Fi (Shelly H&amp;T Gen3). With up to 4 sensors the head uses their average. The unit heats or cools to that reading instead of the air at the head, and Off at setpoint no longer needs fan air checks. If every sensor goes quiet the head goes back to its own sensor.</div>
+    <div id="rsRoom" class="row hidden"><label>Room temperature</label><span class="v" id="rsRoomV">--</span></div>
+    <div id="rsList"></div>
     <div id="rsNone" class="row"><label>Status</label><span class="v">No sensor</span></div>
+    <div id="rsChoose" class="hidden">
+      <div class="sub" style="margin:8px 0 6px">What kind of sensor?</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+        <button class="btn" onclick="sensorAction('pair_ble')">Bluetooth (Shelly BLU H&amp;T)</button>
+        <button class="btn" onclick="sensorAction('discover')">Wi-Fi (Shelly H&amp;T Gen3)</button>
+      </div>
+    </div>
     <div id="rsPair" class="hidden">
       <div class="status info" style="margin:8px 0" id="rsPairMsg">Press the button on the sensor</div>
       <div class="sub" style="margin:0 0 6px">Or pick it from the sensors heard nearby:</div>
       <div id="rsNearby" class="sub" style="margin:0 0 8px">Listening…</div>
     </div>
+    <div id="rsWifi" class="hidden">
+      <div class="status info" style="margin:8px 0" id="rsWifiHint">Wake the sensor: open its back cover and press the button once.</div>
+      <div id="rsFound" class="sub" style="margin:0 0 8px">Looking for sensors…</div>
+      <div class="sub" style="margin:0 0 6px">Or enter its IP address:</div>
+      <div style="display:flex;gap:8px;margin-bottom:8px">
+        <input type="text" id="rsHost" placeholder="192.168.1.50" style="flex:1;min-width:0" autocomplete="off" spellcheck="false">
+        <button class="btn sm" id="rsHostBtn" onclick="sensorPairWifi($('rsHost').value.trim())">Pair</button>
+      </div>
+      <div id="rsWifiMsg" class="status hidden" style="margin:8px 0"></div>
+    </div>
     <div id="rsMsg" class="status hidden" style="margin:10px 0"></div>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
-      <button class="btn" id="rsAdd" onclick="sensorAction('pair')">Add sensor</button>
-      <button class="btn" id="rsCancel" onclick="sensorAction('cancel')">Cancel</button>
-      <button class="btn" id="rsRemove" onclick="sensorRemove()">Remove</button>
+      <button class="btn" id="rsAdd" onclick="sensorChoose(true)">Add sensor</button>
+      <button class="btn hidden" id="rsCancel" onclick="sensorCancel()">Cancel</button>
     </div>
   </div>
 
@@ -1085,9 +1095,33 @@ const I18N = { fr: {
   // Room sensor (#142)
   "Room sensor":"Capteur de pièce",
   "What is a room sensor?":"Qu’est-ce qu’un capteur de pièce ?",
-  "A battery-powered Shelly BLU H&T on the wall reports the real room temperature over Bluetooth. The unit heats or cools to that reading instead of the air at the head, and Off at setpoint no longer needs fan air checks. If the sensor goes quiet for 10 minutes the head goes back to its own sensor.":"Un Shelly BLU H&T à piles fixé au mur transmet la vraie température de la pièce par Bluetooth. L’unité chauffe ou refroidit selon cette mesure plutôt que selon l’air près de l’unité, et Arrêt à la consigne n’a plus besoin de ventilations de contrôle. Si le capteur reste muet pendant 10 minutes, l’unité revient à son propre capteur.",
-  "Use a wireless sensor on the wall as this room's temperature.":"Utiliser un capteur sans fil au mur comme température de cette pièce.",
+  "Room sensors":"Capteurs de pièce",
+  "Battery-powered sensors on the wall report the real room temperature, over Bluetooth (BTHome, e.g. Shelly BLU H&T) or Wi-Fi (Shelly H&T Gen3). With up to 4 sensors the head uses their average. The unit heats or cools to that reading instead of the air at the head, and Off at setpoint no longer needs fan air checks. If every sensor goes quiet the head goes back to its own sensor.":"Des capteurs à piles fixés au mur transmettent la vraie température de la pièce, par Bluetooth (BTHome, p. ex. Shelly BLU H&T) ou Wi-Fi (Shelly H&T Gen3). Avec jusqu’à 4 capteurs, l’unité utilise leur moyenne. L’unité chauffe ou refroidit selon cette mesure plutôt que selon l’air près de l’unité, et Arrêt à la consigne n’a plus besoin de ventilations de contrôle. Si tous les capteurs se taisent, l’unité revient à son propre capteur.",
+  "Use wireless sensors on the wall as this room's temperature.":"Utiliser des capteurs sans fil au mur comme température de cette pièce.",
+  "Room temperature":"Température de la pièce",
+  "average of {n} sensors":"moyenne de {n} capteurs",
+  "What kind of sensor?":"Quel type de capteur ?",
+  "Bluetooth (Shelly BLU H&T)":"Bluetooth (Shelly BLU H&T)",
+  "Wi-Fi (Shelly H&T Gen3)":"Wi-Fi (Shelly H&T Gen3)",
+  "Wake the sensor: open its back cover and press the button once.":"Réveillez le capteur : ouvrez son couvercle arrière et appuyez une fois sur le bouton.",
+  "Looking for sensors…":"Recherche de capteurs…",
+  "Or enter its IP address:":"Ou saisissez son adresse IP :",
+  "Pair":"Jumeler",
+  "Pairing…":"Jumelage…",
+  "Added {name}":"{name} ajouté",
+  "This head already has 4 sensors":"Cette unité a déjà 4 capteurs",
+  "Bluetooth":"Bluetooth",
+  "Wi-Fi":"Wi-Fi",
+  "Report every":"Signaler tous les",
+  "Waiting for the sensor to wake up — press its button to apply now.":"En attente du réveil du capteur — appuyez sur son bouton pour appliquer maintenant.",
+  "Sensor said":"Le capteur a répondu",
+  "Remove {name}? If no other sensor is left the head goes back to its own sensor.":"Retirer {name} ? S’il ne reste aucun autre capteur, l’unité reviendra à son propre capteur.",
+  "sensor not reachable (is it awake?)":"capteur injoignable (est-il réveillé ?)",
+  "this device has no temperature sensor":"cet appareil n’a pas de capteur de température",
+  "not a Shelly Gen2+ device":"ce n’est pas un appareil Shelly Gen2+",
+  "the sensor has a password; turn off authentication in the Shelly app":"le capteur a un mot de passe ; désactivez l’authentification dans l’application Shelly",
   "Sensor":"Capteur",
+  "Temperature":"Température",
   "Humidity":"Humidité",
   "Last reading":"Dernière mesure",
   "No sensor":"Aucun capteur",
@@ -1095,7 +1129,6 @@ const I18N = { fr: {
   "Or pick it from the sensors heard nearby:":"Ou choisissez-le parmi les capteurs détectés à proximité :",
   "Listening…":"Écoute…",
   "Add sensor":"Ajouter un capteur",
-  "Replace sensor":"Remplacer le capteur",
   "Remove":"Retirer",
   "Use":"Utiliser",
   "Encrypted":"Chiffré",
@@ -1107,8 +1140,8 @@ const I18N = { fr: {
   "Waiting for a reading":"En attente d’une mesure",
   "No reading yet — the head is using its own sensor.":"Pas encore de mesure — l’unité utilise son propre capteur.",
   "Not heard for {n} min — the head is using its own sensor.":"Muet depuis {n} min — l’unité utilise son propre capteur.",
+  "Not heard recently — using the other sensors.":"Muet récemment — les autres capteurs sont utilisés.",
   "Bluetooth failed to start":"Échec du démarrage du Bluetooth",
-  "Remove the room sensor? The head will go back to its own sensor.":"Retirer le capteur de pièce ? L’unité reviendra à son propre capteur.",
   "room sensor":"capteur de pièce",
   "Outdoor unit":"Unité extérieure",
   "Not paired":"Non jumelé",
@@ -1673,77 +1706,120 @@ async function savePark(){
   }catch(e){ msg.textContent=i18n('Save failed');msg.className='status err';msg.classList.remove('hidden'); }
 }
 
-// ── Room sensor (Settings, #142) ───────────────────────────────────────
-let rsTimer=null;
+// ── Room sensors (Settings, #142) ──────────────────────────────────────
+let rsTimer=null, rsChoosing=false, rsLast=null, rsPairState='idle';
+const RS_STEPS=[0.1,0.2,0.3,0.5,1.0];
 const rsAgo=s=>s==null?'--':s<60?i18n('just now'):i18n('{n} min ago',{n:Math.floor(s/60)});
 const rsSig=r=>r==null?'--':(r>=-65?i18n('Strong'):r>=-80?i18n('Good'):i18n('Weak'))+' ('+r+' dBm)';
 const rsEsc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-function renderSensor(d){
-  $('rsPaired').classList.toggle('hidden',!d.paired);
-  $('rsNone').classList.toggle('hidden',d.paired||d.pairing);
-  $('rsPair').classList.toggle('hidden',!d.pairing);
-  $('rsAdd').classList.toggle('hidden',d.pairing);
-  $('rsAdd').textContent=d.paired?i18n('Replace sensor'):i18n('Add sensor');
-  $('rsCancel').classList.toggle('hidden',!d.pairing);
-  $('rsRemove').classList.toggle('hidden',!d.paired||d.pairing);
-  if(d.paired){
-    $('rsName').textContent=(d.name?d.name+' \u00b7 ':'')+d.addr;
-    $('rsTemp').textContent=d.temp==null?i18n('Waiting for a reading'):fmtTemp(d.temp)+' '+unitSym();
-    $('rsHum').textContent=d.humidity==null?'--':Math.round(d.humidity)+' %';
-    $('rsBat').textContent=d.battery==null?'--':d.battery+' %';
-    $('rsSig').textContent=rsSig(d.rssi);
-    $('rsAge').textContent=rsAgo(d.temp_age_s);
-    const stale=!d.fresh&&!d.pairing;
-    const st=$('rsStale');
-    st.classList.toggle('hidden',!stale);
-    if(stale) st.textContent=d.temp_age_s==null
-      ?i18n('No reading yet \u2014 the head is using its own sensor.')
-      :i18n('Not heard for {n} min \u2014 the head is using its own sensor.',{n:Math.floor(d.temp_age_s/60)});
+const rsStep=c=>isF()?(c*1.8).toFixed(1)+' \u00b0F':c.toFixed(1)+' \u00b0C';
+const rsRow=(l,v)=>'<div class="row"><label>'+l+'</label><span class="v">'+v+'</span></div>';
+function rsSensorHtml(x){
+  const kind=x.kind==='shelly'?i18n('Wi-Fi'):i18n('Bluetooth');
+  const sub=x.kind==='shelly'?(x.host||x.id):(x.name?x.id:'');
+  let h='<div class="rs-item" style="border-top:1px solid var(--line,#8883);padding-top:8px;margin-top:8px">';
+  h+='<div class="row"><label><b>'+rsEsc(x.name||x.id)+'</b><br><span style="color:var(--fg-3)">'+kind+(sub?' \u00b7 '+rsEsc(sub):'')+'</span></label>'
+    +'<button class="btn sm" onclick="sensorRemove(\''+rsEsc(x.id)+'\')">'+i18n('Remove')+'</button></div>';
+  h+=rsRow(i18n('Temperature'),x.temp==null?i18n('Waiting for a reading'):fmtTemp(x.temp)+' '+unitSym());
+  if(x.humidity!=null) h+=rsRow(i18n('Humidity'),Math.round(x.humidity)+' %');
+  if(x.battery!=null) h+=rsRow(i18n('Battery'),x.battery+' %');
+  h+=rsRow(i18n('Signal'),rsSig(x.rssi));
+  h+=rsRow(i18n('Last reading'),rsAgo(x.temp_age_s));
+  if(x.kind==='shelly'){
+    const opts=RS_STEPS.map(v=>'<option value="'+v+'"'+(Math.abs(v-x.report_step)<0.01?' selected':'')+'>'+rsStep(v)+'</option>').join('');
+    h+='<div class="row"><label>'+i18n('Report every')+'</label><select onchange="sensorStep(\''+rsEsc(x.id)+'\',this.value)">'+opts+'</select></div>';
+    if(x.pending) h+='<div class="status info" style="margin:6px 0">'+i18n('Waiting for the sensor to wake up \u2014 press its button to apply now.')+'</div>';
+    if(x.sync_error) h+='<div class="status err" style="margin:6px 0">'+i18n('Sensor said')+': '+rsEsc(i18n(x.sync_error))+'</div>';
   }
-  if(d.pairing){
-    $('rsPairMsg').textContent=i18n('Press the button on the sensor')+' ('+d.pairing_remaining_s+' s)';
-    const nb=d.nearby||[];
+  if(!x.fresh){
+    const m=x.temp_age_s==null?i18n('No reading yet \u2014 the head is using its own sensor.')
+      :i18n('Not heard for {n} min \u2014 the head is using its own sensor.',{n:Math.floor(x.temp_age_s/60)});
+    h+='<div class="status err" style="margin:6px 0">'+m+'</div>';
+  }
+  return h+'</div>';
+}
+function rsShowMsg(el,text,cls){ el.textContent=text; el.className='status '+cls; el.classList.remove('hidden'); }
+function renderSensor(d){
+  rsLast=d;
+  const list=d.sensors||[], ble=d.pairing.ble, wifi=d.pairing.wifi;
+  const full=list.length>=d.max, open=ble.open||wifi.open||wifi.state==='working';
+  if(open||full) rsChoosing=false;
+  $('rsRoom').classList.toggle('hidden',!list.length);
+  $('rsRoomV').textContent=d.temp==null?'--':fmtTemp(d.temp)+' '+unitSym()
+    +(d.n_fresh>1?' ('+i18n('average of {n} sensors',{n:d.n_fresh})+')':'');
+  // Don't rebuild under the user's fingers (an open report-step select).
+  const rl=$('rsList');
+  if(!rl.contains(document.activeElement)) rl.innerHTML=list.map(rsSensorHtml).join('');
+  // Per-sensor stale warnings make "using its own sensor" wrong while others are fresh.
+  if(d.n_fresh>0) rl.querySelectorAll('.status.err').forEach(e=>{ if(!e.textContent.startsWith(i18n('Sensor said'))) e.textContent=i18n('Not heard recently \u2014 using the other sensors.'); });
+  $('rsNone').classList.toggle('hidden',list.length>0||open||rsChoosing);
+  $('rsChoose').classList.toggle('hidden',!rsChoosing);
+  $('rsPair').classList.toggle('hidden',!ble.open);
+  $('rsWifi').classList.toggle('hidden',!(wifi.open||wifi.state==='working'));
+  $('rsAdd').classList.toggle('hidden',open||rsChoosing||full);
+  $('rsCancel').classList.toggle('hidden',!(open||rsChoosing));
+  if(ble.open){
+    $('rsPairMsg').textContent=i18n('Press the button on the sensor')+' ('+ble.remaining_s+' s)';
+    const nb=ble.nearby||[];
     $('rsNearby').innerHTML=nb.length?nb.map(n=>{
       const label=rsEsc(n.name||n.addr)+(n.name?' <span style="color:var(--fg-3)">'+rsEsc(n.addr)+'</span>':'');
       const right=n.encrypted?'<span>'+i18n('Encrypted')+'</span>'
-        :'<button class="btn" style="padding:4px 10px" onclick="sensorSelect(\''+rsEsc(n.addr)+'\')">'+i18n('Use')+'</button>';
+        :'<button class="btn sm" onclick="sensorSelect(\''+rsEsc(n.addr)+'\')">'+i18n('Use')+'</button>';
       const tmp=n.temp==null?'':' \u00b7 '+fmtTemp(n.temp)+' '+unitSym();
       return '<div class="row"><label>'+label+'<br><span style="color:var(--fg-3)">'+rsSig(n.rssi)+tmp+'</span></label>'+right+'</div>';
     }).join(''):i18n('Listening…');
   }
-  if(d.ble&&d.ble.error){
-    const m=$('rsMsg');m.textContent=i18n('Bluetooth failed to start')+': '+d.ble.error;
-    m.className='status err';m.classList.remove('hidden');
+  if(wifi.open||wifi.state==='working'){
+    const f=wifi.found||[];
+    $('rsFound').innerHTML=f.length?f.map(n=>'<div class="row"><label>'+rsEsc(n.name)+'<br><span style="color:var(--fg-3)">'+rsEsc(n.ip)+'</span></label>'
+      +'<button class="btn sm" onclick="sensorPairWifi(\''+rsEsc(n.ip)+'\')">'+i18n('Pair')+'</button></div>').join('')
+      :i18n('Looking for sensors…')+(wifi.open?' ('+wifi.remaining_s+' s)':'');
+    $('rsHostBtn').disabled=wifi.state==='working';
+    const wm=$('rsWifiMsg');
+    if(wifi.state==='working') rsShowMsg(wm,i18n('Pairing…'),'info');
+    else if(wifi.state==='error') rsShowMsg(wm,wifi.message==='full'?i18n('This head already has 4 sensors'):i18n(wifi.message),'err');
+    else wm.classList.add('hidden');
   }
-  // Poll fast while the pairing window is open, then settle back.
+  if(rsPairState==='working'&&wifi.state==='ok') rsShowMsg($('rsMsg'),i18n('Added {name}',{name:wifi.message}),'ok');
+  rsPairState=wifi.state;
+  if(d.ble&&d.ble.error) rsShowMsg($('rsMsg'),i18n('Bluetooth failed to start')+': '+d.ble.error,'err');
+  // Poll fast while pairing, then settle back.
   clearTimeout(rsTimer);
-  if(d.pairing&&netTabActive) rsTimer=setTimeout(loadSensor,1000);
+  if(open&&netTabActive) rsTimer=setTimeout(loadSensor,1000);
 }
 async function loadSensor(){
   try{
-    const r=await fetch('/api/sensor');
+    const r=await fetch('/api/sensors');
     if(!r.ok) return;
     const d=await r.json();
-    const was=$('rsCancel').offsetParent!==null;
+    const before=rsLast?rsLast.sensors.length:null;
     renderSensor(d);
-    if(was&&!d.pairing&&d.paired) refresh();
+    if(before!=null&&d.sensors.length!==before) refresh();
   }catch(e){}
 }
 async function postSensor(body){
   const msg=$('rsMsg');
   try{
-    const r=await fetch('/api/sensor',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const r=await fetch('/api/sensors',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
     if(r.status===401||r.status===403){ loadAuth(); return; }
-    if(!r.ok){ msg.textContent=(await r.text())||i18n('Save failed');msg.className='status err';msg.classList.remove('hidden'); return; }
+    if(!r.ok){ rsShowMsg(msg,i18n((await r.text())||'Save failed'),'err'); return; }
     msg.classList.add('hidden');
-    renderSensor(await r.json());
-  }catch(e){ msg.textContent=i18n('Save failed');msg.className='status err';msg.classList.remove('hidden'); }
+    const before=rsLast?rsLast.sensors.length:null;
+    const d=await r.json();
+    renderSensor(d);
+    if(before!=null&&d.sensors.length!==before) refresh();
+  }catch(e){ rsShowMsg(msg,i18n('Save failed'),'err'); }
 }
-function sensorAction(a){ return postSensor({action:a}); }
+function sensorChoose(on){ rsChoosing=on; $('rsMsg').classList.add('hidden'); if(rsLast) renderSensor(rsLast); }
+function sensorAction(a){ rsChoosing=false; return postSensor({action:a}); }
+function sensorCancel(){ rsChoosing=false; return postSensor({action:'cancel'}); }
 function sensorSelect(addr){ return postSensor({action:'select',addr}); }
-function sensorRemove(){
-  if(!confirm(i18n('Remove the room sensor? The head will go back to its own sensor.'))) return;
-  return postSensor({action:'remove'});
+function sensorPairWifi(host){ if(host) return postSensor({action:'pair_wifi',host}); }
+function sensorStep(id,v){ document.activeElement&&document.activeElement.blur(); return postSensor({action:'set',id,report_step:Number(v)}); }
+function sensorRemove(id){
+  const x=rsLast&&rsLast.sensors.find(s=>s.id===id);
+  if(!confirm(i18n('Remove {name}? If no other sensor is left the head goes back to its own sensor.',{name:x?(x.name||x.id):id}))) return;
+  return postSensor({action:'remove',id});
 }
 
 const WV_STATUS={supported:'Powered (detected)',unsupported:'Manual louver (no motor)',
