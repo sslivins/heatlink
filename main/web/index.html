@@ -202,6 +202,8 @@ cursor:pointer;user-select:none;transition:.15s}
 .hist-wrap{position:relative;width:100%;overflow-x:clip;min-height:240px}
 .hist-chart{width:100%;height:auto;display:block;touch-action:pan-y;user-select:none}
 .hist-chart.dragging{cursor:grabbing}
+.hist-hint-touch{display:none}
+@media (hover:none){.hist-hint-mouse{display:none}.hist-hint-touch{display:block}}
 .hist-axis{fill:var(--fg-3);font-size:11px;font-family:inherit}
 .hist-tip{display:none;position:absolute;top:8px;pointer-events:none;background:var(--surface);border:1px solid var(--border-strong);
   border-radius:8px;padding:7px 10px;font-size:.78em;line-height:1.6;white-space:nowrap;box-shadow:0 4px 14px rgba(0,0,0,.3);z-index:2}
@@ -682,7 +684,8 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
       <button class="btn" id="histLatest" onclick="histGoto(null)">Latest</button>
       <button class="btn" id="histNext" onclick="histStep(1)">Later ›</button>
     </div>
-    <p class="hint" style="text-align:center;margin-top:10px">Double-click the chart to centre it on that moment, or drag it sideways. The compressor reading is for the whole outdoor unit.</p>
+    <p class="hint hist-hint-mouse" style="text-align:center;margin-top:10px">Double-click the chart to centre it on that moment, or drag it sideways. The compressor reading is for the whole outdoor unit.</p>
+    <p class="hint hist-hint-touch" style="text-align:center;margin-top:10px">Touch the chart and slide your finger to read values. Use Earlier / Later to move in time. The compressor reading is for the whole outdoor unit.</p>
   </div>
   </div><!-- /panel-history -->
 
@@ -1187,6 +1190,7 @@ const I18N = { fr: {
   "Defrost":"Dégivrage","Quiet":"Silencieux","Room sensor":"Capteur de pièce",
   "‹ Earlier":"‹ Plus tôt","Later ›":"Plus tard ›","Latest":"Actuel",
   "Double-click the chart to centre it on that moment, or drag it sideways. The compressor reading is for the whole outdoor unit.":"Double-cliquez sur le graphique pour le centrer sur ce moment, ou faites-le glisser latéralement. La valeur du compresseur concerne toute l’unité extérieure.",
+  "Touch the chart and slide your finger to read values. Use Earlier / Later to move in time. The compressor reading is for the whole outdoor unit.":"Touchez le graphique et faites glisser le doigt pour lire les valeurs. Utilisez Plus tôt / Plus tard pour vous déplacer dans le temps. La valeur du compresseur concerne toute l’unité extérieure.",
   "Could not load history.":"Impossible de charger l’historique.",
   "Waiting for the clock to be set…":"En attente de la mise à l’heure…",
   "Nothing recorded for this period yet. A sample is taken every 30 seconds.":"Rien d’enregistré pour cette période. Un relevé est pris toutes les 30 secondes.",
@@ -3299,10 +3303,16 @@ function histWire(){
     }
     histHover(ev);
   });
-  wrap.addEventListener('pointerleave',()=>{ if(!histDrag) histHide(); });
+  // Touch: a tap or finger slide shows the readout, which stays after lifting
+  // until the user touches somewhere else.
+  wrap.addEventListener('pointerleave',ev=>{ if(!histDrag && ev.pointerType==='mouse') histHide(); });
+  document.addEventListener('pointerdown',ev=>{
+    if(ev.pointerType!=='mouse' && !(ev.target.closest&&ev.target.closest('#histWrap .hist-chart'))) histHide();
+  });
   wrap.addEventListener('pointerdown',ev=>{
     const svg=ev.target.closest&&ev.target.closest('.hist-chart');
-    if(!svg||ev.pointerType!=='mouse'||ev.button!==0||!histGeom) return;
+    if(svg && ev.pointerType!=='mouse'){ histHover(ev); return; }
+    if(!svg||ev.button!==0||!histGeom) return;
     histDrag={svg,x0:ev.clientX,dx:0,moved:false};
   });
   window.addEventListener('pointerup',()=>{
