@@ -301,8 +301,8 @@ unit's MAC suffix shown on the Status tab). It has five tabs — **Climate**
 (temperature dial, mode, fan & vanes), **Zones** (multi-head pairing &
 coordination with live Tandem status, plus a **House** view listing every head on the LAN grouped by
 outdoor unit when you have more than one), **History** (admin only — a chart of
-room/target/outdoor temperature, heating/cooling/defrost/parked bands and compressor
-frequency over 4 h, 24 h or 7 days; one sample every 30 s is kept on flash for
+room/target/outdoor temperature and heating/cooling/defrost/parked bands
+over 4 h, 24 h or 7 days; one sample every 30 s is kept on flash for
 14 days and survives reboots and OTA), **Status** (live diagnostics — WiFi, controller power, heat-pump
 sensors, activity log), and **Settings** (display, wide-vane, off at setpoint,
 Tandem, WiFi, MQTT/HA,
