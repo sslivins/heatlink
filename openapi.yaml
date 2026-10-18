@@ -75,7 +75,10 @@ paths:
     post:
       tags: [Climate]
       summary: Change heat-pump settings
-      description: Only the fields present in the body are applied.
+      description: >-
+        Only the fields present in the body are applied. Setting `mode` also
+        turns the head on, unless the same body has `"power": "OFF"`; then the
+        mode is stored and the head stays off.
       security:
         - ApiKeyAuth: []
         - SessionCookie: []
