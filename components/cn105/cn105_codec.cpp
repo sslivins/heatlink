@@ -272,6 +272,14 @@ StandbyPayload decodeStandby(const uint8_t* data, int len) {
         for (int i = 0; i < 7; i++)
             if (STAGE_B[i] == data[4]) { p.stage = STAGE_MAP[i]; p.hasStage = true; break; }
     }
+    p.hasDirection = false;
+    p.direction = "";
+    if (len >= 6) {
+        // data[5]: 0 off / 1 cool / 2 heat / 3 "leader" (meaning unclear).
+        p.hasDirection = true;
+        if (data[5] == 0x01)      p.direction = "COOL";
+        else if (data[5] == 0x02) p.direction = "HEAT";
+    }
     return p;
 }
 

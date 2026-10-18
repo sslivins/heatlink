@@ -1516,6 +1516,7 @@ async function refresh(){
       if(c.temperature!=null&&confirmField('temperature',c.temperature)) climate.temp=c.temperature;
       climate.room=(c.roomTemperature!=null&&c.roomTemperature>0)?c.roomTemperature:null;
       climate.operating=!!c.operating;
+      climate.direction=c.direction||null;
       climate.park=c.park||null;
       if(c.fan&&confirmField('fan',c.fan))$('fan').value=c.fan;
       if(c.vane&&confirmField('vane',c.vane))$('vane').value=c.vane;
@@ -1776,8 +1777,10 @@ function renderClimate(){
       case 'DRY':  opTxt='Drying'; break;
       case 'FAN':  opTxt='Fan running'; break;
       case 'AUTO':
-        // AUTO doesn't report its direction, so infer from room vs setpoint.
-        if(climate.room!=null && climate.temp!=null && Math.abs(climate.room-climate.temp)>=0.5)
+        // Prefer the unit's reported direction; else infer from room vs setpoint.
+        if(climate.direction==='HEAT'||climate.direction==='COOL')
+          opTxt=climate.direction==='HEAT'?'Heating':'Cooling';
+        else if(climate.room!=null && climate.temp!=null && Math.abs(climate.room-climate.temp)>=0.5)
           opTxt=(climate.room>climate.temp)?'Cooling':'Heating';
         else opTxt='Active';
         break;
