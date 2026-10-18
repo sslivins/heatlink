@@ -475,6 +475,20 @@ static void test_decode_standby_golden() {
     codec::StandbyPayload p3 = codec::decodeStandby(d, 4);
     CHECK_FALSE(p3.hasSubMode);
     CHECK_FALSE(p3.hasStage);
+    CHECK_FALSE(p3.hasDirection);
+
+    // data[5]: AUTO direction. len 5 -> not present.
+    CHECK_FALSE(p.hasDirection);
+    d[5] = 0x01;
+    CHECK_EQ(codec::decodeStandby(d, 6).direction, "COOL");
+    d[5] = 0x02;
+    CHECK_EQ(codec::decodeStandby(d, 6).direction, "HEAT");
+    d[5] = 0x00;
+    codec::StandbyPayload p4 = codec::decodeStandby(d, 6);
+    CHECK_TRUE(p4.hasDirection);
+    CHECK_EQ(p4.direction, "");
+    d[5] = 0x03;
+    CHECK_EQ(codec::decodeStandby(d, 6).direction, "");
 }
 
 static void test_decode_error_golden() {

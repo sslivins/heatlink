@@ -50,6 +50,7 @@ struct Status {
     bool  has_targetHumidity{false};
     std::string subMode;           ///< NORMAL/DEFROST/PREHEAT/... (0x09 data[3])
     std::string stage;             ///< IDLE/LOW/.../HIGH (0x09 data[4])
+    std::string direction;         ///< HEAT/COOL or "" (0x09 data[5]; AUTO's current direction)
     std::string errorCode;         ///< "No Error" or "Error 0xXX sub 0xXX" (0x04)
 };
 

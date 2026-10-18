@@ -135,6 +135,8 @@ struct StandbyPayload {
     const char* subMode;
     bool        hasStage;
     const char* stage;
+    bool        hasDirection;  ///< data[5] present
+    const char* direction;     ///< "HEAT"/"COOL" (AUTO's current direction), "" otherwise
 };
 
 /// 0x04 error reply. `text` is "No Error" or "Error 0xXX sub 0xXX".

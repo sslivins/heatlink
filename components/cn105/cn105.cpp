@@ -553,6 +553,10 @@ int HeatPump::decodeInfo_(const uint8_t* data, int len) {
                 status_.stage = p.stage;
                 statusChanged_ = true;
             }
+            if (p.hasDirection && p.direction != status_.direction) {
+                status_.direction = p.direction;
+                statusChanged_ = true;
+            }
             return RCVD_PKT_STATUS;
         }
 

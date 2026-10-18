@@ -387,6 +387,8 @@ esp_err_t handle_get_settings(httpd_req_t* req) {
         cJSON_AddStringToObject(root, "subMode", sta.subMode.c_str());
     if (!sta.stage.empty())
         cJSON_AddStringToObject(root, "stage", sta.stage.c_str());
+    if (!sta.direction.empty())
+        cJSON_AddStringToObject(root, "direction", sta.direction.c_str());
     if (!sta.errorCode.empty())
         cJSON_AddStringToObject(root, "errorCode", sta.errorCode.c_str());
 

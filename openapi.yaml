@@ -1145,6 +1145,12 @@ components:
         targetHumidity: { type: number, description: Only present when reported by the unit }
         subMode: { type: string, description: Only present when reported by the unit }
         stage: { type: string, description: Only present when reported by the unit }
+        direction:
+          type: string
+          enum: [HEAT, COOL]
+          description: >-
+            Direction the outdoor unit is currently running (CN105 0x09
+            data[5]). Mainly useful in AUTO; absent when unknown or idle.
         errorCode: { type: string, description: Only present when reported by the unit }
         park: { $ref: '#/components/schemas/ParkStatus' }
     ParkStatus:

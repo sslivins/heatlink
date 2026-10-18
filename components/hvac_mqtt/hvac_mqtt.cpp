@@ -506,7 +506,11 @@ std::string ha_action(const cn105::Settings& s, const cn105::Status& st) {
     if (s.mode == "COOL") return "cooling";
     if (s.mode == "DRY")  return "drying";
     if (s.mode == "FAN")  return "fan";
-    return "idle";  // AUTO: direction unknown from settings alone
+    if (s.mode == "AUTO") {
+        if (st.direction == "HEAT") return "heating";
+        if (st.direction == "COOL") return "cooling";
+    }
+    return "idle";
 }
 }  // namespace
 
