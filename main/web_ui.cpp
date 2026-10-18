@@ -447,20 +447,23 @@ esp_err_t handle_post_settings(httpd_req_t* req) {
     }
     std::string who = web_actor_name(req);
     const char* wname = who.empty() ? "" : who.c_str();
+    // A mode command also powers the head on (HA expresses on/off as a mode),
+    // so apply power after it: {"power":"OFF","mode":"COOL"} stores COOL and
+    // leaves the head off.
+    const cJSON* jmode = cJSON_GetObjectItem(json, "mode");
+    const bool has_mode = cJSON_IsString(jmode);
+    if (has_mode) {
+        apply(K::Mode, jmode->valuestring);
+        events::log(events::Cat::Mode, events::Actor::WebUI,
+                    ("Set to " + pretty_token(jmode->valuestring)).c_str(), wname);
+    }
     if ((v = cJSON_GetObjectItem(json, "power")) && cJSON_IsString(v)) {
         apply(K::Power, v->valuestring);
-        // A mode field (below) already implies power-on; only log a standalone
-        // power change so an on+mode POST reads as one "Set to Heat" event.
-        if (!cJSON_IsString(cJSON_GetObjectItem(json, "mode"))) {
-            bool off = strcasecmp(v->valuestring, "off") == 0;
+        // On+mode reads as one "Set to Heat" event; off is always logged.
+        bool off = strcasecmp(v->valuestring, "off") == 0;
+        if (!has_mode || off)
             events::log(events::Cat::Power, events::Actor::WebUI,
                         off ? "Turned off" : "Turned on", wname);
-        }
-    }
-    if ((v = cJSON_GetObjectItem(json, "mode")) && cJSON_IsString(v)) {
-        apply(K::Mode, v->valuestring);
-        events::log(events::Cat::Mode, events::Actor::WebUI,
-                    ("Set to " + pretty_token(v->valuestring)).c_str(), wname);
     }
     if ((v = cJSON_GetObjectItem(json, "fan")) && cJSON_IsString(v)) {
         apply(K::Fan, v->valuestring);

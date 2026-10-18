@@ -47,13 +47,14 @@ struct Config {
     bool     enabled     = false;
     uint32_t min_slice_s = 600;
     uint32_t max_slice_s = 1800;
-    uint32_t settle_s    = 60;
+    uint32_t settle_s    = 180;
 };
 
 constexpr uint32_t kMinSliceFloorS = 300;   ///< outdoor-unit short-cycle floor
 constexpr uint32_t kMinSliceCapS   = 3600;
 constexpr uint32_t kMaxSliceCapS   = 7200;
-constexpr uint32_t kMinSettleS     = 30;
+/// Matches the compressor's restart guard, in case the outdoor unit lacks one.
+constexpr uint32_t kMinSettleS     = 180;
 constexpr uint32_t kMaxSettleS     = 600;
 
 /// A follower drops the coordinator's state after this long without a fresh

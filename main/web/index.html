@@ -118,13 +118,6 @@ background:#fff;border-radius:50%;transition:.2s}
   font-size:1.15em;line-height:1;cursor:pointer;align-items:center;justify-content:center;
   padding:0;-webkit-tap-highlight-color:transparent}
 .icon-btn:active{background:var(--hover)}
-.info-btn{flex:0 0 auto;width:20px;height:20px;border-radius:50%;margin-left:6px;padding:0;
-  border:1px solid var(--border-strong);background:var(--chip);color:var(--fg-2);
-  font:italic 600 .75em/1 Georgia,serif;cursor:help;display:inline-flex;align-items:center;
-  justify-content:center;vertical-align:middle;-webkit-tap-highlight-color:transparent}
-.info-btn:hover,.info-btn[aria-expanded="true"]{background:var(--hover);color:var(--fg)}
-.info-pop{font-size:.82em;color:var(--fg-2);background:var(--chip);border:1px solid var(--border);
-  border-radius:8px;padding:8px 10px;margin:6px 0}
 .btn{cursor:pointer;border:none;border-radius:8px;padding:9px 14px;font-size:.88em;width:100%}
 .btn-warn{background:var(--chip);color:var(--orange);border:1px solid var(--border-strong);margin-top:8px}
 .btn-warn:hover{background:var(--hover)}
@@ -839,12 +832,11 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
   <!-- Tandem (#133): heads on one outdoor unit take turns heating and cooling.
        Shared per outdoor unit (zone group); editable from any of its heads. -->
   <div class="card" data-grp="settings" id="sec-tandem">
-    <h2 style="display:flex;align-items:center">Tandem<button type="button" class="info-btn" aria-label="What is Tandem?" aria-expanded="false" aria-controls="slInfo"
-            title="Tandem lets heads on one outdoor unit heat some rooms and cool others. The outdoor unit can only heat or cool at one time, so the heads take turns: rooms that want the current mode run, and the rest stay off until their turn. Each turn lasts between the minimum and maximum turn, with a short pause between modes." onclick="toggleInfo(this)">i</button></h2>
-    <div class="sub" style="margin:-4px 0 8px">Heat some rooms and cool others: when rooms want different modes, the
-          outdoor unit serves one mode at a time. Rooms waiting for the other mode stay off
-          until their turn. Auto mode isn't available while this is on.</div>
-    <div id="slInfo" class="info-pop hidden">Tandem lets heads on one outdoor unit heat some rooms and cool others. The outdoor unit can only heat or cool at one time, so the heads take turns: rooms that want the current mode run, and the rest stay off until their turn. Each turn lasts between the minimum and maximum turn, with a short pause between modes.</div>
+    <h2>Tandem™</h2>
+    <div class="sub" style="margin:-4px 0 8px;text-align:left">An outdoor unit can heat or cool, but not both,
+      so a warm room and a cold room can't both get comfortable. Tandem™ fixes that by taking turns
+      heating and cooling, automatically. Rooms waiting for their turn are parked (switched off,
+      settings kept) and restart on their own. Auto mode isn't available with Tandem.</div>
     <div class="row"><label>Outdoor unit</label><span class="v" id="slUnit">--</span></div>
     <div id="slNoGroup" class="sub hidden" style="margin:0 0 8px">Pair this head with the other
       heads on its outdoor unit in the Zones tab to use Tandem.</div>
@@ -1118,9 +1110,8 @@ const I18N = { fr: {
   "Parked":"En veille","Checking room":"Vérification de la pièce","Running":"En marche",
   "air check in":"vérification dans",
   // Time-slicing
-  "Tandem":"Tandem","What is Tandem?":"Qu'est-ce que Tandem ?",
-  "Tandem lets heads on one outdoor unit heat some rooms and cool others. The outdoor unit can only heat or cool at one time, so the heads take turns: rooms that want the current mode run, and the rest stay off until their turn. Each turn lasts between the minimum and maximum turn, with a short pause between modes.":"Tandem permet aux unités d'une même unité extérieure de chauffer certaines pièces et d'en refroidir d'autres. L'unité extérieure ne peut que chauffer ou refroidir à la fois, donc les unités alternent : les pièces qui veulent le mode en cours fonctionnent et les autres restent arrêtées jusqu'à leur tour. Chaque tour dure entre le tour minimum et le tour maximum, avec une courte pause entre les modes.",
-  "When rooms want different modes, the outdoor unit serves one mode at a time. Rooms waiting for the other mode stay off until their turn. Auto mode isn't available while this is on.":"Quand les pièces demandent des modes différents, l’unité extérieure sert un mode à la fois. Les pièces qui attendent l’autre mode restent éteintes jusqu’à leur tour. Le mode Auto n’est pas disponible tant que cette option est active.",
+  "Tandem":"Tandem","Tandem™":"Tandem™",
+  "An outdoor unit can heat or cool, but not both, so a warm room and a cold room can't both get comfortable. Tandem™ fixes that by taking turns heating and cooling, automatically. Rooms waiting for their turn are parked (switched off, settings kept) and restart on their own. Auto mode isn't available with Tandem.":"Une unité extérieure peut chauffer ou refroidir, mais pas les deux : une pièce trop chaude et une pièce trop froide ne peuvent pas être confortables en même temps. Tandem™ règle cela en alternant automatiquement chauffage et refroidissement. Les pièces qui attendent leur tour sont mises en veille (arrêtées, réglages conservés) et redémarrent d’elles-mêmes. Le mode Auto n’est pas disponible avec Tandem.",
   "Now":"Maintenant","Minimum turn":"Tour minimal","Maximum turn":"Tour maximal",
   "Pause between modes":"Pause entre les modes","Waiting for its turn":"En attente de son tour",
   "Its turn":"Son tour","Waiting":"En attente","Heating turn":"Tour de chauffage",
@@ -1657,14 +1648,6 @@ function pkStatusText(st){
   if(st.state==='probing') return i18n('Checking room');
   if(st.state==='running') return i18n('Running');
   return i18n('Off');
-}
-// ⓘ buttons: the title is the hover tooltip on desktop; a tap (touch has no
-// hover) toggles the inline explainer named by aria-controls.
-function toggleInfo(btn){
-  const pop=$(btn.getAttribute('aria-controls'));
-  if(!pop) return;
-  const open=pop.classList.toggle('hidden')===false;
-  btn.setAttribute('aria-expanded',open?'true':'false');
 }
 async function loadPark(force){
   if(pkDirty&&!force) { return; }
@@ -2650,7 +2633,7 @@ function renderSlice(g){
   $('slEn').checked=!!sl.enabled;
   pkFill('slMin',[300,600,900,1200,1800,2700,3600],pkMin,sl.min_slice_s||600);
   pkFill('slMax',[900,1200,1800,2700,3600,5400,7200],pkMin,sl.max_slice_s||1800);
-  pkFill('slSettle',[30,60,120,180,300,600],pkMin,sl.settle_s||60);
+  pkFill('slSettle',[180,240,300,600],pkMin,sl.settle_s||180);
 }
 async function saveSlice(){
   const msg=$('slMsg');
