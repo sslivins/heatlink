@@ -673,6 +673,11 @@ esp_err_t init() {
     wifi_config_t sta = {};
     strlcpy(reinterpret_cast<char*>(sta.sta.ssid), ssid, sizeof(sta.sta.ssid));
     strlcpy(reinterpret_cast<char*>(sta.sta.password), pass, sizeof(sta.sta.password));
+    // Default is a fast scan that joins the first matching AP found. On a
+    // multi-AP network that can be a distant one, so scan all channels and
+    // pick the strongest.
+    sta.sta.scan_method = WIFI_ALL_CHANNEL_SCAN;
+    sta.sta.sort_method = WIFI_CONNECT_AP_BY_SIGNAL;
 
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &sta));
