@@ -242,8 +242,9 @@ on firmware that supports it), the group instead takes turns heating and cooling
   as zone polling; another head takes over within ~45 s if it drops off). It
   publishes the current turn — HEAT or COOL — in its signed group snapshot.
 - Heads that want the served mode run normally (with off-at-setpoint). Heads
-  that want the other mode keep that mode but are held **parked** ("Waiting for
-  its turn") until their turn. HeatLink never changes a head's mode to slice.
+  that want the other mode keep that mode but are held **parked** (shown as
+  "Paused while other rooms heat/cool") until their turn. HeatLink never
+  changes a head's mode to slice.
 - A turn lasts at least the **minimum turn** (5–60 min, default 10; protects
   the outdoor unit from short cycling). After that it hands over once every
   head in the current mode is satisfied, or at the **maximum turn** (default

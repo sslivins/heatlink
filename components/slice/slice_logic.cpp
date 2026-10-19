@@ -157,8 +157,8 @@ void Node::enter(Phase p, Mode m) {
     state_.elapsed_s = 0;
     ++state_.seq;
     if (p == Phase::Run) {
-        push(m == Mode::Heat ? "Tandem: heating turn started"
-                                 : "Tandem: cooling turn started");
+        push(m == Mode::Heat ? "Tandem: switched to heating"
+                                 : "Tandem: switched to cooling");
     } else if (p == Phase::Changeover) {
         push(m == Mode::Heat ? "Tandem: changing over to heating"
                                  : "Tandem: changing over to cooling");

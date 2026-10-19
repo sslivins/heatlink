@@ -336,6 +336,14 @@ cJSON* park_status_json() {
     cJSON_AddBoolToObject(o, "unit_on", ps.unit_on);
     cJSON_AddBoolToObject(o, "satisfied", ps.satisfied);
     cJSON_AddBoolToObject(o, "held", ps.held);      // waiting for its time slice
+    if (ps.held) {
+        // What the other rooms are doing while this one is paused: "heat",
+        // "cool", or "switch" (changeover / waiting for a schedule).
+        const slice_ctl::Status ss = slice_ctl::status();
+        cJSON_AddStringToObject(o, "tandem",
+            ss.have_state && ss.state.phase == slice::Phase::Run
+                ? slice::mode_str(ss.state.mode) : "switch");
+    }
     cJSON_AddBoolToObject(o, "forced", ps.forced);  // enabled by time-slicing
     cJSON_AddBoolToObject(o, "slicing", ps.slicing);  // group time-slicing is on
     cJSON_AddBoolToObject(o, "quiet_fan", ps.quiet_fan);  // air check at QUIET fan
