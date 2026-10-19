@@ -1272,6 +1272,7 @@ components:
         unit_on: { type: boolean, description: Physical unit power (false while parked even though power reports ON) }
         satisfied: { type: boolean, description: Parked because the room reached its setpoint }
         held: { type: boolean, description: 'Held off waiting for its time slice (reason "waiting_for_slice")' }
+        tandem: { type: string, enum: [heat, cool, switch], description: 'Only when held: what the other rooms are doing (switch = changing modes)' }
         forced: { type: boolean, description: Off-at-setpoint is forced on by group time-slicing }
         slicing: { type: boolean, description: Group time-slicing (Tandem) is enabled (AUTO is unavailable) }
         quiet_fan: { type: boolean, description: An air check is running with the fan at QUIET (settings report the user's fan) }

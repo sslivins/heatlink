@@ -908,8 +908,8 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
     <h2>Tandem™</h2>
     <div class="sub" style="margin:-4px 0 8px;text-align:left">An outdoor unit can heat or cool, but not both,
       so a warm room and a cold room can't both get comfortable. Tandem™ fixes that by taking turns
-      heating and cooling, automatically. Rooms waiting for their turn are parked (switched off,
-      settings kept) and restart on their own. Auto mode isn't available with Tandem.</div>
+      heating and cooling, automatically. Paused rooms are switched off
+      (settings kept) and restart on their own. Auto mode isn't available with Tandem.</div>
     <div class="row"><label>Outdoor unit</label><span class="v" id="slUnit">--</span></div>
     <div id="slNoGroup" class="sub hidden" style="margin:0 0 8px">Pair this head with the other
       heads on its outdoor unit in the Zones tab to use Tandem.</div>
@@ -1184,11 +1184,11 @@ const I18N = { fr: {
   "air check in":"vérification dans",
   // Time-slicing
   "Tandem":"Tandem","Tandem™":"Tandem™",
-  "An outdoor unit can heat or cool, but not both, so a warm room and a cold room can't both get comfortable. Tandem™ fixes that by taking turns heating and cooling, automatically. Rooms waiting for their turn are parked (switched off, settings kept) and restart on their own. Auto mode isn't available with Tandem.":"Une unité extérieure peut chauffer ou refroidir, mais pas les deux : une pièce trop chaude et une pièce trop froide ne peuvent pas être confortables en même temps. Tandem™ règle cela en alternant automatiquement chauffage et refroidissement. Les pièces qui attendent leur tour sont mises en veille (arrêtées, réglages conservés) et redémarrent d’elles-mêmes. Le mode Auto n’est pas disponible avec Tandem.",
+  "An outdoor unit can heat or cool, but not both, so a warm room and a cold room can't both get comfortable. Tandem™ fixes that by taking turns heating and cooling, automatically. Paused rooms are switched off (settings kept) and restart on their own. Auto mode isn't available with Tandem.":"Une unité extérieure peut chauffer ou refroidir, mais pas les deux : une pièce trop chaude et une pièce trop froide ne peuvent pas être confortables en même temps. Tandem™ règle cela en alternant automatiquement chauffage et refroidissement. Les pièces en pause sont arrêtées (réglages conservés) et redémarrent d’elles-mêmes. Le mode Auto n’est pas disponible avec Tandem.",
   "Now":"Maintenant","Minimum turn":"Tour minimal","Maximum turn":"Tour maximal",
-  "Pause between modes":"Pause entre les modes","Waiting for its turn":"En attente de son tour",
-  "Its turn":"Son tour","Waiting":"En attente","Heating turn":"Tour de chauffage",
-  "Cooling turn":"Tour de refroidissement","Switching modes":"Changement de mode",
+  "Pause between modes":"Pause entre les modes","Paused while other rooms heat":"En pause pendant que les autres pièces chauffent","Paused while other rooms cool":"En pause pendant que les autres pièces refroidissent","Paused while modes switch":"En pause pendant le changement de mode",
+  "Heating now":"Chauffe","Cooling now":"Refroidit","Paused":"En pause",
+  "Switching modes":"Changement de mode",
   "Nobody needs heat or cool":"Aucun besoin de chauffage ou de refroidissement",
   "Starting…":"Démarrage…",
   // Room sensor (#142)
@@ -1772,9 +1772,14 @@ function pkFill(id,vals,label,cur){
   sel.value=String(cur);
 }
 const pkMin=v=>(v%60?(v/60).toFixed(1):(v/60))+' min';
+// Tandem hold reason for a paused head: what the other rooms are doing.
+function tandemPaused(st){
+  return i18n(st.tandem==='heat'?'Paused while other rooms heat':
+              st.tandem==='cool'?'Paused while other rooms cool':'Paused while modes switch');
+}
 function pkStatusText(st){
   if(!st||!st.enabled) return i18n('Disabled');
-  if(st.held) return i18n('Waiting for its turn');
+  if(st.held) return tandemPaused(st);
   if(st.state==='parked'){
     let t=i18n('Parked');
     if(st.room_sensor) t+=' \u00b7 '+i18n('room sensor');
@@ -2033,7 +2038,7 @@ function renderClimate(){
   let opTxt;
   const pk=climate.park;
   if(!climate.power){ opTxt='Off'; }
-  else if(pk&&pk.held){ opTxt='Waiting for its turn'; }
+  else if(pk&&pk.held){ opTxt=tandemPaused(pk); }
   else if(pk&&pk.parked){
     opTxt=i18n('Parked');
     if(pk.next_probe_s!=null) opTxt+=' \u00b7 '+i18n('air check in')+' '+Math.max(1,Math.ceil(pk.next_probe_s/60))+' min';
@@ -2822,8 +2827,8 @@ function memberRow(o){
   if(o.room!=null) parts.push('<span class="gmstat">Current <b>'+fmtTemp(o.room)+unitSym()+'</b>'
     +(o.rs?'<span title="'+gEsc(i18n(o.rs==='ok'?'Room temperature from wall sensors':'Wall sensors not heard'))+'">'+RS_ICON(o.rs==='ok'?'gm-rs':'gm-rs warn')+'</span>':'')+'</span>');
   if(o.target!=null) parts.push('<span class="gmstat">Target <b>'+fmtTemp(o.target)+unitSym()+'</b></span>');
-  if(o.slice==='run') parts.push('<span class="gmstat"><b>'+gEsc(i18n('Its turn'))+'</b></span>');
-  else if(o.slice==='hold') parts.push('<span class="gmstat"><b>'+gEsc(i18n('Waiting'))+'</b></span>');
+  if(o.slice==='run') parts.push('<span class="gmstat"><b>'+gEsc(i18n(o.mode==='COOL'||o.mode==='DRY'?'Cooling now':'Heating now'))+'</b></span>');
+  else if(o.slice==='hold') parts.push('<span class="gmstat"><b>'+gEsc(i18n('Paused'))+'</b></span>');
   if(parts.length) stats='<div class="gmstats">'+parts.join('')+'</div>';
   // A whole card is a link to that zone's own UI. Buttons live inside and are
   // handled first by the delegated listener (so a tap on ✕/Leave never
@@ -2927,7 +2932,7 @@ function sliceNowText(sl){
   if(!sl.active) return i18n('Starting…');
   const mins=' \u00b7 '+Math.floor((sl.elapsed_s||0)/60)+' min';
   if(sl.phase==='changeover') return i18n('Switching modes')+mins;
-  if(sl.phase==='run') return i18n(sl.mode==='heat'?'Heating turn':'Cooling turn')+mins;
+  if(sl.phase==='run') return i18n(sl.mode==='heat'?'Heating':'Cooling')+mins;
   return i18n('Nobody needs heat or cool');
 }
 // Tandem is a per-outdoor-unit (zone group) setting: shown in Settings with the

@@ -146,7 +146,7 @@ static void test_warmup_then_coordinate() {
     CHECK(n.directive(Mode::Heat, kWarmupS) == Directive::Run);
     CHECK(n.directive(Mode::Cool, kWarmupS) == Directive::Hold);
     CHECK(std::string(n.take_event()) == "Tandem: this head is now the coordinator");
-    CHECK(std::string(n.take_event()) == "Tandem: heating turn started");
+    CHECK(std::string(n.take_event()) == "Tandem: switched to heating");
     CHECK(n.take_event() == nullptr);
 }
 
@@ -170,7 +170,7 @@ static void test_max_slice_forces_switch() {
     CHECK(n.state().mode == Mode::Cool);
     CHECK(n.directive(Mode::Cool, now) == Directive::Run);
     CHECK(std::string(n.take_event()) == "Tandem: changing over to cooling");
-    CHECK(std::string(n.take_event()) == "Tandem: cooling turn started");
+    CHECK(std::string(n.take_event()) == "Tandem: switched to cooling");
 }
 
 static void test_satisfied_switches_after_min() {
