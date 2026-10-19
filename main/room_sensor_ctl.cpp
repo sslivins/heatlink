@@ -551,6 +551,14 @@ bool fresh_temp(float* out) {
 
 bool active() { return s_feeding; }
 
+Summary summary() {
+    Summary o;
+    std::lock_guard<std::mutex> lk(s_mtx);
+    o.n = s_set.sensors().size();
+    o.has_temp = s_set.room_temp(now_s(), &o.temp, &o.n_fresh);
+    return o;
+}
+
 Snapshot snapshot() {
     const uint32_t t = now_s();
     Snapshot o;

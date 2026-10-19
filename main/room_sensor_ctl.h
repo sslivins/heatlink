@@ -40,6 +40,15 @@ bool fresh_temp(float* out);
 /// remote_temp/set is ignored meanwhile).
 bool active();
 
+/// Cheap summary for status displays.
+struct Summary {
+    size_t n = 0;          ///< paired sensors
+    size_t n_fresh = 0;
+    bool   has_temp = false;
+    float  temp = 0.0f;    ///< average of fresh sensors
+};
+Summary summary();
+
 struct SensorView {
     room_sensor::Sensor s;
     bool     fresh = false;

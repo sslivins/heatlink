@@ -1159,6 +1159,7 @@ components:
         operating: { type: boolean }
         roomTemp: { type: number }
         targetTemp: { type: number }
+        rs: { type: string, enum: [ok, stale], description: 'Wall room sensors: ok = roomTemp is their average, stale = none heard (unit sensor). Absent with none paired.' }
     StatusOk:
       type: object
       properties:
@@ -1225,7 +1226,23 @@ components:
         temp_unit: { type: string, enum: [C, F], description: Web UI display unit (Home Assistant stays in °C) }
         lang: { type: string, description: 'Persisted web UI language override ("" = auto-detect from browser, e.g. "en", "fr")' }
         caps: { $ref: '#/components/schemas/SettingsCaps' }
-        roomTemperature: { type: number }
+        roomTemperature: { type: number, description: Room temperature reported by the unit (the remote value while wall sensors are in use) }
+        roomSensor:
+          type: object
+          description: Wall room sensors; absent when none is paired
+          properties:
+            state: { type: string, enum: [ok, stale] }
+            temp: { type: number, nullable: true, description: Average of the fresh sensors }
+            n_fresh: { type: integer }
+            sensors:
+              type: array
+              items:
+                type: object
+                properties:
+                  name: { type: string }
+                  fresh: { type: boolean }
+                  temp: { type: number, nullable: true }
+                  age_s: { type: integer, nullable: true }
         operating: { type: boolean }
         compressorFrequency: { type: number }
         outsideTemp: { type: number, description: Only present when reported by the unit }
@@ -1519,6 +1536,7 @@ components:
         mode: { type: string }
         roomTemp: { type: number }
         targetTemp: { type: number }
+        rs: { type: string, enum: [ok, stale], description: 'Wall room sensors: ok = roomTemp is their average, stale = none heard (unit sensor). Absent with none paired.' }
         ip: { type: string }
     GroupSelf:
       type: object
@@ -1531,6 +1549,7 @@ components:
         mode: { type: string }
         roomTemp: { type: number }
         targetTemp: { type: number }
+        rs: { type: string, enum: [ok, stale], description: 'Wall room sensors: ok = roomTemp is their average, stale = none heard (unit sensor). Absent with none paired.' }
         ip: { type: string }
     GroupConflict:
       type: object

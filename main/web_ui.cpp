@@ -312,6 +312,19 @@ esp_err_t handle_status(httpd_req_t* req) {
     return ESP_OK;
 }
 
+static void add_num_or_null(cJSON* o, const char* k, bool has, double v) {
+    if (has) cJSON_AddNumberToObject(o, k, v);
+    else cJSON_AddNullToObject(o, k);
+}
+
+// Room temperature for displays: the wall sensors' average (0.1 °C) while any
+// is fresh, otherwise the unit's reading. *rs = "" / "ok" / "stale".
+float display_room_temp(const cn105::Status& sta, const char** rs) {
+    const room_sensor_ctl::Summary s = room_sensor_ctl::summary();
+    *rs = s.n == 0 ? "" : s.has_temp ? "ok" : "stale";
+    return s.has_temp ? s.temp : sta.roomTemperature;
+}
+
 // Off-at-setpoint runtime status (shared by /api/settings and /api/park).
 cJSON* park_status_json() {
     park_ctl::Snapshot ps = park_ctl::snapshot();
@@ -370,6 +383,25 @@ esp_err_t handle_get_settings(httpd_req_t* req) {
         cJSON_AddItemToObject(root, "caps", caps);
     }
     cJSON_AddNumberToObject(root, "roomTemperature", sta.roomTemperature);
+    // Wall sensors (#142) for the dial's room-sensor icon; absent with none paired.
+    {
+        room_sensor_ctl::Snapshot rs = room_sensor_ctl::snapshot();
+        if (!rs.sensors.empty()) {
+            cJSON* o = cJSON_AddObjectToObject(root, "roomSensor");
+            cJSON_AddStringToObject(o, "state", rs.has_temp ? "ok" : "stale");
+            add_num_or_null(o, "temp", rs.has_temp, rs.temp);
+            cJSON_AddNumberToObject(o, "n_fresh", rs.n_fresh);
+            cJSON* arr = cJSON_AddArrayToObject(o, "sensors");
+            for (const auto& v : rs.sensors) {
+                cJSON* e = cJSON_CreateObject();
+                cJSON_AddStringToObject(e, "name", (v.s.name.empty() ? v.s.id : v.s.name).c_str());
+                cJSON_AddBoolToObject(e, "fresh", v.fresh);
+                add_num_or_null(e, "temp", v.s.sample.valid, v.s.sample.temp_c);
+                add_num_or_null(e, "age_s", v.temp_age_s >= 0, v.temp_age_s);
+                cJSON_AddItemToArray(arr, e);
+            }
+        }
+    }
     cJSON_AddBoolToObject(root, "operating", sta.operating);
     cJSON_AddNumberToObject(root, "compressorFrequency", sta.compressorFrequency);
     cJSON_AddItemToObject(root, "park", park_status_json());
@@ -578,11 +610,6 @@ esp_err_t handle_park_post(httpd_req_t* req) {
 // ── GET /api/sensors ───────────────────────────────────────────────────
 // Wireless room sensors (#142): the paired sensors and their readings, the
 // averaged room temperature, and the Bluetooth / Wi-Fi pairing windows.
-static void add_num_or_null(cJSON* o, const char* k, bool has, double v) {
-    if (has) cJSON_AddNumberToObject(o, k, v);
-    else cJSON_AddNullToObject(o, k);
-}
-
 esp_err_t send_sensors(httpd_req_t* req) {
     room_sensor_ctl::Snapshot s = room_sensor_ctl::snapshot();
     cJSON* root = cJSON_CreateObject();
@@ -1327,7 +1354,11 @@ esp_err_t handle_group_state(httpd_req_t* req) {
     cJSON_AddStringToObject(root, "stage", sta.stage.c_str());
     // Display-only extras consumed by the poller's Zones-tab cards (pv-compatible:
     // an older peer simply omits them and the card renders "--").
-    cJSON_AddNumberToObject(root, "roomTemp", sta.roomTemperature);
+    {
+        const char* rs = "";
+        cJSON_AddNumberToObject(root, "roomTemp", display_room_temp(sta, &rs));
+        if (*rs) cJSON_AddStringToObject(root, "rs", rs);
+    }
     cJSON_AddNumberToObject(root, "targetTemp", st.temperature);
     cJSON_AddNumberToObject(root, "pv", hvac_group::kProtocolVersion);
     // Time-slicing (#133). Additive fields (older peers ignore them); "slice_v"
@@ -1469,6 +1500,12 @@ bool poll_peer(const std::string& uid, hvac_group::MemberObs& out, bool& incompa
                     const cJSON* jtt = cJSON_GetObjectItem(j, "targetTemp");
                     out.room_temp   = (jrt && cJSON_IsNumber(jrt)) ? (float)jrt->valuedouble : -1000.f;
                     out.target_temp = (jtt && cJSON_IsNumber(jtt)) ? (float)jtt->valuedouble : -1000.f;
+                    {
+                        const cJSON* jrs = cJSON_GetObjectItem(j, "rs");
+                        if (cJSON_IsString(jrs) && (!strcmp(jrs->valuestring, "ok") ||
+                                                    !strcmp(jrs->valuestring, "stale")))
+                            out.room_sensor = jrs->valuestring;
+                    }
                     out.ip          = ip;
                     {
                         slice_ctl::PeerObs so;
@@ -1606,7 +1643,11 @@ hvac_group::GroupView compute_group_view(std::vector<hvac_group::MemberObs>* out
     // signal — the authoritative conflict indicator (see design doc).
     self_obs.standby    = (sta.subMode == "STANDBY") && (sta.stage == "IDLE") &&
                           !sta.operating;
-    self_obs.room_temp   = sta.roomTemperature;
+    {
+        const char* rs = "";
+        self_obs.room_temp   = display_room_temp(sta, &rs);
+        self_obs.room_sensor = rs;
+    }
     self_obs.target_temp = st.temperature;
     self_obs.mode_str    = (st.power == "OFF") ? std::string("OFF") : st.mode;
     self_obs.ip          = wifi::get_ip();
@@ -1927,6 +1968,7 @@ esp_err_t handle_group_get(httpd_req_t* req) {
     cJSON_AddStringToObject(self, "mode", self_obs.mode_str.c_str());
     if (self_obs.room_temp   > -900.f) cJSON_AddNumberToObject(self, "roomTemp", self_obs.room_temp);
     if (self_obs.target_temp > -900.f) cJSON_AddNumberToObject(self, "targetTemp", self_obs.target_temp);
+    if (!self_obs.room_sensor.empty()) cJSON_AddStringToObject(self, "rs", self_obs.room_sensor.c_str());
     if (!self_obs.ip.empty())          cJSON_AddStringToObject(self, "ip", self_obs.ip.c_str());
     cJSON_AddItemToObject(root, "self", self);
 
@@ -1945,6 +1987,7 @@ esp_err_t handle_group_get(httpd_req_t* req) {
             if (!m.mode_str.empty())        cJSON_AddStringToObject(jm, "mode", m.mode_str.c_str());
             if (m.room_temp   > -900.f)     cJSON_AddNumberToObject(jm, "roomTemp", m.room_temp);
             if (m.target_temp > -900.f)     cJSON_AddNumberToObject(jm, "targetTemp", m.target_temp);
+            if (!m.room_sensor.empty())     cJSON_AddStringToObject(jm, "rs", m.room_sensor.c_str());
         }
         if (!m.ip.empty()) cJSON_AddStringToObject(jm, "ip", m.ip.c_str());
         cJSON_AddItemToArray(jmembers, jm);
@@ -3197,7 +3240,9 @@ cJSON* build_house_summary() {
         cJSON_AddStringToObject(o, "power", st.power.c_str());
         cJSON_AddStringToObject(o, "mode", st.mode.c_str());
         cJSON_AddBoolToObject(o, "operating", sta.operating);
-        cJSON_AddNumberToObject(o, "roomTemp", sta.roomTemperature);
+        const char* rs = "";
+        cJSON_AddNumberToObject(o, "roomTemp", display_room_temp(sta, &rs));
+        if (*rs) cJSON_AddStringToObject(o, "rs", rs);
         cJSON_AddNumberToObject(o, "targetTemp", st.temperature);
     }
     return o;
@@ -3295,7 +3340,7 @@ void house_task(void*) {
                 // The summary is fresher than the mDNS TXT; it wins where present.
                 static const char* keys[] = {"name", "ghash", "glabel", "pv", "version",
                                              "unit_connected", "power", "mode",
-                                             "operating", "roomTemp", "targetTemp"};
+                                             "operating", "roomTemp", "targetTemp", "rs"};
                 for (const char* k : keys) copy_if(o, sj, k);
             }
             cJSON_Delete(sj);
