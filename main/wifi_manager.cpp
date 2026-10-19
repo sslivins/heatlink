@@ -12,6 +12,7 @@
 #include <string>
 #include <algorithm>
 #include <mutex>
+#include <atomic>
 #include "esp_log.h"
 #include "esp_wifi.h"
 #include "esp_netif.h"
@@ -160,19 +161,43 @@ bool load_creds(char* ssid, size_t ssid_len, char* pass, size_t pass_len) {
 // esp_wifi_connect() here as well would race it, so we only count failures and
 // rely on the watchdog below as a backstop. Without the roaming app we retry
 // ourselves, as before.
-int64_t s_down_since_us = 0;  // when the established link was lost; 0 = up
+// Watchdog state is shared between the event task and the esp_timer task, so
+// it is atomic and 32-bit: seconds since boot when the link (IP) was lost,
+// 0 = up. Set on *every* disconnect, including driver-managed roams, so a roam
+// that never completes is still recovered.
+std::atomic<uint32_t> s_down_since_s{0};
+esp_netif_t* s_sta_netif = nullptr;
 esp_timer_handle_t s_link_wd = nullptr;
 
-constexpr int64_t kLinkWdPeriodUs = 30LL * 1000 * 1000;
-constexpr int64_t kLinkWdKickUs   = 60LL * 1000 * 1000;
+constexpr int64_t  kLinkWdPeriodUs = 30LL * 1000 * 1000;
+constexpr uint32_t kLinkWdKickS    = 60;
+
+uint32_t uptime_s() { return static_cast<uint32_t>(esp_timer_get_time() / 1000000) + 1; }
 
 void link_watchdog_cb(void*) {
-    if (s_mode != Mode::CONNECTED || s_established || s_down_since_us == 0) return;
-    if (esp_timer_get_time() - s_down_since_us < kLinkWdKickUs) return;
-    ESP_LOGW(TAG, "still disconnected — kicking STA reconnect");
-    esp_wifi_connect();
+    const uint32_t down = s_down_since_s.load();
+    if (down == 0 || uptime_s() - down < kLinkWdKickS) return;
+    const unsigned long secs = static_cast<unsigned long>(uptime_s() - down);
+    esp_err_t err;
+    wifi_ap_record_t ap;
+    if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) {
+        // Associated but no IP: esp_wifi_connect() would be a no-op, so kick DHCP.
+        esp_err_t stop = esp_netif_dhcpc_stop(s_sta_netif);
+        err = esp_netif_dhcpc_start(s_sta_netif);
+        ESP_LOGW(TAG, "associated but no IP for %lus — restarting DHCP (%s/%s)",
+                 secs, esp_err_to_name(stop), esp_err_to_name(err));
+    } else {
+        err = esp_wifi_connect();
+        ESP_LOGW(TAG, "disconnected for %lus — kicking STA reconnect (%s)",
+                 secs, esp_err_to_name(err));
+    }
+    // Give the kick a full window to complete before trying again (a slow
+    // DHCP server must not be restarted mid-negotiation every period).
+    if (err == ESP_OK) {
+        uint32_t expected = down;
+        s_down_since_s.compare_exchange_strong(expected, uptime_s());
+    }
 }
-
 void on_event(void*, esp_event_base_t base, int32_t id, void* data) {
     if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) {
         // In provisioning (APSTA) the STA side is only used for scanning; don't
@@ -180,19 +205,18 @@ void on_event(void*, esp_event_base_t base, int32_t id, void* data) {
         if (s_mode != Mode::PROVISIONING) esp_wifi_connect();
     } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
         if (s_mode == Mode::PROVISIONING) return;
+        uint32_t expected = 0;
+        s_down_since_s.compare_exchange_strong(expected, uptime_s());
         auto* d = static_cast<wifi_event_sta_disconnected_t*>(data);
-        // Driver-managed roam: the stack reconnects to the new AP itself.
+        // Driver-managed roam: the stack reconnects to the new AP itself, so
+        // it is neither an outage nor a failed attempt.
         if (d && d->reason == WIFI_REASON_ROAMING) {
             ESP_LOGI(TAG, "roaming to another AP");
             return;
         }
         // Count a genuine outage only on the established->lost transition, not
         // on the retry storm that follows or on initial connect attempts.
-        if (s_established) {
-            s_wifi_drops++;
-            s_established = false;
-            s_down_since_us = esp_timer_get_time();
-        }
+        if (s_established) { s_wifi_drops++; s_established = false; }
         s_retries++;
         ESP_LOGW(TAG, "STA disconnected (reason %d, attempt %d)", d ? d->reason : -1, s_retries);
 #if !CONFIG_ESP_WIFI_ENABLE_ROAMING_APP
@@ -204,7 +228,7 @@ void on_event(void*, esp_event_base_t base, int32_t id, void* data) {
         esp_ip4addr_ntoa(&e->ip_info.ip, s_ip, sizeof(s_ip));
         s_retries = 0;
         s_established = true;
-        s_down_since_us = 0;
+        s_down_since_s.store(0);
         xEventGroupSetBits(s_events, kConnectedBit);
     }
 }
@@ -577,21 +601,52 @@ std::string device_uid() {
 
 // DHCP hostname (what the router / UniFi shows instead of "espressif"):
 // "HeatLink-<room>" from the display name, e.g. "HeatLink-Master-Bedroom".
-// Hostnames can't carry spaces or punctuation (RFC 1123), so anything that
-// isn't a letter or digit becomes a single '-'. Falls back to the mDNS name.
-static esp_netif_t* s_sta_netif = nullptr;
+// Hostnames are limited to letters, digits and '-' (RFC 1123), so accented
+// Latin letters are folded to ASCII ("Éric" -> "Eric"), any other run of
+// characters becomes one '-' (apostrophes are dropped), and an over-long name is cut at a word boundary
+// to fit esp_netif's 32-byte limit. Falls back to the mDNS name.
+// ASCII fold for U+00C0..U+00FF (UTF-8 lead byte 0xC3); '\0' = no letter.
+static const char kLatin1Fold[] =
+    "AAAAAAACEEEEIIII" "DNOOOOO\0OUUUUY\0s"   // U+00C0..U+00DF (Æ->A, ×, Þ, ß->s)
+    "aaaaaaaceeeeiiii" "dnooooo\0ouuuuy\0y";  // U+00E0..U+00FF (æ->a, ÷, þ)
 
 static std::string dhcp_hostname(const std::string& name) {
+    constexpr size_t kMax = 32;
     std::string h = "HeatLink-";
     const size_t base = h.size();
-    for (char c : name) {
-        if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9'))
-            h += c;
-        else if (h.size() > base && h.back() != '-')
-            h += '-';
+    auto sep = [&] { if (h.size() > base && h.back() != '-') h += '-'; };
+    for (size_t i = 0; i < name.size(); ++i) {
+        const unsigned char c = static_cast<unsigned char>(name[i]);
+        if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')) {
+            h += static_cast<char>(c);
+        } else if (c == 0xC3 && i + 1 < name.size() &&
+                   (static_cast<unsigned char>(name[i + 1]) & 0xC0) == 0x80) {
+            const char a = kLatin1Fold[(static_cast<unsigned char>(name[i + 1]) & 0x3F)];
+            ++i;
+            if (a) h += a; else sep();
+        } else if (c == 0xC5 && i + 1 < name.size() &&
+                   (name[i + 1] == '\x92' || name[i + 1] == '\x93')) {
+            h += (name[i + 1] == '\x92') ? "OE" : "oe";  // Œ / œ
+            ++i;
+        } else if (c == '\'') {
+            // Drop apostrophes: "Eric's" -> "Erics".
+        } else if (c == 0xE2 && i + 2 < name.size() && name[i + 1] == '\x80' &&
+                   (name[i + 2] == '\x98' || name[i + 2] == '\x99')) {
+            i += 2;  // typographic apostrophe U+2018/U+2019
+        } else if (c >= 0x80) {
+            // Skip the rest of any other UTF-8 sequence, then separate.
+            while (i + 1 < name.size() && (static_cast<unsigned char>(name[i + 1]) & 0xC0) == 0x80) ++i;
+            sep();
+        } else {
+            sep();
+        }
     }
-    if (h.size() > 32) h.resize(32);
-    while (!h.empty() && h.back() == '-') h.pop_back();
+    while (h.size() > base && h.back() == '-') h.pop_back();
+    if (h.size() > kMax) {
+        const size_t cut = h.rfind('-', kMax);  // last word break that fits
+        h.resize(cut != std::string::npos && cut > base ? cut : kMax);
+        while (h.size() > base && h.back() == '-') h.pop_back();
+    }
     if (h.size() <= base) return std::string(CONFIG_MDNS_HOSTNAME) + "-" + device_uid();
     return h;
 }
@@ -604,6 +659,14 @@ static void apply_dhcp_hostname(const std::string& name) {
     else ESP_LOGI(TAG, "DHCP hostname '%s'", h.c_str());
 }
 
+// DHCP option 60 so routers can identify the device type. Must be set
+// before the DHCP client starts (i.e. before esp_wifi_start()).
+static void apply_dhcp_vendor_class() {
+    static char vc[] = "HeatLink";
+    esp_err_t err = esp_netif_dhcpc_option(s_sta_netif, ESP_NETIF_OP_SET,
+                                           ESP_NETIF_VENDOR_CLASS_IDENTIFIER, vc, sizeof(vc) - 1);
+    if (err != ESP_OK) ESP_LOGW(TAG, "set DHCP vendor class failed: %s", esp_err_to_name(err));
+}
 std::string mdns_hostname() {
     return std::string(CONFIG_MDNS_HOSTNAME) + "-" + device_uid();
 }
@@ -731,6 +794,7 @@ esp_err_t init() {
     s_mode = Mode::CONNECTING;
     s_sta_netif = esp_netif_create_default_wifi_sta();
     apply_dhcp_hostname(device_display_name());
+    apply_dhcp_vendor_class();
 
     wifi_config_t sta = {};
     strlcpy(reinterpret_cast<char*>(sta.sta.ssid), ssid, sizeof(sta.sta.ssid));
@@ -757,7 +821,9 @@ esp_err_t init() {
         s_mode = Mode::CONNECTED;
         ESP_LOGI(TAG, "connected, IP %s", s_ip);
         start_mdns();
-        const esp_timer_create_args_t wd = {.callback = &link_watchdog_cb, .name = "wifi_wd"};
+        esp_timer_create_args_t wd = {};
+        wd.callback = &link_watchdog_cb;
+        wd.name = "wifi_wd";
         if (esp_timer_create(&wd, &s_link_wd) == ESP_OK) esp_timer_start_periodic(s_link_wd, kLinkWdPeriodUs);
         return ESP_OK;
     }
