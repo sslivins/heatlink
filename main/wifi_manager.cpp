@@ -155,28 +155,59 @@ bool load_creds(char* ssid, size_t ssid_len, char* pass, size_t pass_len) {
     return ssid[0] != '\0';
 }
 
+// Reconnect ownership: with the IDF roaming app enabled it reconnects after
+// every ordinary disconnect (and retargets on a roam), indefinitely. Calling
+// esp_wifi_connect() here as well would race it, so we only count failures and
+// rely on the watchdog below as a backstop. Without the roaming app we retry
+// ourselves, as before.
+int64_t s_down_since_us = 0;  // when the established link was lost; 0 = up
+esp_timer_handle_t s_link_wd = nullptr;
+
+constexpr int64_t kLinkWdPeriodUs = 30LL * 1000 * 1000;
+constexpr int64_t kLinkWdKickUs   = 60LL * 1000 * 1000;
+
+void link_watchdog_cb(void*) {
+    if (s_mode != Mode::CONNECTED || s_established || s_down_since_us == 0) return;
+    if (esp_timer_get_time() - s_down_since_us < kLinkWdKickUs) return;
+    ESP_LOGW(TAG, "still disconnected — kicking STA reconnect");
+    esp_wifi_connect();
+}
+
 void on_event(void*, esp_event_base_t base, int32_t id, void* data) {
     if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) {
-        esp_wifi_connect();
+        // In provisioning (APSTA) the STA side is only used for scanning; don't
+        // start a reconnect loop against credentials that just failed.
+        if (s_mode != Mode::PROVISIONING) esp_wifi_connect();
     } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
+        if (s_mode == Mode::PROVISIONING) return;
+        auto* d = static_cast<wifi_event_sta_disconnected_t*>(data);
+        // Driver-managed roam: the stack reconnects to the new AP itself.
+        if (d && d->reason == WIFI_REASON_ROAMING) {
+            ESP_LOGI(TAG, "roaming to another AP");
+            return;
+        }
         // Count a genuine outage only on the established->lost transition, not
         // on the retry storm that follows or on initial connect attempts.
-        if (s_established) { s_wifi_drops++; s_established = false; }
-        if (s_retries++ < 5) {
-            esp_wifi_connect();
-            ESP_LOGW(TAG, "retry STA connect (%d)", s_retries);
-        } else {
-            xEventGroupSetBits(s_events, kFailBit);
+        if (s_established) {
+            s_wifi_drops++;
+            s_established = false;
+            s_down_since_us = esp_timer_get_time();
         }
+        s_retries++;
+        ESP_LOGW(TAG, "STA disconnected (reason %d, attempt %d)", d ? d->reason : -1, s_retries);
+#if !CONFIG_ESP_WIFI_ENABLE_ROAMING_APP
+        if (s_retries <= 5 || s_mode == Mode::CONNECTED) esp_wifi_connect();
+#endif
+        if (s_mode == Mode::CONNECTING && s_retries > 5) xEventGroupSetBits(s_events, kFailBit);
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
         auto* e = static_cast<ip_event_got_ip_t*>(data);
         esp_ip4addr_ntoa(&e->ip_info.ip, s_ip, sizeof(s_ip));
         s_retries = 0;
         s_established = true;
+        s_down_since_us = 0;
         xEventGroupSetBits(s_events, kConnectedBit);
     }
 }
-
 // ── mDNS (called once STA is connected) ────────────────────────────────
 // A unique hostname avoids ".local" collisions, but on its own it is not
 // discoverable (nobody knows the suffix to type). So we also advertise a
@@ -544,6 +575,35 @@ std::string device_uid() {
     return std::string(buf);
 }
 
+// DHCP hostname (what the router / UniFi shows instead of "espressif"):
+// "HeatLink-<room>" from the display name, e.g. "HeatLink-Master-Bedroom".
+// Hostnames can't carry spaces or punctuation (RFC 1123), so anything that
+// isn't a letter or digit becomes a single '-'. Falls back to the mDNS name.
+static esp_netif_t* s_sta_netif = nullptr;
+
+static std::string dhcp_hostname(const std::string& name) {
+    std::string h = "HeatLink-";
+    const size_t base = h.size();
+    for (char c : name) {
+        if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9'))
+            h += c;
+        else if (h.size() > base && h.back() != '-')
+            h += '-';
+    }
+    if (h.size() > 32) h.resize(32);
+    while (!h.empty() && h.back() == '-') h.pop_back();
+    if (h.size() <= base) return std::string(CONFIG_MDNS_HOSTNAME) + "-" + device_uid();
+    return h;
+}
+
+static void apply_dhcp_hostname(const std::string& name) {
+    if (!s_sta_netif) return;
+    const std::string h = dhcp_hostname(name);
+    esp_err_t err = esp_netif_set_hostname(s_sta_netif, h.c_str());
+    if (err != ESP_OK) ESP_LOGW(TAG, "set hostname '%s' failed: %s", h.c_str(), esp_err_to_name(err));
+    else ESP_LOGI(TAG, "DHCP hostname '%s'", h.c_str());
+}
+
 std::string mdns_hostname() {
     return std::string(CONFIG_MDNS_HOSTNAME) + "-" + device_uid();
 }
@@ -568,6 +628,7 @@ esp_err_t set_display_name(const char* name) {
     xSemaphoreTake(s_name_mtx, portMAX_DELAY);
     s_name = n;
     xSemaphoreGive(s_name_mtx);
+    apply_dhcp_hostname(n);  // routers see it after the next reconnect/reboot
     return ESP_OK;
 }
 
@@ -668,7 +729,8 @@ esp_err_t init() {
     strlcpy(s_pass, pass, sizeof(s_pass));
 
     s_mode = Mode::CONNECTING;
-    esp_netif_create_default_wifi_sta();
+    s_sta_netif = esp_netif_create_default_wifi_sta();
+    apply_dhcp_hostname(device_display_name());
 
     wifi_config_t sta = {};
     strlcpy(reinterpret_cast<char*>(sta.sta.ssid), ssid, sizeof(sta.sta.ssid));
@@ -678,6 +740,8 @@ esp_err_t init() {
     // pick the strongest.
     sta.sta.scan_method = WIFI_ALL_CHANNEL_SCAN;
     sta.sta.sort_method = WIFI_CONNECT_AP_BY_SIGNAL;
+    sta.sta.rm_enabled  = 1;  // 802.11k neighbour reports
+    sta.sta.btm_enabled = 1;  // 802.11v BSS transition requests
 
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &sta));
@@ -693,6 +757,8 @@ esp_err_t init() {
         s_mode = Mode::CONNECTED;
         ESP_LOGI(TAG, "connected, IP %s", s_ip);
         start_mdns();
+        const esp_timer_create_args_t wd = {.callback = &link_watchdog_cb, .name = "wifi_wd"};
+        if (esp_timer_create(&wd, &s_link_wd) == ESP_OK) esp_timer_start_periodic(s_link_wd, kLinkWdPeriodUs);
         return ESP_OK;
     }
 
