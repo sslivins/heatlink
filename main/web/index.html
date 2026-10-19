@@ -119,6 +119,7 @@ background:#fff;border-radius:50%;transition:.2s}
   padding:0;-webkit-tap-highlight-color:transparent}
 .icon-btn:active{background:var(--hover)}
 .btn{cursor:pointer;border:none;border-radius:8px;padding:9px 14px;font-size:.88em;width:100%}
+.btn.sm{width:auto;flex:none;padding:5px 12px}
 .btn-warn{background:var(--chip);color:var(--orange);border:1px solid var(--border-strong);margin-top:8px}
 .btn-warn:hover{background:var(--hover)}
 .adv{align-self:stretch;margin-top:14px;border-top:1px solid var(--border);padding-top:12px}
@@ -127,6 +128,23 @@ background:#fff;border-radius:50%;transition:.2s}
 .adv>summary::-webkit-details-marker{display:none}
 .adv>summary::before{content:"\25B8";color:var(--fg-3);font-size:1.15em;line-height:1;display:inline-block;width:1em;text-align:center;transition:transform .15s}
 .adv[open]>summary::before{transform:rotate(90deg)}
+.info-btn{flex:0 0 auto;width:28px;height:28px;margin-left:4px;padding:4px;border:none;border-radius:50%;
+  background:none;color:var(--fg-3);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;
+  -webkit-tap-highlight-color:transparent}
+.info-btn svg{width:18px;height:18px}
+.info-btn:hover,.info-btn[aria-expanded="true"]{color:var(--blue);background:var(--chip)}
+.info-pop{font-size:.82em;font-weight:400;color:var(--fg-2);background:var(--chip);border:1px solid var(--border);
+  border-radius:8px;padding:8px 10px;margin:6px 0 10px}
+.rs-item{border-top:1px solid var(--border);padding-top:10px;margin-top:10px}
+.rs-d>summary{cursor:pointer;list-style:none;user-select:none;display:flex;align-items:center;gap:8px;padding:2px 0}
+.rs-d>summary::-webkit-details-marker{display:none}
+.rs-d>summary::before{content:"\25B8";color:var(--fg-3);font-size:1.15em;line-height:1;width:1em;text-align:center;transition:transform .15s}
+.rs-d[open]>summary::before{transform:rotate(90deg)}
+.rs-d>summary .rs-nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}
+.rs-d>summary .rs-t{font-weight:600}
+.rs-d>summary .rs-t.stale{color:var(--fg-3)}
+.rs-body{padding:10px 0 2px 1.5em}
+.rs-body .row:last-child{margin-bottom:14px}
 .btn-danger{background:var(--chip);color:var(--red);border:1px solid var(--border-strong);margin-top:8px}
 .btn-danger:hover{background:var(--hover)}
 .logout-ico{position:fixed;top:calc(12px + env(safe-area-inset-top,0px));right:calc(12px + env(safe-area-inset-right,0px));z-index:60;width:38px;height:38px;
@@ -270,6 +288,22 @@ align-items:center;justify-content:center;pointer-events:none;text-align:center}
 .dc-temp{font-size:3.1em;font-weight:300;line-height:1.05;color:var(--fg)}
 .dc-unit{font-size:.4em;color:var(--fg-3);vertical-align:super;margin-left:2px}
 .dc-room{font-size:.78em;color:var(--fg-3);margin-top:2px}
+.rs-ic{pointer-events:auto;display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;
+  margin:-7px -7px -7px 1px;border:none;background:none;padding:0;color:var(--fg-3);cursor:pointer;vertical-align:middle;
+  -webkit-tap-highlight-color:transparent}
+.rs-ic svg,.gm-rs{width:15px;height:15px}
+.rs-ic.warn,.gm-rs.warn{color:var(--orange)}
+.gm-rs{vertical-align:-3px;margin-left:3px;color:var(--fg-3)}
+.rs-pop{position:absolute;left:50%;top:72%;transform:translateX(-50%);z-index:5;width:230px;max-width:86vw;text-align:left;
+  background:var(--surface);border:1px solid var(--border-strong);border-radius:10px;padding:10px 12px;
+  box-shadow:0 6px 20px #0003;font-size:.8em;color:var(--fg-2)}
+.rs-pop::before{content:"";position:absolute;top:-6px;left:50%;margin-left:-6px;width:10px;height:10px;
+  background:var(--surface);border-left:1px solid var(--border-strong);border-top:1px solid var(--border-strong);transform:rotate(45deg)}
+.rs-pop b{color:var(--fg);font-weight:600}
+.rs-pop .r{display:flex;justify-content:space-between;gap:10px;margin-top:4px;color:var(--fg-3)}
+.rs-pop .r span:first-child{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rs-pop .r span:last-child{color:var(--fg);flex:none}
+.rs-pop a{display:block;margin-top:8px;color:var(--blue);text-decoration:none;font-weight:500;cursor:pointer}
 .dial-wrap.off .dc-temp{color:var(--dial-off)}
 .dial-btn{position:absolute;bottom:10%;width:40px;height:40px;border-radius:50%;
 border:1px solid var(--dial-btn-border);background:var(--dial-btn);color:var(--fg);font-size:1.3em;line-height:1;
@@ -514,8 +548,9 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
       <div class="dial-center">
         <div class="dc-mode" id="dialMode">--</div>
         <div class="dc-temp"><span id="setTemp">--</span><span class="dc-unit" id="setUnit">°C</span></div>
-        <div class="dc-room"><span id="roomTemp">--</span>° room</div>
+        <div class="dc-room"><span id="roomTemp">--</span>° room<button type="button" id="rsIc" class="rs-ic hidden" aria-label="Room sensors" aria-expanded="false" aria-controls="rsPop" onclick="rsPopToggle(event)"></button></div>
       </div>
+      <div id="rsPop" class="rs-pop hidden" role="dialog" aria-label="Room sensors"></div>
       <button class="dial-btn dec" id="tDec" onclick="bumpTemp(-0.5)" aria-label="Lower setpoint">−</button>
       <button class="dial-btn inc" id="tInc" onclick="bumpTemp(0.5)" aria-label="Raise setpoint">+</button>
     </div>
@@ -706,6 +741,7 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
   <div class="secnav" data-grp="settings">
     <button onclick="jumpTo('sec-display')">Display</button>
     <button onclick="jumpTo('sec-widevane')">Wide vane</button>
+    <button onclick="jumpTo('sec-sensor')">Room sensors</button>
     <button onclick="jumpTo('sec-park')">Off at setpoint</button>
     <button onclick="jumpTo('sec-tandem')">Tandem</button>
     <button onclick="jumpTo('sec-wifi')">WiFi</button>
@@ -786,6 +822,43 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
       not detected on your unit and may have no effect.</div>
     <div id="wvMsg" class="status hidden" style="margin:10px 0"></div>
     <button class="btn" id="wvDetectBtn" onclick="detectWideVane()">Detect now</button>
+  </div>
+
+  <!-- Wireless room sensors (#142): BTHome over Bluetooth, Shelly over Wi-Fi. -->
+  <div class="card" data-grp="settings" id="sec-sensor">
+    <h2 style="display:flex;align-items:center">Room sensors<button type="button" class="info-btn" aria-label="What is a room sensor?" aria-expanded="false" aria-controls="rsInfo" onclick="toggleInfo(this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="11" x2="12" y2="17"/><circle cx="12" cy="7.5" r=".6" fill="currentColor"/></svg></button></h2>
+    <div class="sub" style="margin:-4px 0 8px">Use wireless sensors on the wall as this room's temperature.</div>
+    <div id="rsInfo" class="info-pop hidden">Battery-powered sensors on the wall report the real room temperature, over Bluetooth (BTHome, e.g. Shelly BLU H&amp;T) or Wi-Fi (Shelly H&amp;T Gen3). With up to 4 sensors the head uses their average. The unit heats or cools to that reading instead of the air at the head, and Off at setpoint no longer needs fan air checks. If every sensor goes quiet the head goes back to its own sensor.</div>
+    <div id="rsRoom" class="row hidden"><label>Room temperature</label><span class="v" id="rsRoomV">--</span></div>
+    <div id="rsList"></div>
+    <div id="rsNone" class="row"><label>Status</label><span class="v">No sensor</span></div>
+    <div id="rsChoose" class="hidden">
+      <div class="sub" style="margin:8px 0 6px">What kind of sensor?</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+        <button class="btn" onclick="sensorAction('pair_ble')">Bluetooth (Shelly BLU H&amp;T)</button>
+        <button class="btn" onclick="sensorAction('discover')">Wi-Fi (Shelly H&amp;T Gen3)</button>
+      </div>
+    </div>
+    <div id="rsPair" class="hidden">
+      <div class="status info" style="margin:8px 0" id="rsPairMsg">Press the button on the sensor</div>
+      <div class="sub" style="margin:0 0 6px">Or pick it from the sensors heard nearby:</div>
+      <div id="rsNearby" class="sub" style="margin:0 0 8px">Listening…</div>
+    </div>
+    <div id="rsWifi" class="hidden">
+      <div class="status info" style="margin:8px 0" id="rsWifiHint">Wake the sensor: open its back cover and press the button once.</div>
+      <div id="rsFound" class="sub" style="margin:0 0 8px">Looking for sensors…</div>
+      <div class="sub" style="margin:0 0 6px">Or enter its IP address:</div>
+      <div style="display:flex;gap:8px;margin-bottom:8px">
+        <input type="text" id="rsHost" placeholder="192.168.1.50" style="flex:1;min-width:0" autocomplete="off" spellcheck="false">
+        <button class="btn sm" id="rsHostBtn" onclick="sensorPairWifi($('rsHost').value.trim())">Pair</button>
+      </div>
+      <div id="rsWifiMsg" class="status hidden" style="margin:8px 0"></div>
+    </div>
+    <div id="rsMsg" class="status hidden" style="margin:10px 0"></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:16px">
+      <button class="btn" id="rsAdd" onclick="sensorChoose(true)">Add sensor</button>
+      <button class="btn hidden" id="rsCancel" onclick="sensorCancel()">Cancel</button>
+    </div>
   </div>
 
   <div class="card" data-grp="settings" id="sec-park">
@@ -1118,6 +1191,65 @@ const I18N = { fr: {
   "Cooling turn":"Tour de refroidissement","Switching modes":"Changement de mode",
   "Nobody needs heat or cool":"Aucun besoin de chauffage ou de refroidissement",
   "Starting…":"Démarrage…",
+  // Room sensor (#142)
+  "Room sensor":"Capteur de pièce",
+  "What is a room sensor?":"Qu’est-ce qu’un capteur de pièce ?",
+  "Room sensors":"Capteurs de pièce",
+  "Battery-powered sensors on the wall report the real room temperature, over Bluetooth (BTHome, e.g. Shelly BLU H&T) or Wi-Fi (Shelly H&T Gen3). With up to 4 sensors the head uses their average. The unit heats or cools to that reading instead of the air at the head, and Off at setpoint no longer needs fan air checks. If every sensor goes quiet the head goes back to its own sensor.":"Des capteurs à piles fixés au mur transmettent la vraie température de la pièce, par Bluetooth (BTHome, p. ex. Shelly BLU H&T) ou Wi-Fi (Shelly H&T Gen3). Avec jusqu’à 4 capteurs, l’unité utilise leur moyenne. L’unité chauffe ou refroidit selon cette mesure plutôt que selon l’air près de l’unité, et Arrêt à la consigne n’a plus besoin de ventilations de contrôle. Si tous les capteurs se taisent, l’unité revient à son propre capteur.",
+  "Use wireless sensors on the wall as this room's temperature.":"Utiliser des capteurs sans fil au mur comme température de cette pièce.",
+  "Room temperature":"Température de la pièce",
+  "average of {n} sensors":"moyenne de {n} capteurs",
+  "What kind of sensor?":"Quel type de capteur ?",
+  "Bluetooth (Shelly BLU H&T)":"Bluetooth (Shelly BLU H&T)",
+  "Wi-Fi (Shelly H&T Gen3)":"Wi-Fi (Shelly H&T Gen3)",
+  "Wake the sensor: open its back cover and press the button once.":"Réveillez le capteur : ouvrez son couvercle arrière et appuyez une fois sur le bouton.",
+  "Looking for sensors…":"Recherche de capteurs…",
+  "Or enter its IP address:":"Ou saisissez son adresse IP :",
+  "Pair":"Jumeler",
+  "Pairing…":"Jumelage…",
+  "Added {name}":"{name} ajouté",
+  "This head already has 4 sensors":"Cette unité a déjà 4 capteurs",
+  "Bluetooth":"Bluetooth",
+  "Using {n} wall sensors":"{n} capteurs muraux utilisés",
+  "(average)":"(moyenne)",
+  "Using a wall sensor":"Capteur mural utilisé",
+  "Wall sensors not heard":"Capteurs muraux muets",
+  "Using the head’s own sensor until they report again.":"L’unité utilise son propre capteur jusqu’à leur retour.",
+  "Room sensors settings":"Réglages des capteurs de pièce",
+  "Room temperature from wall sensors":"Température de la pièce par capteurs muraux",
+  "Name":"Nom",
+  "Wi-Fi":"Wi-Fi",
+  "Report every":"Signaler tous les",
+  "Waiting for the sensor to wake up — press its button to apply now.":"En attente du réveil du capteur — appuyez sur son bouton pour appliquer maintenant.",
+  "Sensor said":"Le capteur a répondu",
+  "Remove {name}? If no other sensor is left the head goes back to its own sensor.":"Retirer {name} ? S’il ne reste aucun autre capteur, l’unité reviendra à son propre capteur.",
+  "sensor not reachable (is it awake?)":"capteur injoignable (est-il réveillé ?)",
+  "this device has no temperature sensor":"cet appareil n’a pas de capteur de température",
+  "not a Shelly Gen2+ device":"ce n’est pas un appareil Shelly Gen2+",
+  "the sensor has a password; turn off authentication in the Shelly app":"le capteur a un mot de passe ; désactivez l’authentification dans l’application Shelly",
+  "Sensor":"Capteur",
+  "Temperature":"Température",
+  "Humidity":"Humidité",
+  "Last reading":"Dernière mesure",
+  "No sensor":"Aucun capteur",
+  "Press the button on the sensor":"Appuyez sur le bouton du capteur",
+  "Or pick it from the sensors heard nearby:":"Ou choisissez-le parmi les capteurs détectés à proximité :",
+  "Listening…":"Écoute…",
+  "Add sensor":"Ajouter un capteur",
+  "Remove":"Retirer",
+  "Use":"Utiliser",
+  "Encrypted":"Chiffré",
+  "just now":"à l’instant",
+  "{n} min ago":"il y a {n} min",
+  "Strong":"Fort",
+  "Good":"Bon",
+  "Weak":"Faible",
+  "Waiting for a reading":"En attente d’une mesure",
+  "No reading yet — the head is using its own sensor.":"Pas encore de mesure — l’unité utilise son propre capteur.",
+  "Not heard for {n} min — the head is using its own sensor.":"Muet depuis {n} min — l’unité utilise son propre capteur.",
+  "Not heard recently — using the other sensors.":"Muet récemment — les autres capteurs sont utilisés.",
+  "Bluetooth failed to start":"Échec du démarrage du Bluetooth",
+  "room sensor":"capteur de pièce",
   "Outdoor unit":"Unité extérieure",
   "Not paired":"Non jumelé",
   "(unnamed group)":"(groupe sans nom)",
@@ -1399,7 +1531,7 @@ function showTab(name){
   netTabActive=(name==='settings');
   statusTabActive=(name==='status');
   if(statusTabActive && authState.role==='admin'){ refreshActivity(true); }
-  if(netTabActive && authState.role==='admin'){ loadPark(); }
+  if(netTabActive && authState.role==='admin'){ loadPark(); loadSensor(); }
   mqEditing=false;   // switching tabs commits/abandons any in-progress MQTT edit
   if(netTabActive && authState.role==='admin'){ closeJoin(); }
   // Re-sync stored auth state when opening Settings so the pending-change gate
@@ -1515,6 +1647,8 @@ async function refresh(){
       if(confirmField('mode',c.mode)) climate.mode=c.mode||climate.mode;
       if(c.temperature!=null&&confirmField('temperature',c.temperature)) climate.temp=c.temperature;
       climate.room=(c.roomTemperature!=null&&c.roomTemperature>0)?c.roomTemperature:null;
+      climate.rs=c.roomSensor||null;
+      if(climate.rs&&climate.rs.state==='ok'&&climate.rs.temp!=null) climate.room=climate.rs.temp;
       climate.operating=!!c.operating;
       climate.direction=c.direction||null;
       climate.park=c.park||null;
@@ -1643,7 +1777,8 @@ function pkStatusText(st){
   if(st.held) return i18n('Waiting for its turn');
   if(st.state==='parked'){
     let t=i18n('Parked');
-    if(st.next_probe_s!=null) t+=' \u00b7 '+i18n('air check in')+' '+Math.max(1,Math.ceil(st.next_probe_s/60))+' min';
+    if(st.room_sensor) t+=' \u00b7 '+i18n('room sensor');
+    else if(st.next_probe_s!=null) t+=' \u00b7 '+i18n('air check in')+' '+Math.max(1,Math.ceil(st.next_probe_s/60))+' min';
     return t;
   }
   if(st.state==='probing') return i18n('Checking room');
@@ -1684,6 +1819,140 @@ async function savePark(){
     await loadPark(true);
     refresh();
   }catch(e){ msg.textContent=i18n('Save failed');msg.className='status err';msg.classList.remove('hidden'); }
+}
+
+// ── Room sensors (Settings, #142) ──────────────────────────────────────
+let rsTimer=null, rsChoosing=false, rsLast=null, rsPairState='idle';
+const RS_STEPS=[0.1,0.2,0.3,0.5,1.0];
+const rsAgo=s=>s==null?'--':s<60?i18n('just now'):i18n('{n} min ago',{n:Math.floor(s/60)});
+const rsSig=r=>r==null?'--':(r>=-65?i18n('Strong'):r>=-80?i18n('Good'):i18n('Weak'))+' ('+r+' dBm)';
+const rsEsc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const rsStep=c=>isF()?(c*1.8).toFixed(1)+' \u00b0F':c.toFixed(1)+' \u00b0C';
+const rsRow=(l,v)=>'<div class="row"><label>'+l+'</label><span class="v">'+v+'</span></div>';
+const rsOpen=new Set();
+function rsToggle(d){ d.open?rsOpen.add(d.dataset.id):rsOpen.delete(d.dataset.id); }
+function rsSensorHtml(x){
+  const id=rsEsc(x.id), kind=x.kind==='shelly'?i18n('Wi-Fi'):i18n('Bluetooth');
+  const temp=x.temp==null?'--':fmtTemp(x.temp)+' '+unitSym();
+  let h='<div class="rs-item"><details class="rs-d" data-id="'+id+'" ontoggle="rsToggle(this)"'+(rsOpen.has(x.id)?' open':'')+'>';
+  h+='<summary><span class="rs-nm">'+rsEsc(x.name||x.id)+'</span><span class="rs-t'+(x.fresh?'':' stale')+'">'+temp+'</span></summary><div class="rs-body">';
+  h+='<div class="row"><label>'+i18n('Name')+'</label><div style="display:flex;gap:6px;flex:1;max-width:240px">'
+    +'<input type="text" id="rsNm-'+id+'" value="'+rsEsc(x.name||'')+'" placeholder="'+id+'" maxlength="32" autocomplete="off" style="flex:1;min-width:0"'
+    +' onkeydown="if(event.key===\'Enter\')sensorRename(\''+id+'\')">'
+    +'<button class="btn sm" style="width:auto" onclick="sensorRename(\''+id+'\')">'+i18n('Save')+'</button></div></div>';
+  h+=rsRow(kind,rsEsc(x.kind==='shelly'?(x.host||x.id):x.id));
+  if(x.temp==null) h+=rsRow(i18n('Temperature'),i18n('Waiting for a reading'));
+  if(x.humidity!=null) h+=rsRow(i18n('Humidity'),Math.round(x.humidity)+' %');
+  if(x.battery!=null) h+=rsRow(i18n('Battery'),x.battery+' %');
+  h+=rsRow(i18n('Signal'),rsSig(x.rssi));
+  h+=rsRow(i18n('Last reading'),rsAgo(x.temp_age_s));
+  if(x.kind==='shelly'){
+    const opts=RS_STEPS.map(v=>'<option value="'+v+'"'+(Math.abs(v-x.report_step)<0.01?' selected':'')+'>'+rsStep(v)+'</option>').join('');
+    h+='<div class="row"><label>'+i18n('Report every')+'</label><select onchange="sensorStep(\''+id+'\',this.value)">'+opts+'</select></div>';
+    if(x.pending) h+='<div class="status info" style="margin:6px 0 14px">'+i18n('Waiting for the sensor to wake up \u2014 press its button to apply now.')+'</div>';
+    if(x.sync_error) h+='<div class="status err" style="margin:6px 0 14px">'+i18n('Sensor said')+': '+rsEsc(i18n(x.sync_error))+'</div>';
+  }
+  h+='<button class="btn sm" style="width:auto" onclick="sensorRemove(\''+id+'\')">'+i18n('Remove')+'</button></div></details>';
+  if(!x.fresh){
+    const m=x.temp_age_s==null?i18n('No reading yet \u2014 the head is using its own sensor.')
+      :i18n('Not heard for {n} min \u2014 the head is using its own sensor.',{n:Math.floor(x.temp_age_s/60)});
+    h+='<div class="status err" style="margin:6px 0">'+m+'</div>';
+  }
+  return h+'</div>';
+}
+function rsShowMsg(el,text,cls){ el.textContent=text; el.className='status '+cls; el.classList.remove('hidden'); }
+function renderSensor(d){
+  rsLast=d;
+  const list=d.sensors||[], ble=d.pairing.ble, wifi=d.pairing.wifi;
+  const full=list.length>=d.max, open=ble.open||wifi.open||wifi.state==='working';
+  if(open||full) rsChoosing=false;
+  $('rsRoom').classList.toggle('hidden',!list.length);
+  $('rsRoomV').textContent=d.temp==null?'--':fmtTemp(d.temp)+' '+unitSym()
+    +(d.n_fresh>1?' ('+i18n('average of {n} sensors',{n:d.n_fresh})+')':'');
+  // Don't rebuild under the user's fingers (name being typed, report-step select open).
+  const rl=$('rsList'), ae=document.activeElement;
+  if(!(rl.contains(ae)&&/^(INPUT|SELECT)$/.test(ae.tagName))) rl.innerHTML=list.map(rsSensorHtml).join('');
+  // Per-sensor stale warnings make "using its own sensor" wrong while others are fresh.
+  if(d.n_fresh>0) rl.querySelectorAll('.status.err').forEach(e=>{ if(!e.textContent.startsWith(i18n('Sensor said'))) e.textContent=i18n('Not heard recently \u2014 using the other sensors.'); });
+  $('rsNone').classList.toggle('hidden',list.length>0||open||rsChoosing);
+  $('rsChoose').classList.toggle('hidden',!rsChoosing);
+  $('rsPair').classList.toggle('hidden',!ble.open);
+  $('rsWifi').classList.toggle('hidden',!(wifi.open||wifi.state==='working'));
+  $('rsAdd').classList.toggle('hidden',open||rsChoosing||full);
+  $('rsCancel').classList.toggle('hidden',!(open||rsChoosing));
+  if(ble.open){
+    $('rsPairMsg').textContent=i18n('Press the button on the sensor')+' ('+ble.remaining_s+' s)';
+    const nb=ble.nearby||[];
+    $('rsNearby').innerHTML=nb.length?nb.map(n=>{
+      const label=rsEsc(n.name||n.addr)+(n.name?' <span style="color:var(--fg-3)">'+rsEsc(n.addr)+'</span>':'');
+      const right=n.encrypted?'<span>'+i18n('Encrypted')+'</span>'
+        :'<button class="btn sm" onclick="sensorSelect(\''+rsEsc(n.addr)+'\')">'+i18n('Use')+'</button>';
+      const tmp=n.temp==null?'':' \u00b7 '+fmtTemp(n.temp)+' '+unitSym();
+      return '<div class="row"><label>'+label+'<br><span style="color:var(--fg-3)">'+rsSig(n.rssi)+tmp+'</span></label>'+right+'</div>';
+    }).join(''):i18n('Listening…');
+  }
+  if(wifi.open||wifi.state==='working'){
+    const f=wifi.found||[];
+    $('rsFound').innerHTML=f.length?f.map(n=>'<div class="row"><label>'+rsEsc(n.name)+'<br><span style="color:var(--fg-3)">'+rsEsc(n.ip)+'</span></label>'
+      +'<button class="btn sm" onclick="sensorPairWifi(\''+rsEsc(n.ip)+'\')">'+i18n('Pair')+'</button></div>').join('')
+      :i18n('Looking for sensors…')+(wifi.open?' ('+wifi.remaining_s+' s)':'');
+    $('rsHostBtn').disabled=wifi.state==='working';
+    const wm=$('rsWifiMsg');
+    if(wifi.state==='working') rsShowMsg(wm,i18n('Pairing…'),'info');
+    else if(wifi.state==='error') rsShowMsg(wm,wifi.message==='full'?i18n('This head already has 4 sensors'):i18n(wifi.message),'err');
+    else wm.classList.add('hidden');
+  }
+  if(rsPairState==='working'&&wifi.state==='ok') rsShowMsg($('rsMsg'),i18n('Added {name}',{name:wifi.message}),'ok');
+  rsPairState=wifi.state;
+  if(d.ble&&d.ble.error) rsShowMsg($('rsMsg'),i18n('Bluetooth failed to start')+': '+d.ble.error,'err');
+  // Poll fast while pairing, then settle back.
+  clearTimeout(rsTimer);
+  if(open&&netTabActive) rsTimer=setTimeout(loadSensor,1000);
+}
+async function loadSensor(){
+  try{
+    const r=await fetch('/api/sensors');
+    if(!r.ok) return;
+    const d=await r.json();
+    const before=rsLast?rsLast.sensors.length:null;
+    renderSensor(d);
+    if(before!=null&&d.sensors.length!==before) refresh();
+  }catch(e){}
+}
+async function postSensor(body){
+  const msg=$('rsMsg');
+  try{
+    const r=await fetch('/api/sensors',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    if(r.status===401||r.status===403){ loadAuth(); return; }
+    if(!r.ok){ rsShowMsg(msg,i18n((await r.text())||'Save failed'),'err'); return; }
+    msg.classList.add('hidden');
+    const before=rsLast?rsLast.sensors.length:null;
+    const d=await r.json();
+    renderSensor(d);
+    if(before!=null&&d.sensors.length!==before) refresh();
+  }catch(e){ rsShowMsg(msg,i18n('Save failed'),'err'); }
+}
+function sensorChoose(on){ rsChoosing=on; $('rsMsg').classList.add('hidden'); if(rsLast) renderSensor(rsLast); }
+function sensorAction(a){ rsChoosing=false; return postSensor({action:a}); }
+function sensorCancel(){ rsChoosing=false; return postSensor({action:'cancel'}); }
+function sensorSelect(addr){ return postSensor({action:'select',addr}); }
+function sensorPairWifi(host){ if(host) return postSensor({action:'pair_wifi',host}); }
+function sensorStep(id,v){ document.activeElement&&document.activeElement.blur(); return postSensor({action:'set',id,report_step:Number(v)}); }
+function sensorRename(id){
+  const el=$('rsNm-'+id); if(!el) return;
+  const name=el.value.trim(); el.blur();
+  return postSensor({action:'set',id,name});
+}
+function toggleInfo(btn){
+  const pop=$(btn.getAttribute('aria-controls'));
+  if(!pop) return;
+  const open=pop.classList.toggle('hidden')===false;
+  btn.setAttribute('aria-expanded',open?'true':'false');
+}
+function sensorRemove(id){
+  const x=rsLast&&rsLast.sensors.find(s=>s.id===id);
+  if(!confirm(i18n('Remove {name}? If no other sensor is left the head goes back to its own sensor.',{name:x?(x.name||x.id):id}))) return;
+  return postSensor({action:'remove',id});
 }
 
 const WV_STATUS={supported:'Powered (detected)',unsupported:'Manual louver (no motor)',
@@ -1747,6 +2016,7 @@ function renderClimate(){
   $('setTemp').textContent=climate.temp!=null?fmtTemp(t):'--';
   $('setUnit').textContent=unitSym();
   $('roomTemp').textContent=fmtTemp(climate.room);
+  rsIconRender();
   const color=climate.power?(MODE_COLOR[climate.mode]||'#9aa4ad'):getComputedStyle(document.documentElement).getPropertyValue('--dial-fill').trim();
   $('dialFill').setAttribute('d',arc(T_MIN,t));
   $('dialFill').style.stroke=color;
@@ -1852,6 +2122,44 @@ function commitTempDebounced(c){
 }
 
 // Drag / tap on the dial to set the temperature.
+// Room-sensor icon next to the dial's room temperature (#142).
+const RS_ICON=w=>'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"'+(w===true?'':' class="'+w+'"')+'>'
+  +'<path d="M8 14.5V5a2 2 0 0 1 4 0v9.5a4 4 0 1 1-4 0z"/><circle cx="10" cy="17.5" r="1.3" fill="currentColor"/>'
+  +'<path d="M16 7.5a4 4 0 0 1 0 6"/><path d="M19 5a7.5 7.5 0 0 1 0 11"/>'
+  +(/warn/.test(w)?'<line x1="3" y1="3" x2="21" y2="21"/>':'')+'</svg>';
+let rsIcState='';
+function rsIconRender(){
+  const rs=climate.rs, st=rs?rs.state:'', ic=$('rsIc');
+  if(st!==rsIcState){
+    rsIcState=st;
+    ic.innerHTML=st?RS_ICON(st==='stale'?'warn':true):'';
+    ic.classList.toggle('warn',st==='stale');
+  }
+  ic.classList.toggle('hidden',!st);
+  if(!st) rsPopClose();
+  else if(!$('rsPop').classList.contains('hidden')) rsPopFill();
+}
+function rsPopFill(){
+  const rs=climate.rs; if(!rs) return;
+  const ss=rs.sensors||[], esc=s=>String(s).replace(/[&<>"']/g,c=>'&#'+c.charCodeAt(0)+';');
+  const t=v=>fmtTemp(v)+' '+unitSym();
+  let h;
+  if(rs.state==='ok') h='<b>'+(rs.n_fresh>1?i18n('Using {n} wall sensors',{n:rs.n_fresh})+'</b> '+i18n('(average)'):i18n('Using a wall sensor')+'</b>');
+  else h='<b>'+i18n('Wall sensors not heard')+'</b><div style="margin-top:4px">'+i18n('Using the head\u2019s own sensor until they report again.')+'</div>';
+  ss.forEach(s=>{ h+='<div class="r"><span>'+esc(s.name)+'</span><span>'+(s.fresh&&s.temp!=null?t(s.temp):rsAgo(s.age_s))+'</span></div>'; });
+  h+='<a onclick="rsPopClose();showTab(\'settings\');setTimeout(()=>jumpTo(\'sec-sensor\'),50)">'+i18n('Room sensors settings')+' \u203a</a>';
+  $('rsPop').innerHTML=h;
+}
+function rsPopToggle(ev){
+  ev.stopPropagation();
+  const p=$('rsPop'), open=p.classList.contains('hidden');
+  if(open) rsPopFill();
+  p.classList.toggle('hidden',!open);
+  $('rsIc').setAttribute('aria-expanded',open?'true':'false');
+}
+function rsPopClose(){ $('rsPop').classList.add('hidden'); $('rsIc').setAttribute('aria-expanded','false'); }
+document.addEventListener('pointerdown',e=>{ if(!e.target.closest('#rsPop,#rsIc')) rsPopClose(); });
+document.addEventListener('keydown',e=>{ if(e.key==='Escape') rsPopClose(); });
 let dialDragging=false;
 function dialTemp(ev){
   const r=$('dialSvg').getBoundingClientRect();
@@ -2511,7 +2819,8 @@ function memberRow(o){
   let stats='';
   const parts=[];
   if(o.mode) parts.push('<span class="gmstat"><b>'+gEsc(modeCap(o.mode))+'</b></span>');
-  if(o.room!=null) parts.push('<span class="gmstat">Current <b>'+fmtTemp(o.room)+unitSym()+'</b></span>');
+  if(o.room!=null) parts.push('<span class="gmstat">Current <b>'+fmtTemp(o.room)+unitSym()+'</b>'
+    +(o.rs?'<span title="'+gEsc(i18n(o.rs==='ok'?'Room temperature from wall sensors':'Wall sensors not heard'))+'">'+RS_ICON(o.rs==='ok'?'gm-rs':'gm-rs warn')+'</span>':'')+'</span>');
   if(o.target!=null) parts.push('<span class="gmstat">Target <b>'+fmtTemp(o.target)+unitSym()+'</b></span>');
   if(o.slice==='run') parts.push('<span class="gmstat"><b>'+gEsc(i18n('Its turn'))+'</b></span>');
   else if(o.slice==='hold') parts.push('<span class="gmstat"><b>'+gEsc(i18n('Waiting'))+'</b></span>');
@@ -2575,7 +2884,7 @@ function renderGroupPanel(g){
   const rows=[ memberRow({
       name:self.name||self.uid, dotcls:'selfdot', tag:'This device',
       isLock:lockMatch(self.name,self.uid), uid:self.uid, isPeer:false,
-      mode:self.mode, room:self.roomTemp, target:self.targetTemp, url:null, slice:slOf(self.uid) }) ];
+      mode:self.mode, room:self.roomTemp, target:self.targetTemp, rs:self.rs, url:null, slice:slOf(self.uid) }) ];
   (g.members||[]).forEach(m=>{
     const known=(m.state==='known');
     // An unreachable peer (no fresh signed poll within ~45s) comes back as
@@ -2585,7 +2894,7 @@ function renderGroupPanel(g){
     rows.push(memberRow({
       name:m.name||m.uid, dotcls:known?'known':'unknown', tag:tag,
       isLock:lockMatch(m.name,m.uid), uid:m.uid, isPeer:true,
-      mode:known?m.mode:null, room:known?m.roomTemp:null, target:known?m.targetTemp:null,
+      mode:known?m.mode:null, room:known?m.roomTemp:null, target:known?m.targetTemp:null, rs:known?m.rs:null,
       url:m.ip?('http://'+m.ip+'/'):null, slice:known?slOf(m.uid):null }));
   });
   $('gMembers').innerHTML=rows.join('');
@@ -2680,7 +2989,7 @@ function houseRow(h,isSelf){
   const mode=known&&h.mode?((h.power==='OFF')?'OFF':h.mode):null;
   return memberRow({ name:h.name||h.uid, dotcls:isSelf?'selfdot':(known?'known':'unknown'),
     tag:tag, isLock:false, uid:null, isPeer:false, mode:mode,
-    room:known&&h.roomTemp!=null?h.roomTemp:null, target:known&&h.targetTemp!=null?h.targetTemp:null,
+    room:known&&h.roomTemp!=null?h.roomTemp:null, target:known&&h.targetTemp!=null?h.targetTemp:null, rs:known?h.rs:null,
     url:(!isSelf&&h.ip)?('http://'+h.ip+'/'):null });
 }
 function renderHouse(d){
@@ -3430,7 +3739,7 @@ async function pollOnce(){
   if(tickN%6===0){ await refreshUpdate(); await loadMqtt(); }
   if(tickN%2===0) await refreshGroup();
   if(statusTabActive && tickN%2===0) await refreshActivity(false);
-  if(netTabActive && tickN%2===0) await loadPark();
+  if(netTabActive && tickN%2===0){ await loadPark(); await loadSensor(); }
   tickN++;
 }
 function schedule(ms){ clearTimeout(pollTimer); pollTimer=setTimeout(tick,ms); }

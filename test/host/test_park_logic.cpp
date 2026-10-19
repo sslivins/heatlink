@@ -499,6 +499,67 @@ static void test_disable_while_held_resumes() {
     CHECK(m.configure(off, now + 5) == Action::PowerOn);
 }
 
+static Inputs ext(Inputs in) {
+    in.room_external = true;
+    return in;
+}
+
+// #142: a fresh room sensor replaces air checks while parked.
+static void test_room_sensor_skips_probes() {
+    uint32_t now;
+    Machine m = running_heat(now);
+    uint32_t parked = park_it(m, now);
+    CHECK(m.parked());
+    CHECK(m.tick(ext(heat(21.0f, 21.0f, false)), parked + 1) == Action::None);
+    CHECK(m.next_probe_s(parked + 1) == -1);
+    // Well past the probe interval: still parked, no probe.
+    Hit h = run(m, ext(heat(21.0f, 21.0f, false)), parked + 2, parked + 3 * 900);
+    CHECK(h.a == Action::None);
+    CHECK(m.parked());
+    // Sensor drifts past the delta: resumes.
+    h = run(m, ext(heat(20.5f, 21.0f, false)), parked + 3 * 900, parked + 3 * 900 + 5);
+    CHECK(h.a == Action::PowerOn);
+    CHECK(m.state() == State::Running);
+}
+
+static void test_room_sensor_lost_probes_at_once() {
+    uint32_t now;
+    Machine m = running_heat(now);
+    uint32_t parked = park_it(m, now);
+    run(m, ext(heat(21.0f, 21.0f, false)), parked + 1, parked + 2000);
+    CHECK(m.parked());
+    // Sensor went stale: the overdue air check runs immediately.
+    CHECK(m.tick(heat(21.0f, 21.0f, false), parked + 2000) == Action::PowerOn);
+    CHECK(m.state() == State::Probing);
+}
+
+static void test_room_sensor_setpoint_change() {
+    uint32_t now;
+    Machine m = running_heat(now);
+    uint32_t parked = park_it(m, now);
+    m.tick(ext(heat(21.0f, 21.0f, false)), parked + 1);
+    // Raised within the delta while the room is still at the old target: the
+    // sensor says not satisfied, so it resumes without a probe or min off.
+    CHECK(m.notify_intent_change(parked + 2) == Action::None);
+    CHECK(m.state() == State::Parked);
+    CHECK(m.tick(ext(heat(21.0f, 21.5f, false)), parked + 3) == Action::PowerOn);
+    CHECK(m.state() == State::Running);
+
+    // Lowered while parked: already satisfied, stays parked.
+    Machine m2 = running_heat(now);
+    parked = park_it(m2, now);
+    m2.tick(ext(heat(21.0f, 21.0f, false)), parked + 1);
+    CHECK(m2.notify_intent_change(parked + 2) == Action::None);
+    CHECK(m2.tick(ext(heat(21.0f, 20.0f, false)), parked + 3) == Action::None);
+    CHECK(m2.parked());
+    // Without a sensor the old behaviour (probe) is unchanged.
+    Machine m3 = running_heat(now);
+    parked = park_it(m3, now);
+    m3.tick(heat(21.0f, 21.0f, false), parked + 1);
+    CHECK(m3.notify_intent_change(parked + 2) == Action::PowerOn);
+    CHECK(m3.state() == State::Probing);
+}
+
 int main() {
     test_sanitize();
     test_disabled_is_passthrough();
@@ -529,6 +590,9 @@ int main() {
     test_turn_on_while_held_stays_off();
     test_hold_applied_on_first_tick();
     test_disable_while_held_resumes();
+    test_room_sensor_skips_probes();
+    test_room_sensor_lost_probes_at_once();
+    test_room_sensor_setpoint_change();
     if (g_failures) {
         std::printf("%d park_logic test(s) FAILED\n", g_failures);
         return 1;

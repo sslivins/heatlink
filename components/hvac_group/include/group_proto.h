@@ -144,6 +144,7 @@ struct MemberObs {
     float       target_temp = -1000.f;      ///< active setpoint, °C.
     std::string mode_str;                   ///< friendly mode ("COOL"/"OFF"/…).
     std::string ip;                         ///< resolved IPv4, for the zone link.
+    std::string room_sensor;                ///< "" none / "ok" / "stale" (wall sensors).
 };
 
 /// Overall group status for the computed view.
