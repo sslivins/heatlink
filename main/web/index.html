@@ -128,6 +128,23 @@ background:#fff;border-radius:50%;transition:.2s}
 .adv>summary::-webkit-details-marker{display:none}
 .adv>summary::before{content:"\25B8";color:var(--fg-3);font-size:1.15em;line-height:1;display:inline-block;width:1em;text-align:center;transition:transform .15s}
 .adv[open]>summary::before{transform:rotate(90deg)}
+.info-btn{flex:0 0 auto;width:28px;height:28px;margin-left:4px;padding:4px;border:none;border-radius:50%;
+  background:none;color:var(--fg-3);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;
+  -webkit-tap-highlight-color:transparent}
+.info-btn svg{width:18px;height:18px}
+.info-btn:hover,.info-btn[aria-expanded="true"]{color:var(--blue);background:var(--chip)}
+.info-pop{font-size:.82em;font-weight:400;color:var(--fg-2);background:var(--chip);border:1px solid var(--border);
+  border-radius:8px;padding:8px 10px;margin:6px 0 10px}
+.rs-item{border-top:1px solid var(--border);padding-top:10px;margin-top:10px}
+.rs-d>summary{cursor:pointer;list-style:none;user-select:none;display:flex;align-items:center;gap:8px;padding:2px 0}
+.rs-d>summary::-webkit-details-marker{display:none}
+.rs-d>summary::before{content:"\25B8";color:var(--fg-3);font-size:1.15em;line-height:1;width:1em;text-align:center;transition:transform .15s}
+.rs-d[open]>summary::before{transform:rotate(90deg)}
+.rs-d>summary .rs-nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}
+.rs-d>summary .rs-t{font-weight:600}
+.rs-d>summary .rs-t.stale{color:var(--fg-3)}
+.rs-body{padding:10px 0 2px 1.5em}
+.rs-body .row:last-child{margin-bottom:14px}
 .btn-danger{background:var(--chip);color:var(--red);border:1px solid var(--border-strong);margin-top:8px}
 .btn-danger:hover{background:var(--hover)}
 .logout-ico{position:fixed;top:calc(12px + env(safe-area-inset-top,0px));right:calc(12px + env(safe-area-inset-right,0px));z-index:60;width:38px;height:38px;
@@ -792,8 +809,7 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
 
   <!-- Wireless room sensors (#142): BTHome over Bluetooth, Shelly over Wi-Fi. -->
   <div class="card" data-grp="settings" id="sec-sensor">
-    <h2 style="display:flex;align-items:center">Room sensors<button type="button" class="info-btn" aria-label="What is a room sensor?" aria-expanded="false" aria-controls="rsInfo"
-            title="Battery-powered sensors on the wall report the real room temperature, over Bluetooth (BTHome, e.g. Shelly BLU H&amp;T) or Wi-Fi (Shelly H&amp;T Gen3). With up to 4 sensors the head uses their average. The unit heats or cools to that reading instead of the air at the head, and Off at setpoint no longer needs fan air checks. If every sensor goes quiet the head goes back to its own sensor." onclick="toggleInfo(this)">i</button></h2>
+    <h2 style="display:flex;align-items:center">Room sensors<button type="button" class="info-btn" aria-label="What is a room sensor?" aria-expanded="false" aria-controls="rsInfo" onclick="toggleInfo(this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="11" x2="12" y2="17"/><circle cx="12" cy="7.5" r=".6" fill="currentColor"/></svg></button></h2>
     <div class="sub" style="margin:-4px 0 8px">Use wireless sensors on the wall as this room's temperature.</div>
     <div id="rsInfo" class="info-pop hidden">Battery-powered sensors on the wall report the real room temperature, over Bluetooth (BTHome, e.g. Shelly BLU H&amp;T) or Wi-Fi (Shelly H&amp;T Gen3). With up to 4 sensors the head uses their average. The unit heats or cools to that reading instead of the air at the head, and Off at setpoint no longer needs fan air checks. If every sensor goes quiet the head goes back to its own sensor.</div>
     <div id="rsRoom" class="row hidden"><label>Room temperature</label><span class="v" id="rsRoomV">--</span></div>
@@ -822,7 +838,7 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
       <div id="rsWifiMsg" class="status hidden" style="margin:8px 0"></div>
     </div>
     <div id="rsMsg" class="status hidden" style="margin:10px 0"></div>
-    <div style="display:flex;gap:8px;flex-wrap:wrap">
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:16px">
       <button class="btn" id="rsAdd" onclick="sensorChoose(true)">Add sensor</button>
       <button class="btn hidden" id="rsCancel" onclick="sensorCancel()">Cancel</button>
     </div>
@@ -1177,6 +1193,7 @@ const I18N = { fr: {
   "Added {name}":"{name} ajouté",
   "This head already has 4 sensors":"Cette unité a déjà 4 capteurs",
   "Bluetooth":"Bluetooth",
+  "Name":"Nom",
   "Wi-Fi":"Wi-Fi",
   "Report every":"Signaler tous les",
   "Waiting for the sensor to wake up — press its button to apply now.":"En attente du réveil du capteur — appuyez sur son bouton pour appliquer maintenant.",
@@ -1786,23 +1803,30 @@ const rsSig=r=>r==null?'--':(r>=-65?i18n('Strong'):r>=-80?i18n('Good'):i18n('Wea
 const rsEsc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const rsStep=c=>isF()?(c*1.8).toFixed(1)+' \u00b0F':c.toFixed(1)+' \u00b0C';
 const rsRow=(l,v)=>'<div class="row"><label>'+l+'</label><span class="v">'+v+'</span></div>';
+const rsOpen=new Set();
+function rsToggle(d){ d.open?rsOpen.add(d.dataset.id):rsOpen.delete(d.dataset.id); }
 function rsSensorHtml(x){
-  const kind=x.kind==='shelly'?i18n('Wi-Fi'):i18n('Bluetooth');
-  const sub=x.kind==='shelly'?(x.host||x.id):(x.name?x.id:'');
-  let h='<div class="rs-item" style="border-top:1px solid var(--line,#8883);padding-top:8px;margin-top:8px">';
-  h+='<div class="row"><label><b>'+rsEsc(x.name||x.id)+'</b><br><span style="color:var(--fg-3)">'+kind+(sub?' \u00b7 '+rsEsc(sub):'')+'</span></label>'
-    +'<button class="btn sm" onclick="sensorRemove(\''+rsEsc(x.id)+'\')">'+i18n('Remove')+'</button></div>';
-  h+=rsRow(i18n('Temperature'),x.temp==null?i18n('Waiting for a reading'):fmtTemp(x.temp)+' '+unitSym());
+  const id=rsEsc(x.id), kind=x.kind==='shelly'?i18n('Wi-Fi'):i18n('Bluetooth');
+  const temp=x.temp==null?'--':fmtTemp(x.temp)+' '+unitSym();
+  let h='<div class="rs-item"><details class="rs-d" data-id="'+id+'" ontoggle="rsToggle(this)"'+(rsOpen.has(x.id)?' open':'')+'>';
+  h+='<summary><span class="rs-nm">'+rsEsc(x.name||x.id)+'</span><span class="rs-t'+(x.fresh?'':' stale')+'">'+temp+'</span></summary><div class="rs-body">';
+  h+='<div class="row"><label>'+i18n('Name')+'</label><div style="display:flex;gap:6px;flex:1;max-width:240px">'
+    +'<input type="text" id="rsNm-'+id+'" value="'+rsEsc(x.name||'')+'" placeholder="'+id+'" maxlength="32" autocomplete="off" style="flex:1;min-width:0"'
+    +' onkeydown="if(event.key===\'Enter\')sensorRename(\''+id+'\')">'
+    +'<button class="btn sm" style="width:auto" onclick="sensorRename(\''+id+'\')">'+i18n('Save')+'</button></div></div>';
+  h+=rsRow(kind,rsEsc(x.kind==='shelly'?(x.host||x.id):x.id));
+  if(x.temp==null) h+=rsRow(i18n('Temperature'),i18n('Waiting for a reading'));
   if(x.humidity!=null) h+=rsRow(i18n('Humidity'),Math.round(x.humidity)+' %');
   if(x.battery!=null) h+=rsRow(i18n('Battery'),x.battery+' %');
   h+=rsRow(i18n('Signal'),rsSig(x.rssi));
   h+=rsRow(i18n('Last reading'),rsAgo(x.temp_age_s));
   if(x.kind==='shelly'){
     const opts=RS_STEPS.map(v=>'<option value="'+v+'"'+(Math.abs(v-x.report_step)<0.01?' selected':'')+'>'+rsStep(v)+'</option>').join('');
-    h+='<div class="row"><label>'+i18n('Report every')+'</label><select onchange="sensorStep(\''+rsEsc(x.id)+'\',this.value)">'+opts+'</select></div>';
-    if(x.pending) h+='<div class="status info" style="margin:6px 0">'+i18n('Waiting for the sensor to wake up \u2014 press its button to apply now.')+'</div>';
-    if(x.sync_error) h+='<div class="status err" style="margin:6px 0">'+i18n('Sensor said')+': '+rsEsc(i18n(x.sync_error))+'</div>';
+    h+='<div class="row"><label>'+i18n('Report every')+'</label><select onchange="sensorStep(\''+id+'\',this.value)">'+opts+'</select></div>';
+    if(x.pending) h+='<div class="status info" style="margin:6px 0 14px">'+i18n('Waiting for the sensor to wake up \u2014 press its button to apply now.')+'</div>';
+    if(x.sync_error) h+='<div class="status err" style="margin:6px 0 14px">'+i18n('Sensor said')+': '+rsEsc(i18n(x.sync_error))+'</div>';
   }
+  h+='<button class="btn sm" style="width:auto" onclick="sensorRemove(\''+id+'\')">'+i18n('Remove')+'</button></div></details>';
   if(!x.fresh){
     const m=x.temp_age_s==null?i18n('No reading yet \u2014 the head is using its own sensor.')
       :i18n('Not heard for {n} min \u2014 the head is using its own sensor.',{n:Math.floor(x.temp_age_s/60)});
@@ -1819,9 +1843,9 @@ function renderSensor(d){
   $('rsRoom').classList.toggle('hidden',!list.length);
   $('rsRoomV').textContent=d.temp==null?'--':fmtTemp(d.temp)+' '+unitSym()
     +(d.n_fresh>1?' ('+i18n('average of {n} sensors',{n:d.n_fresh})+')':'');
-  // Don't rebuild under the user's fingers (an open report-step select).
-  const rl=$('rsList');
-  if(!rl.contains(document.activeElement)) rl.innerHTML=list.map(rsSensorHtml).join('');
+  // Don't rebuild under the user's fingers (name being typed, report-step select open).
+  const rl=$('rsList'), ae=document.activeElement;
+  if(!(rl.contains(ae)&&/^(INPUT|SELECT)$/.test(ae.tagName))) rl.innerHTML=list.map(rsSensorHtml).join('');
   // Per-sensor stale warnings make "using its own sensor" wrong while others are fresh.
   if(d.n_fresh>0) rl.querySelectorAll('.status.err').forEach(e=>{ if(!e.textContent.startsWith(i18n('Sensor said'))) e.textContent=i18n('Not heard recently \u2014 using the other sensors.'); });
   $('rsNone').classList.toggle('hidden',list.length>0||open||rsChoosing);
@@ -1888,6 +1912,17 @@ function sensorCancel(){ rsChoosing=false; return postSensor({action:'cancel'});
 function sensorSelect(addr){ return postSensor({action:'select',addr}); }
 function sensorPairWifi(host){ if(host) return postSensor({action:'pair_wifi',host}); }
 function sensorStep(id,v){ document.activeElement&&document.activeElement.blur(); return postSensor({action:'set',id,report_step:Number(v)}); }
+function sensorRename(id){
+  const el=$('rsNm-'+id); if(!el) return;
+  const name=el.value.trim(); el.blur();
+  return postSensor({action:'set',id,name});
+}
+function toggleInfo(btn){
+  const pop=$(btn.getAttribute('aria-controls'));
+  if(!pop) return;
+  const open=pop.classList.toggle('hidden')===false;
+  btn.setAttribute('aria-expanded',open?'true':'false');
+}
 function sensorRemove(id){
   const x=rsLast&&rsLast.sensors.find(s=>s.id===id);
   if(!confirm(i18n('Remove {name}? If no other sensor is left the head goes back to its own sensor.',{name:x?(x.name||x.id):id}))) return;
