@@ -1033,6 +1033,11 @@ paths:
     post:
       tags: [Groups]
       summary: Owner-initiated coordinated whole-group mode switch
+      description: |
+        Switches this head to `target_mode` and fans the op out to every peer.
+        `off_conflicting` turns off peers on the opposite direction (allowed
+        for the climate-only `user` role); `flip` switches them to
+        `target_mode` (admin only, 403 otherwise).
       security:
         - SessionCookie: []
       requestBody:
@@ -1053,6 +1058,8 @@ paths:
               schema: { $ref: '#/components/schemas/GroupResolveResult' }
         '400':
           description: Empty, oversized or invalid body, or bad target_mode
+        '403':
+          description: Not an admin and strategy is not `off_conflicting`
         '409':
           description: Time-slicing is enabled
   /api/group/label:

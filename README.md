@@ -232,8 +232,9 @@ Limitations:
 ## Tandem: heating and cooling on one outdoor unit
 
 All heads on one outdoor unit share its direction: it can heat or cool, not
-both. Normally a zone group resolves a mixed request by switching every zone to
-one mode. With **Settings → Tandem** enabled (admin, needs every head online and
+both. Normally, picking Heat or Cool while another zone runs the opposite
+direction asks for confirmation, names those zones, and turns them **off**
+(their modes are left alone) so this head gets the unit. With **Settings → Tandem** enabled (admin, needs every head online and
 on firmware that supports it), the group instead takes turns heating and cooling
 (time-slicing):
 
@@ -448,7 +449,7 @@ access**). Optional per-endpoint API-key auth can be enabled there.
 | `GET`  | `/api/group/discover` | heads to offer for joining (as `/api/house`; also open during setup with the claim token) |
 | `GET`/`POST` | `/api/group/join/params` · `/join/claim` | head-to-head join exchange (password proof, sealed reply) |
 | `POST` | `/api/group/leave` · `/label` · `/member/remove` | leave · relabel · remove a member |
-| `POST` | `/api/group/sync` · `/resolve` | signed peer sync · coordinator HEAT/COOL resolve (409 while time-slicing) |
+| `POST` | `/api/group/sync` · `/resolve` | signed peer sync · coordinator HEAT/COOL resolve (`off_conflicting` for climate-only users, `flip` admin only; 409 while time-slicing) |
 | `POST` | `/api/group/slice` | admin: time-slicing settings (`enabled`, `min_slice_s`, `max_slice_s`, `settle_s`) |
 
 ### House view (all outdoor units)
