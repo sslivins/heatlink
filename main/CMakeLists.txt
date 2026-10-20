@@ -20,6 +20,7 @@ idf_component_register(
          "auth_manager.cpp"
          "diag.cpp"
          "events.cpp"
+         "devlog.cpp"
          "capability.cpp"
          "status_led.cpp"
          "factory_reset.cpp"

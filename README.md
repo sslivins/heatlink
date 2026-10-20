@@ -223,7 +223,6 @@ a **Parked** binary sensor. Park/resume transitions are written to the activity
 log; routine air checks aren't.
 
 Limitations:
-- The unit **beeps** each time it is powered off or on.
 - Pressing **OFF on the IR remote while a head is parked** can't be detected
   (the unit is already off), so the next air check turns it back on. Use the
   web UI or HA to turn a parked head off. Pressing ON on the remote while parked

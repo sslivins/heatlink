@@ -11,6 +11,7 @@
 #include "group_config.h"
 #include "group_proto.h"
 #include "status_led.h"
+#include "devlog.h"
 #include "events.h"
 #include "history_ctl.h"
 #include "capability.h"
@@ -3085,6 +3086,29 @@ esp_err_t handle_events_get(httpd_req_t* req) {
     return ESP_OK;
 }
 
+// ── GET /api/logs (admin) ──────────────────────────────────────────────
+// Recent ESP_LOG output as plain text, oldest first, for diagnosing sporadic
+// problems. Survives software/panic/brownout restarts; no UI.
+esp_err_t handle_logs_get(httpd_req_t* req) {
+    set_cors(req);
+    REQUIRE_ADMIN(req);
+    std::string body = devlog::snapshot();
+    httpd_resp_set_type(req, "text/plain; charset=utf-8");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    httpd_resp_send(req, body.data(), body.size());
+    return ESP_OK;
+}
+
+// ── DELETE /api/logs (admin) ───────────────────────────────────────────
+esp_err_t handle_logs_clear(httpd_req_t* req) {
+    set_cors(req);
+    REQUIRE_ADMIN(req);
+    devlog::clear();
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"ok\":true}");
+    return ESP_OK;
+}
+
 // ── DELETE /api/events (admin) ─────────────────────────────────────────
 esp_err_t handle_events_clear(httpd_req_t* req) {
     set_cors(req);
@@ -3493,6 +3517,8 @@ esp_err_t init(const Hooks& hooks) {
         {"/api/auth",                HTTP_POST,     handle_auth_post,      nullptr},
         {"/api/events",              HTTP_GET,      handle_events_get,     nullptr},
         {"/api/events",              HTTP_DELETE,   handle_events_clear,   nullptr},
+        {"/api/logs",                HTTP_GET,      handle_logs_get,       nullptr},
+        {"/api/logs",                HTTP_DELETE,   handle_logs_clear,     nullptr},
         {"/api/history",             HTTP_GET,      handle_history_get,    nullptr},
         {"/api/*",                   HTTP_OPTIONS, handle_options,        nullptr},
     };

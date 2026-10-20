@@ -681,6 +681,38 @@ paths:
                 type: object
                 properties:
                   ok: { type: boolean, example: true }
+  /api/logs:
+    get:
+      tags: [Activity]
+      summary: Recent firmware log output (admin only, diagnostics)
+      description: |
+        The last ~16 KB of ESP_LOG output, oldest first. Lines are prefixed
+        with the UTC time (`MM-DD HH:MM:SSZ`) once SNTP has synced. The buffer
+        survives software, panic, watchdog and brownout restarts, each marked
+        with a `=== restart (reason) ===` line; a power-on reset clears it.
+        Not shown in the web UI.
+      security:
+        - SessionCookie: []
+      responses:
+        '200':
+          description: Log text
+          content:
+            text/plain:
+              schema: { type: string }
+    delete:
+      tags: [Activity]
+      summary: Clear the firmware log buffer
+      security:
+        - SessionCookie: []
+      responses:
+        '200':
+          description: Cleared
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean, example: true }
   /api/history:
     get:
       tags: [Activity]

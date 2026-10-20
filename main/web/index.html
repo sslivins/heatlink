@@ -919,7 +919,7 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
     <h2>Off at setpoint</h2>
     <div class="sub" style="margin:-4px 0 8px">Turns the head off once the room
       reaches its target so the fan stops, and back on when the room drifts
-      past it. Heat, cool and dry only. The unit beeps each time it switches.</div>
+      past it. Heat, cool and dry only.</div>
     <div class="row">
       <label>Enabled</label>
       <div class="toggle"><input type="checkbox" id="pkEn" onchange="pkChanged()"><span class="slider" onclick="document.getElementById('pkEn').click()"></span></div>
@@ -941,6 +941,7 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
     <div class="sub" style="margin:0 0 8px">With the fan stopped the head only
       senses the air around itself. A short, quiet fan run moves room air past the
       sensor for a true reading.</div>
+    <div id="pkRsNote" class="sub hidden" style="margin:0 0 8px;color:var(--blue)">This head has wall sensors, so it only runs air checks if they all stop reporting.</div>
     <div class="row">
       <label for="pkInt">Check every</label>
       <select id="pkInt" onchange="pkChanged()"></select>
@@ -1330,7 +1331,8 @@ const I18N = { fr: {
   // Off at setpoint
   "Off at setpoint":"Arrêt à la consigne","Enabled":"Activé",
   "Turn back on when off by":"Rallumer après un écart de","Minimum off time":"Durée d’arrêt minimale",
-  "Periodic air check":"Vérification périodique de l’air","Check every":"Vérifier toutes les",
+  "Periodic air check":"Vérification périodique de l’air",
+  "This head has wall sensors, so it only runs air checks if they all stop reporting.":"Cette unité a des capteurs muraux : elle ne fait de vérification de l’air que s’ils cessent tous d’émettre.","Check every":"Vérifier toutes les",
   "Run the fan for":"Faire tourner le ventilateur pendant","Disabled":"Désactivé",
   "Parked":"En veille","Checking room":"Vérification de la pièce","Running":"En marche",
   "air check in":"vérification dans",
@@ -1412,7 +1414,7 @@ const I18N = { fr: {
   "Shared by every head on this outdoor unit (except the turn-back-on threshold).":"Partagé par toutes les têtes de cette unité extérieure (sauf le seuil de remise en marche).",
 "Kept on while the zone group runs in Tandem.":"Maintenu actif pendant que le groupe est en mode Tandem.",
   "Every room must be online and up to date first.":"Toutes les pièces doivent d’abord être en ligne et à jour.","Saved":"Enregistré","Save failed":"Échec de l’enregistrement",
-  "Turns the head off once the room reaches its target so the fan stops, and back on when the room drifts past it. Heat, cool and dry only. The unit beeps each time it switches.":"Éteint l’unité dès que la pièce atteint la consigne pour arrêter le ventilateur, puis la rallume quand la température s’en écarte. Chauffage, refroidissement et déshumidification uniquement. L’unité émet un bip à chaque changement.",
+  "Turns the head off once the room reaches its target so the fan stops, and back on when the room drifts past it. Heat, cool and dry only.":"Éteint l’unité dès que la pièce atteint la consigne pour arrêter le ventilateur, puis la rallume quand la température s’en écarte. Chauffage, refroidissement et déshumidification uniquement.",
   "With the fan stopped the head only senses the air around itself. A short, quiet fan run moves room air past the sensor for a true reading.":"Ventilateur arrêté, l’unité ne mesure que l’air qui l’entoure. Une courte ventilation silencieuse fait passer l’air de la pièce sur le capteur pour une mesure fiable.",
   // WiFi settings
   "Other networks":"Autres réseaux","Scan":"Rechercher","Rescan":"Relancer",
@@ -2166,6 +2168,12 @@ function pkForm(){
 function pkChanged(){
   pkDirty=JSON.stringify(pkForm())!==pkSaved;
   $('pkSave').disabled=!pkDirty;
+  pkRsSync();
+}
+// Wall sensors replace scheduled air checks; say so while air checks are on.
+function pkRsSync(){
+  const n=$('pkRsNote'), p=$('pkProbe'); if(!n||!p) return;
+  n.classList.toggle('hidden',!(climate.rs&&climate.rs.state&&p.checked));
 }
 async function savePark(){
   const msg=$('pkMsg');
@@ -2493,6 +2501,7 @@ const RS_ICON=w=>'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" str
 let rsIcState='';
 function rsIconRender(){
   const rs=climate.rs, st=rs?rs.state:'', ic=$('rsIc');
+  pkRsSync();
   if(st!==rsIcState){
     rsIcState=st;
     ic.innerHTML=st?RS_ICON(st==='stale'?'warn':true):'';
