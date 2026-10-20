@@ -306,8 +306,9 @@ await testCase('saveTxPow success posts {tx_power} and applies echo', async () =
   ok(body && body.tx_power === 11, 'POST body carried {tx_power:11}');
   eq(String(t.el('txPow').value), '11', 'slider set to echoed value');
   eq(t.el('txPowVal').textContent, '11 dBm', 'slider label set to echoed value');
-  ok(t.el('txMsg').textContent.startsWith('Applied 11'), 'success message shown');
-  ok(t.el('txMsg').className.includes('ok'), 'success message styled ok');
+  ok(t.el('toastT').textContent.startsWith('Applied 11'), 'success toast shown');
+  ok(t.el('toast').className.includes('show'), 'success toast visible');
+  ok(t.el('txMsg').className.includes('hidden'), 'inline message hidden on success');
 });
 
 // 6) saveTxPow surfaces a non-2xx as a save failure.
