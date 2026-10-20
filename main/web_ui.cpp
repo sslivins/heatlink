@@ -18,11 +18,13 @@
 #include "factory_reset.h"
 #include "diag.h"
 
+#include <algorithm>
 #include <cstdlib>
 #include <cstring>
 #include <cctype>
 #include <strings.h>
 #include <map>
+#include <new>
 #include <string>
 #include <vector>
 
@@ -1392,6 +1394,21 @@ esp_err_t handle_group_state(httpd_req_t* req) {
             cJSON_AddItemToObject(root, "slice", js);
         }
     }
+    // Admin-password sync: the verifier record, sealed under a group subkey so
+    // it never crosses the LAN in the clear. Newer epoch wins on the poller.
+    {
+        uint8_t rec[AUTH_ADMIN_REC_LEN];
+        uint8_t k[32];
+        std::string sealed;
+        if (auth_mgr_admin_record(rec) && hvac_group::group_subkey("hl-adm1", k) &&
+            hvac_group::seal(k, std::string((const char*)rec, sizeof(rec)), sealed)) {
+            cJSON* ja = cJSON_CreateObject();
+            cJSON_AddNumberToObject(ja, "e", (double)auth_mgr_admin_epoch());
+            cJSON_AddStringToObject(ja, "s", sealed.c_str());
+            cJSON_AddItemToObject(root, "adm", ja);
+        }
+        memset(k, 0, sizeof(k));
+    }
     // Ride the replicated group state (label + names + membership CRDT) on the
     // snapshot so the poller can anti-entropy-merge it (Phase 6 gossip).
     std::string rep = hvac_group::replica_json();
@@ -1435,10 +1452,63 @@ esp_err_t poll_evt(esp_http_client_event_t* evt) {
     } else if (evt->event_id == HTTP_EVENT_ON_DATA && evt->data && evt->data_len > 0) {
         // Body carries the peer snapshot + replicated group-state CRDT, so allow
         // headroom beyond the tiny status fields for the membership/name payload.
-        if (c->body.size() < 4096)
+        if (c->body.size() < 6144)
             c->body.append(static_cast<const char*>(evt->data), evt->data_len);
     }
     return ESP_OK;
+}
+
+// Admin-password gossip. auth_manager isn't thread-safe, so the poll task only
+// decrypts the peer's record here and hands it to the httpd thread to compare
+// and adopt.
+struct AdminAdopt {
+    uint8_t     rec[AUTH_ADMIN_REC_LEN];
+    uint32_t    epoch;
+    std::string from;
+};
+
+void adopt_admin_work(void* arg) {
+    auto* a = static_cast<AdminAdopt*>(arg);
+    uint8_t mine[AUTH_ADMIN_REC_LEN];
+    std::string mine_hex;
+    if (auth_mgr_admin_record(mine)) mine_hex = hvac_group::to_hex(mine, sizeof(mine));
+    const std::string peer_hex = hvac_group::to_hex(a->rec, sizeof(a->rec));
+    if (hvac_group::should_adopt_admin(auth_mgr_admin_epoch(), mine_hex, a->epoch, peer_hex) &&
+        auth_mgr_adopt_admin(a->rec, a->epoch)) {
+        std::string who = hvac_group::member_display_name(a->from);
+        events::log(events::Cat::System, events::Actor::Group,
+                    "Admin password synced from the group", who.empty() ? a->from : who);
+    }
+    memset(a->rec, 0, sizeof(a->rec));
+    delete a;
+}
+
+void note_peer_admin(const std::string& uid, const cJSON* ja) {
+    if (!ja || !cJSON_IsObject(ja) || !s_server) return;
+    const cJSON* je = cJSON_GetObjectItem(ja, "e");
+    const cJSON* js = cJSON_GetObjectItem(ja, "s");
+    if (!cJSON_IsNumber(je) || je->valuedouble < 0 || je->valuedouble > 4294967295.0 ||
+        !cJSON_IsString(js))
+        return;
+    const uint32_t epoch = (uint32_t)je->valuedouble;
+    // Cheap pre-filter (racy read is fine; the httpd side re-checks).
+    if (epoch < auth_mgr_admin_epoch()) return;
+    uint8_t k[32];
+    std::string plain;
+    const bool ok = hvac_group::group_subkey("hl-adm1", k) &&
+                    hvac_group::open_sealed(k, js->valuestring, plain);
+    memset(k, 0, sizeof(k));
+    if (!ok || plain.size() != AUTH_ADMIN_REC_LEN) return;
+    auto* a = new (std::nothrow) AdminAdopt;
+    if (!a) return;
+    memcpy(a->rec, plain.data(), AUTH_ADMIN_REC_LEN);
+    std::fill(plain.begin(), plain.end(), '\0');
+    a->epoch = epoch;
+    a->from  = uid;
+    if (httpd_queue_work(s_server, adopt_admin_work, a) != ESP_OK) {
+        memset(a->rec, 0, sizeof(a->rec));
+        delete a;
+    }
 }
 
 bool poll_peer(const std::string& uid, hvac_group::MemberObs& out, bool& incompatible) {
@@ -1566,6 +1636,7 @@ bool poll_peer(const std::string& uid, hvac_group::MemberObs& out, bool& incompa
                         char* rs = cJSON_PrintUnformatted(jrep);
                         if (rs) { hvac_group::merge_remote_json(rs); cJSON_free(rs); }
                     }
+                    note_peer_admin(uid, cJSON_GetObjectItem(j, "adm"));
                     ok = true;
                 }
                 cJSON_Delete(j);
@@ -2055,107 +2126,105 @@ static esp_err_t send_json_error(httpd_req_t* req, const char* status,
     return httpd_resp_sendstr(req, out);
 }
 
-// ── POST /api/group/pair/start ─ owner opens a pairing window (admin) ───
-esp_err_t handle_group_pair_start(httpd_req_t* req) {
-    set_cors(req);
-    REQUIRE_ADMIN(req);
-    // Optional {label} names a freshly-formed group.
-    std::string label;
-    if (req->content_len > 0) {
-        char* body = recv_body(req);
-        if (body) {
-            cJSON* json = cJSON_Parse(body);
-            free(body);
-            if (json) {
-                const cJSON* jl = cJSON_GetObjectItem(json, "label");
-                if (jl && cJSON_IsString(jl)) label = jl->valuestring;
-                cJSON_Delete(json);
-            }
+// ── Joining a group with the admin password ─────────────────────────────
+// A head joins a group by proving it knows the group's admin password, without
+// ever sending it. The target publishes its verifier parameters plus a one-time
+// nonce; the joiner derives the verifier hash K from the typed password and
+// sends an HMAC(K) proof. The reply (group secret, replica, broker and the admin
+// verifier record) is sealed with a key derived from K, so only a head that
+// knows the password can read it.
+
+constexpr int     kJoinNonceSlots = 4;
+constexpr int64_t kJoinNonceTtlUs = 60LL * 1000000;
+constexpr size_t  kJoinReplyMax   = 16384;
+
+struct JoinNonce {
+    std::string nonce;
+    int64_t     exp_us = 0;
+};
+JoinNonce s_join_nonces[kJoinNonceSlots];  // httpd handlers are single-threaded
+
+void refresh_house_advert();  // defined below
+
+bool is_hex_len(const std::string& s, size_t len) {
+    if (s.size() != len) return false;
+    for (char c : s)
+        if (!isxdigit((unsigned char)c)) return false;
+    return true;
+}
+
+void join_nonce_put(const std::string& n) {
+    int slot = 0;
+    for (int i = 1; i < kJoinNonceSlots; ++i)
+        if (s_join_nonces[i].exp_us < s_join_nonces[slot].exp_us) slot = i;
+    s_join_nonces[slot].nonce  = n;
+    s_join_nonces[slot].exp_us = esp_timer_get_time() + kJoinNonceTtlUs;
+}
+
+// One-shot: true (and the slot is cleared) if @p n was issued and is unexpired.
+bool join_nonce_take(const std::string& n) {
+    const int64_t now = esp_timer_get_time();
+    for (auto& e : s_join_nonces) {
+        if (!e.nonce.empty() && e.nonce == n) {
+            const bool live = e.exp_us > now;
+            e.nonce.clear();
+            e.exp_us = 0;
+            return live;
         }
     }
+    return false;
+}
 
-    std::string code;
-    if (hvac_group::pairing_start(label, code) != ESP_OK) {
-        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "could not start pairing");
+std::string hmac_key_hex(const uint8_t key[32], const std::string& msg) {
+    uint8_t mac[32];
+    if (!hvac_group::hmac_sha256(key, 32, msg, mac)) return "";
+    return hvac_group::to_hex(mac, sizeof(mac));
+}
+
+bool ct_equal(const std::string& a, const std::string& b) {
+    if (a.size() != b.size()) return false;
+    uint8_t d = 0;
+    for (size_t i = 0; i < a.size(); ++i) d |= (uint8_t)(a[i] ^ b[i]);
+    return d == 0;
+}
+
+// ── GET /api/group/join/params ─ verifier parameters + nonce (NO auth) ──
+esp_err_t handle_group_join_params(httpd_req_t* req) {
+    set_cors(req);
+    int ver = 0;
+    uint32_t iters = 0;
+    uint8_t salt[AUTH_SALT_LEN];
+    uint8_t key[32];
+    if (!auth_mgr_admin_verifier(&ver, salt, &iters, key))
+        return send_json_error(req, "409 Conflict", "no_admin_password");
+    memset(key, 0, sizeof(key));
+    std::string nonce = hvac_group::generate_group_id();
+    if (nonce.empty()) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "rng failed");
         return ESP_FAIL;
     }
-    hvac_group::GroupConfig g = hvac_group::get();
-
-    // Advertise pair=1 (+ group label + our display name) over mDNS so an
-    // ungrouped head can discover this window without typing an address. Cleared
-    // on stop / successful claim / expiry / lockout.
-    wifi::set_pairing_advert(true, g.group_label, wifi::device_display_name());
-
+    join_nonce_put(nonce);
     cJSON* root = cJSON_CreateObject();
-    cJSON_AddStringToObject(root, "code", code.c_str());
-    cJSON_AddNumberToObject(root, "seconds_left", hvac_group::kPairingTtlSeconds);
-    cJSON_AddNumberToObject(root, "attempts_left", hvac_group::kPairingMaxAttempts);
-    cJSON_AddStringToObject(root, "group_id", g.group_id.c_str());
-    cJSON_AddStringToObject(root, "group_label", g.group_label.c_str());
+    cJSON_AddNumberToObject(root, "ver", ver);
+    cJSON_AddNumberToObject(root, "iters", (double)iters);
+    cJSON_AddStringToObject(root, "salt", hvac_group::to_hex(salt, sizeof(salt)).c_str());
+    cJSON_AddStringToObject(root, "nonce", nonce.c_str());
+    cJSON_AddStringToObject(root, "uid", hvac_group::self_uid().c_str());
+    cJSON_AddStringToObject(root, "name", wifi::device_display_name().c_str());
+    if (hvac_group::in_group())
+        cJSON_AddStringToObject(root, "glabel", hvac_group::get().group_label.c_str());
     char* str = cJSON_PrintUnformatted(root);
-    httpd_resp_set_type(req, "application/json");
-    httpd_resp_sendstr(req, str);
-    cJSON_free(str);
     cJSON_Delete(root);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, str ? str : "{}");
+    cJSON_free(str);
     return ESP_OK;
 }
 
-// ── POST /api/group/pair/stop ─ owner cancels the window (admin) ────────
-esp_err_t handle_group_pair_stop(httpd_req_t* req) {
-    set_cors(req);
-    REQUIRE_ADMIN(req);
-    hvac_group::pairing_stop();
-    wifi::set_pairing_advert(false);
-    httpd_resp_set_type(req, "application/json");
-    return httpd_resp_sendstr(req, "{\"status\":\"stopped\"}");
-}
-
-// ── GET /api/group/pair/status ─ owner polls the window (admin) ─────────
-esp_err_t handle_group_pair_status(httpd_req_t* req) {
-    set_cors(req);
-    REQUIRE_ADMIN(req);
-    hvac_group::PairingStatus st = hvac_group::pairing_status();
-    // Lazily clear the mDNS pair=1 advert once the window is no longer active
-    // (covers expiry, which pairing_status() reaps). Idempotent + cheap.
-    if (!st.active) wifi::set_pairing_advert(false);
-    cJSON* root = cJSON_CreateObject();
-    cJSON_AddBoolToObject(root, "active", st.active);
-    cJSON_AddNumberToObject(root, "seconds_left", st.seconds_left);
-    cJSON_AddNumberToObject(root, "attempts_left", st.attempts_left);
-    char* str = cJSON_PrintUnformatted(root);
-    httpd_resp_set_type(req, "application/json");
-    httpd_resp_sendstr(req, str);
-    cJSON_free(str);
-    cJSON_Delete(root);
-    return ESP_OK;
-}
-
-// ── GET /api/group/pair/discover ─ browse LAN for pairing heads (admin) ─
-// Returns the heads currently advertising pair=1 so the UI can present a
-// tap-to-select list. The code is then sent to the ONE selected host via
-// pair/join — never fanned out to all responders.
-esp_err_t handle_group_pair_discover(httpd_req_t* req) {
-    set_cors(req);
-    REQUIRE_ADMIN(req);
-    std::string list;
-    esp_err_t err = wifi::discover_pairing(list);
-    if (err != ESP_OK || list.empty()) list = "[]";
-    cJSON* root = cJSON_CreateObject();
-    cJSON* cand = cJSON_Parse(list.c_str());
-    cJSON_AddItemToObject(root, "candidates", cand ? cand : cJSON_CreateArray());
-    char* str = cJSON_PrintUnformatted(root);
-    httpd_resp_set_type(req, "application/json");
-    httpd_resp_sendstr(req, str);
-    cJSON_free(str);
-    cJSON_Delete(root);
-    return ESP_OK;
-}
-
-// ── POST /api/group/pair/claim ─ joiner presents the code (NO auth) ─────
-// The 6-digit code IS the authenticator here, so this endpoint intentionally
-// bypasses the session gate (like /api/login). A correct claim returns the
-// group secret, so constant-time checking + lockout live in pairing_claim().
-esp_err_t handle_group_pair_claim(httpd_req_t* req) {
+// ── POST /api/group/join/claim ─ joiner proves the password (NO auth) ───
+// The HMAC proof IS the authenticator (like /api/login), so this bypasses the
+// session gate and counts failures toward the login throttle.
+esp_err_t handle_group_join_claim(httpd_req_t* req) {
     set_cors(req);
     char* body = recv_body(req);
     if (!body) {
@@ -2168,33 +2237,57 @@ esp_err_t handle_group_pair_claim(httpd_req_t* req) {
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid JSON");
         return ESP_FAIL;
     }
-    const cJSON* juid  = cJSON_GetObjectItem(json, "joiner_uid");
-    const cJSON* jcode = cJSON_GetObjectItem(json, "code");
-    const cJSON* jname = cJSON_GetObjectItem(json, "joiner_name");
-    std::string joiner = (juid && cJSON_IsString(juid)) ? juid->valuestring : "";
-    std::string code   = (jcode && cJSON_IsString(jcode)) ? jcode->valuestring : "";
-    std::string jn     = (jname && cJSON_IsString(jname)) ? jname->valuestring : "";
-    if (jn.size() > 48) jn.resize(48);  // bound the self-reported name
+    auto str_of = [&](const char* k) {
+        const cJSON* v = cJSON_GetObjectItem(json, k);
+        return (v && cJSON_IsString(v)) ? std::string(v->valuestring) : std::string();
+    };
+    std::string joiner = str_of("joiner_uid");
+    std::string jn     = str_of("joiner_name");
+    std::string nonce  = str_of("nonce");
+    std::string cnonce = str_of("cnonce");
+    std::string proof  = str_of("proof");
     cJSON_Delete(json);
+    if (jn.size() > 48) jn.resize(48);  // bound the self-reported name
+    if (!hvac_group::is_valid_uid(joiner) || !is_hex_len(nonce, 32) ||
+        !is_hex_len(cnonce, 32) || !is_hex_len(proof, 64))
+        return send_json_error(req, "400 Bad Request", "bad request");
+    if (joiner == hvac_group::self_uid())
+        return send_json_error(req, "400 Bad Request", "cannot join self");
+    if (auth_mgr_login_lockout_secs() > 0)
+        return send_json_error(req, "429 Too Many Requests", "locked out");
+    if (!join_nonce_take(nonce))
+        return send_json_error(req, "410 Gone", "nonce expired");
 
-    hvac_group::ClaimOutcome oc = hvac_group::pairing_claim(code, joiner, jn);
-    switch (oc.decision) {
-        case hvac_group::ClaimDecision::NoActiveCode:
-            return send_json_error(req, "409 Conflict", "no active pairing");
-        case hvac_group::ClaimDecision::Expired:
-            wifi::set_pairing_advert(false);  // window dead — stop offering it
-            return send_json_error(req, "410 Gone", "code expired");
-        case hvac_group::ClaimDecision::LockedOut:
-            wifi::set_pairing_advert(false);  // window locked — stop offering it
-            return send_json_error(req, "429 Too Many Requests", "locked out");
-        case hvac_group::ClaimDecision::BadCode:
-            return send_json_error(req, "401 Unauthorized", "invalid code");
-        case hvac_group::ClaimDecision::Ok:
-            wifi::set_pairing_advert(false);  // a head joined — close the advert
-            events::log(events::Cat::Membership, events::Actor::System,
-                        "Zone joined the group",
-                        (!jn.empty() ? jn.c_str() : joiner.c_str()));
-            break;
+    int ver = 0;
+    uint32_t iters = 0;
+    uint8_t salt[AUTH_SALT_LEN];
+    uint8_t key[32];
+    if (!auth_mgr_admin_verifier(&ver, salt, &iters, key))
+        return send_json_error(req, "409 Conflict", "no_admin_password");
+    for (auto& c : proof) c = (char)tolower((unsigned char)c);
+    std::string expect = hmac_key_hex(key, "hl-join1|" + nonce + "|" + cnonce + "|" + joiner);
+    if (expect.empty() || !ct_equal(expect, proof)) {
+        memset(key, 0, sizeof(key));
+        auth_mgr_note_failed_login();
+        return send_json_error(req, "401 Unauthorized", "bad password");
+    }
+    auth_mgr_note_good_login();
+    uint8_t ek[32];
+    const bool ek_ok = hvac_group::hmac_sha256(key, 32, "hl-enc1|" + nonce + "|" + cnonce, ek);
+    memset(key, 0, sizeof(key));
+    uint8_t rec[AUTH_ADMIN_REC_LEN];
+    if (!ek_ok || !auth_mgr_admin_record(rec)) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "crypto failed");
+        return ESP_FAIL;
+    }
+
+    hvac_group::AdmitOutcome oc;
+    esp_err_t aerr = hvac_group::admit_joiner(joiner, jn, wifi::device_display_name(), oc);
+    if (aerr == ESP_ERR_INVALID_ARG)
+        return send_json_error(req, "400 Bad Request", "bad joiner");
+    if (aerr != ESP_OK) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "could not admit");
+        return ESP_FAIL;
     }
 
     cJSON* root = cJSON_CreateObject();
@@ -2205,18 +2298,13 @@ esp_err_t handle_group_pair_claim(httpd_req_t* req) {
     for (const auto& uid : oc.members)
         cJSON_AddItemToArray(members, cJSON_CreateString(uid.c_str()));
     cJSON_AddItemToObject(root, "members", members);
-    // Include the owner's replicated CRDT state so the joiner adopts exact
-    // versions/names/tombstones (immediate membership + label consistency).
     if (!oc.replica_json.empty()) {
         cJSON* rj = cJSON_Parse(oc.replica_json.c_str());
         if (rj) cJSON_AddItemToObject(root, "replica", rj);
     }
-    // Share the group's broker settings so a fresh joining head inherits the
-    // Home Assistant / MQTT config instead of re-typing it. Only sent when we
-    // are actually configured; the joiner adopts it only if it has none of its
-    // own. The 6-digit code already gated this exchange (same trust model as
-    // handing over group_secret above). friendly_name is intentionally omitted
-    // so each head keeps its own MQTT node name.
+    // Share the group's broker so a fresh head inherits Home Assistant / MQTT
+    // config; the joiner adopts it only if it has none. friendly_name is
+    // omitted so each head keeps its own MQTT node name.
     {
         hvac_mqtt::StoredSettings bs = hvac_mqtt::get_settings();
         if (!bs.host.empty()) {
@@ -2229,20 +2317,76 @@ esp_err_t handle_group_pair_claim(httpd_req_t* req) {
             cJSON_AddItemToObject(root, "broker", b);
         }
     }
-    char* str = cJSON_PrintUnformatted(root);
-    httpd_resp_set_type(req, "application/json");
-    httpd_resp_sendstr(req, str);
-    cJSON_free(str);
+    {
+        cJSON* adm = cJSON_CreateObject();
+        cJSON_AddNumberToObject(adm, "e", (double)auth_mgr_admin_epoch());
+        cJSON_AddStringToObject(adm, "r", hvac_group::to_hex(rec, sizeof(rec)).c_str());
+        cJSON_AddItemToObject(root, "adm", adm);
+    }
+    char* plain = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
-    return ESP_OK;
+    std::string sealed;
+    const bool sealed_ok = plain && hvac_group::seal(ek, plain, sealed);
+    if (plain) {
+        memset(plain, 0, strlen(plain));
+        cJSON_free(plain);
+    }
+    memset(ek, 0, sizeof(ek));
+    if (!sealed_ok) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "seal failed");
+        return ESP_FAIL;
+    }
+    events::log(events::Cat::Membership, events::Actor::System, "Zone joined the group",
+                jn.empty() ? joiner : jn, peer_ipv4(req));
+    refresh_house_advert();
+    std::string out = "{\"sealed\":\"" + sealed + "\"}";
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_sendstr(req, out.c_str());
 }
 
-// ── POST /api/group/pair/join ─ joiner reaches out to an owner (admin) ──
-// Body: {owner_host, code}. Performs an outbound POST to the owner's
-// /api/group/pair/claim, then adopts the returned group locally.
-esp_err_t handle_group_pair_join(httpd_req_t* req) {
+// Outbound request to another head (no redirects). Returns the HTTP status,
+// or 0 if the head couldn't be reached.
+int join_http(const std::string& url, const std::string* post, std::string& resp) {
+    esp_http_client_config_t cfg = {};
+    cfg.url = url.c_str();
+    cfg.method = post ? HTTP_METHOD_POST : HTTP_METHOD_GET;
+    cfg.timeout_ms = 8000;
+    cfg.disable_auto_redirect = true;  // never follow a redirect off the chosen host
+    cfg.max_redirection_count = 0;
+    esp_http_client_handle_t cli = esp_http_client_init(&cfg);
+    if (!cli) return 0;
+    const int wlen = post ? (int)post->size() : 0;
+    if (post) esp_http_client_set_header(cli, "Content-Type", "application/json");
+    int status = 0;
+    if (esp_http_client_open(cli, wlen) == ESP_OK) {
+        if (post) esp_http_client_write(cli, post->data(), wlen);
+        esp_http_client_fetch_headers(cli);
+        status = esp_http_client_get_status_code(cli);
+        char rbuf[512];
+        while (resp.size() < kJoinReplyMax) {
+            int r = esp_http_client_read(cli, rbuf, sizeof(rbuf));
+            if (r <= 0) break;
+            resp.append(rbuf, r);
+        }
+        esp_http_client_close(cli);
+    }
+    esp_http_client_cleanup(cli);
+    return status;
+}
+
+bool valid_join_host(const std::string& h) {
+    if (h.empty() || h.size() > 64) return false;
+    for (char c : h)
+        if (!isalnum((unsigned char)c) && c != '.' && c != '-' && c != ':') return false;
+    return true;
+}
+
+// ── POST /api/group/join ─ this head joins another head's group ────────
+// Body: {host, password, token?}. Admin, or not signed in during setup (claim
+// token) / the reset window. Proves the password to @c host, adopts the group
+// and its admin password, and signs the browser in as admin.
+esp_err_t handle_group_join(httpd_req_t* req) {
     set_cors(req);
-    REQUIRE_ADMIN(req);
     char* body = recv_body(req);
     if (!body) {
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Empty or oversized body");
@@ -2254,83 +2398,113 @@ esp_err_t handle_group_pair_join(httpd_req_t* req) {
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid JSON");
         return ESP_FAIL;
     }
-    const cJSON* jhost = cJSON_GetObjectItem(json, "owner_host");
-    const cJSON* jcode = cJSON_GetObjectItem(json, "code");
-    std::string host = (jhost && cJSON_IsString(jhost)) ? jhost->valuestring : "";
-    std::string code = (jcode && cJSON_IsString(jcode)) ? jcode->valuestring : "";
+    auto str_of = [&](const char* k) {
+        const cJSON* v = cJSON_GetObjectItem(json, k);
+        return (v && cJSON_IsString(v)) ? std::string(v->valuestring) : std::string();
+    };
+    std::string host  = str_of("host");
+    std::string pw    = str_of("password");
+    std::string token = str_of("token");
     cJSON_Delete(json);
-    if (host.empty() || code.empty()) {
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "owner_host and code required");
+    const bool was_admin = admin_authorized(req);
+    if (!was_admin && !auth_mgr_join_authorized(token.c_str())) {
+        send_unauthorized(req);
         return ESP_FAIL;
     }
+    if (hvac_group::in_group())
+        return send_json_error(req, "409 Conflict",
+                               "This head is already in a group. Leave it first.");
+    if (!valid_join_host(host) || pw.empty() || pw.size() > 64)
+        return send_json_error(req, "400 Bad Request", "Pick a head and enter the admin password.");
 
-    // Build the claim request body.
-    cJSON* reqbody = cJSON_CreateObject();
-    cJSON_AddStringToObject(reqbody, "joiner_uid", hvac_group::self_uid().c_str());
-    cJSON_AddStringToObject(reqbody, "code", code.c_str());
-    // Include our friendly name so the owner can show/seed it immediately
-    // instead of falling back to our short hardware id until gossip catches up.
-    cJSON_AddStringToObject(reqbody, "joiner_name", wifi::device_display_name().c_str());
-    char* reqstr = cJSON_PrintUnformatted(reqbody);
-    cJSON_Delete(reqbody);
-
-    std::string url = "http://" + host + "/api/group/pair/claim";
-    esp_http_client_config_t cfg = {};
-    cfg.url = url.c_str();
-    cfg.method = HTTP_METHOD_POST;
-    cfg.timeout_ms = 8000;
-    cfg.disable_auto_redirect = true;  // never follow a redirect off the chosen host
-    cfg.max_redirection_count = 0;
-    esp_http_client_handle_t cli = esp_http_client_init(&cfg);
-    if (!cli) {
-        cJSON_free(reqstr);
-        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "http init failed");
-        return ESP_FAIL;
-    }
-    esp_http_client_set_header(cli, "Content-Type", "application/json");
-    esp_http_client_set_post_field(cli, reqstr, strlen(reqstr));
-
-    esp_err_t oerr = esp_http_client_open(cli, strlen(reqstr));
-    if (oerr != ESP_OK) {
-        cJSON_free(reqstr);
-        esp_http_client_cleanup(cli);
+    // 1. Verifier parameters + nonce.
+    std::string presp;
+    int status = join_http("http://" + host + "/api/group/join/params", nullptr, presp);
+    if (status == 0)
         return send_json_error(req, "502 Bad Gateway",
-            "Couldn't reach the other head. Make sure it's still showing the code and try again.");
-    }
-    esp_http_client_write(cli, reqstr, strlen(reqstr));
-    cJSON_free(reqstr);
-    int clen = esp_http_client_fetch_headers(cli);
-    int status = esp_http_client_get_status_code(cli);
+                               "Couldn't reach that head. Check it's powered on and try again.");
+    if (status == 404)
+        return send_json_error(req, "400 Bad Request",
+                               "That head needs a firmware update before it can be joined.");
+    if (status == 409)
+        return send_json_error(req, "400 Bad Request",
+                               "That head has no admin password yet. Set one on it first.");
+    cJSON* pj = (status == 200) ? cJSON_Parse(presp.c_str()) : nullptr;
+    if (!pj) return send_json_error(req, "502 Bad Gateway", "That head sent a bad reply.");
+    const cJSON* jver = cJSON_GetObjectItem(pj, "ver");
+    const cJSON* jit  = cJSON_GetObjectItem(pj, "iters");
+    const cJSON* jslt = cJSON_GetObjectItem(pj, "salt");
+    const cJSON* jnon = cJSON_GetObjectItem(pj, "nonce");
+    int ver = cJSON_IsNumber(jver) ? jver->valueint : 0;
+    double itd = cJSON_IsNumber(jit) ? jit->valuedouble : -1;
+    std::string salt_hex = cJSON_IsString(jslt) ? jslt->valuestring : "";
+    std::string nonce    = cJSON_IsString(jnon) ? jnon->valuestring : "";
+    cJSON_Delete(pj);
+    std::vector<uint8_t> salt;
+    if (itd < 0 || itd > AUTH_MAX_ITERS || !is_hex_len(salt_hex, AUTH_SALT_LEN * 2) ||
+        !hvac_group::from_hex(salt_hex, salt) || !is_hex_len(nonce, 32))
+        return send_json_error(req, "502 Bad Gateway", "That head sent a bad reply.");
 
-    // Read the response body (bounded).
-    std::string resp;
-    char rbuf[256];
-    int cap = (clen > 0 && clen < 4096) ? clen : 4096;  // headroom for the replica CRDT
-    while ((int)resp.size() < cap) {
-        int r = esp_http_client_read(cli, rbuf, sizeof(rbuf));
-        if (r <= 0) break;
-        resp.append(rbuf, r);
+    // 2. Prove the password.
+    uint8_t key[32];
+    if (!auth_mgr_derive_key(pw.c_str(), ver, salt.data(), (uint32_t)itd, key))
+        return send_json_error(req, "400 Bad Request",
+                               "That head needs a firmware update before it can be joined.");
+    std::fill(pw.begin(), pw.end(), '\0');
+    const std::string self = hvac_group::self_uid();
+    std::string cnonce = hvac_group::generate_group_id();
+    std::string proof  = hmac_key_hex(key, "hl-join1|" + nonce + "|" + cnonce + "|" + self);
+    uint8_t ek[32];
+    const bool ek_ok = hvac_group::hmac_sha256(key, 32, "hl-enc1|" + nonce + "|" + cnonce, ek);
+    memset(key, 0, sizeof(key));
+    if (cnonce.empty() || proof.empty() || !ek_ok) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "crypto failed");
+        return ESP_FAIL;
     }
-    esp_http_client_close(cli);
-    esp_http_client_cleanup(cli);
-
+    std::string creq;
+    {
+        cJSON* c = cJSON_CreateObject();
+        cJSON_AddStringToObject(c, "joiner_uid", self.c_str());
+        cJSON_AddStringToObject(c, "joiner_name", wifi::device_display_name().c_str());
+        cJSON_AddStringToObject(c, "nonce", nonce.c_str());
+        cJSON_AddStringToObject(c, "cnonce", cnonce.c_str());
+        cJSON_AddStringToObject(c, "proof", proof.c_str());
+        char* cs = cJSON_PrintUnformatted(c);
+        cJSON_Delete(c);
+        if (cs) { creq = cs; cJSON_free(cs); }
+    }
+    std::string cresp;
+    status = join_http("http://" + host + "/api/group/join/claim", &creq, cresp);
     if (status != 200) {
+        memset(ek, 0, sizeof(ek));
         const char* msg;
         switch (status) {
-            case 401: msg = "Incorrect code. Please try again."; break;
-            case 410: msg = "That code expired. On the other head, tap Add a zone for a new code."; break;
-            case 429: msg = "Too many tries. The other head paused pairing; tap Add a zone on it again."; break;
-            case 409: msg = "The other head isn't inviting a new zone right now."; break;
-            default:  msg = "The other head didn't accept the request. Please try again."; break;
+            case 0:   msg = "Couldn't reach that head. Check it's powered on and try again."; break;
+            case 401: msg = "Incorrect admin password."; break;
+            case 429: msg = "Too many wrong passwords. Wait a few minutes and try again."; break;
+            case 410: msg = "That took too long. Please try again."; break;
+            case 409: msg = "That head has no admin password yet. Set one on it first."; break;
+            default:  msg = "That head didn't accept the request. Please try again."; break;
         }
         return send_json_error(req, "400 Bad Request", msg);
     }
 
-    cJSON* rj = cJSON_Parse(resp.c_str());
-    if (!rj) {
-        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "bad owner response");
-        return ESP_FAIL;
+    // 3. Open the sealed group bundle.
+    std::string plain;
+    {
+        cJSON* sj = cJSON_Parse(cresp.c_str());
+        const cJSON* js = sj ? cJSON_GetObjectItem(sj, "sealed") : nullptr;
+        const bool ok = js && cJSON_IsString(js) &&
+                        hvac_group::open_sealed(ek, js->valuestring, plain);
+        cJSON_Delete(sj);
+        memset(ek, 0, sizeof(ek));
+        if (!ok)
+            return send_json_error(req, "502 Bad Gateway",
+                                   "That head's reply couldn't be verified.");
     }
+    cJSON* rj = cJSON_Parse(plain.c_str());
+    std::fill(plain.begin(), plain.end(), '\0');
+    if (!rj) return send_json_error(req, "502 Bad Gateway", "That head sent a bad reply.");
     const cJSON* gid    = cJSON_GetObjectItem(rj, "group_id");
     const cJSON* glabel = cJSON_GetObjectItem(rj, "group_label");
     const cJSON* gsec   = cJSON_GetObjectItem(rj, "group_secret");
@@ -2339,25 +2513,34 @@ esp_err_t handle_group_pair_join(httpd_req_t* req) {
     if (gmem && cJSON_IsArray(gmem)) {
         cJSON* it = nullptr;
         cJSON_ArrayForEach(it, gmem) {
-            // Bound the adopted membership — a compromised/rogue owner must not
-            // be able to inflate our peer table. 4 heads share one compressor.
+            // Bound the adopted membership — 4 heads share one compressor.
             if (members.size() >= 8) break;
             if (cJSON_IsString(it)) members.push_back(it->valuestring);
         }
     }
-    std::string group_id = (gid && cJSON_IsString(gid)) ? gid->valuestring : "";
-    std::string label    = (glabel && cJSON_IsString(glabel)) ? glabel->valuestring : "";
-    std::string secret   = (gsec && cJSON_IsString(gsec)) ? gsec->valuestring : "";
-    // Adopt the owner's exact replicated state when supplied (immediate
-    // membership/label consistency); otherwise join_group synthesizes one.
+    std::string group_id = cJSON_IsString(gid) ? gid->valuestring : "";
+    std::string label    = cJSON_IsString(glabel) ? glabel->valuestring : "";
+    std::string secret   = cJSON_IsString(gsec) ? gsec->valuestring : "";
     std::string replica_json;
     if (const cJSON* jrep = cJSON_GetObjectItem(rj, "replica")) {
         char* rs = cJSON_PrintUnformatted(jrep);
         if (rs) { replica_json = rs; cJSON_free(rs); }
     }
-    // Inherit the group's broker settings when we don't have our own yet — a
-    // fresh head gets Home Assistant / MQTT config with zero re-typing. An
-    // already-configured head keeps its own broker (never clobbered).
+    // The group's admin password replaces ours.
+    std::vector<uint8_t> adm_rec;
+    uint32_t adm_epoch = 0;
+    if (const cJSON* ja = cJSON_GetObjectItem(rj, "adm")) {
+        const cJSON* je = cJSON_GetObjectItem(ja, "e");
+        const cJSON* jr = cJSON_GetObjectItem(ja, "r");
+        if (cJSON_IsNumber(je) && je->valuedouble >= 0 && je->valuedouble <= 4294967295.0 &&
+            cJSON_IsString(jr) && hvac_group::from_hex(jr->valuestring, adm_rec) &&
+            adm_rec.size() == AUTH_ADMIN_REC_LEN)
+            adm_epoch = (uint32_t)je->valuedouble;
+        else
+            adm_rec.clear();
+    }
+    // Inherit the group's broker when we don't have one yet; an already
+    // configured head keeps its own.
     bool inherit_broker = false;
     hvac_mqtt::StoredSettings inb;
     if (const cJSON* jb = cJSON_GetObjectItem(rj, "broker")) {
@@ -2376,20 +2559,31 @@ esp_err_t handle_group_pair_join(httpd_req_t* req) {
         }
     }
     cJSON_Delete(rj);
+    if (adm_rec.empty())
+        return send_json_error(req, "502 Bad Gateway", "That head sent a bad reply.");
 
     if (hvac_group::join_group(group_id, label, secret, members, replica_json) != ESP_OK) {
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "could not adopt group");
         return ESP_FAIL;
     }
-    // Record our own display name into the freshly-adopted replica so it propagates.
     hvac_group::note_self_name(wifi::device_display_name());
+    refresh_house_advert();
+    auth_mgr_adopt_admin(adm_rec.data(), adm_epoch);
+    // Adopting may have logged everyone out; sign this browser in as admin.
+    char session[AUTH_SESSION_TOKEN_LEN + 1];
+    if (auth_mgr_create_admin_session(session)) set_session_cookie(req, session);
 
-    // Persist any inherited broker now; MQTT picks it up on the reboot below
-    // (same apply-on-boot model as POST /api/mqtt).
     bool rebooting = false;
     if (inherit_broker && hvac_mqtt::save_settings(inb) == ESP_OK) rebooting = true;
 
     hvac_group::GroupConfig g = hvac_group::get();
+    {
+        std::string msg = g.group_label.empty()
+                              ? std::string("Joined the group")
+                              : std::string("Joined group \"") + g.group_label + "\"";
+        events::log(events::Cat::Membership, events::Actor::WebUI, msg,
+                    was_admin ? web_actor_name(req) : std::string("admin"), peer_ipv4(req));
+    }
     cJSON* root = cJSON_CreateObject();
     cJSON_AddStringToObject(root, "status", "joined");
     cJSON_AddStringToObject(root, "group_id", g.group_id.c_str());
@@ -2397,19 +2591,11 @@ esp_err_t handle_group_pair_join(httpd_req_t* req) {
     cJSON_AddNumberToObject(root, "member_count", static_cast<int>(g.peers.size()) + 1);
     cJSON_AddBoolToObject(root, "broker_inherited", rebooting);
     cJSON_AddBoolToObject(root, "rebooting", rebooting);
-    {
-        std::string who = web_actor_name(req);
-        std::string msg = g.group_label.empty()
-                              ? std::string("Joined the group")
-                              : std::string("Joined group \"") + g.group_label + "\"";
-        events::log(events::Cat::Membership, events::Actor::WebUI, msg.c_str(),
-                    who.c_str(), peer_ipv4(req));
-    }
     char* str = cJSON_PrintUnformatted(root);
-    httpd_resp_set_type(req, "application/json");
-    httpd_resp_sendstr(req, str);
-    cJSON_free(str);
     cJSON_Delete(root);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, str ? str : "{}");
+    cJSON_free(str);
     if (rebooting) {
         vTaskDelay(pdMS_TO_TICKS(800));
         esp_restart();
@@ -2421,7 +2607,6 @@ esp_err_t handle_group_pair_join(httpd_req_t* req) {
 esp_err_t handle_group_leave(httpd_req_t* req) {
     set_cors(req);
     REQUIRE_ADMIN(req);
-    hvac_group::pairing_stop();
     std::string who = web_actor_name(req);
     if (hvac_group::leave_group() != ESP_OK) {
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "NVS write failed");
@@ -3319,6 +3504,7 @@ cJSON* build_house_summary() {
         cJSON_AddNumberToObject(o, "roomTemp", display_room_temp(sta, &rs));
         if (*rs) cJSON_AddStringToObject(o, "rs", rs);
         cJSON_AddNumberToObject(o, "targetTemp", st.temperature);
+        cJSON_AddNumberToObject(o, "freq", sta.compressorFrequency);
     }
     return o;
 }
@@ -3415,7 +3601,8 @@ void house_task(void*) {
                 // The summary is fresher than the mDNS TXT; it wins where present.
                 static const char* keys[] = {"name", "ghash", "glabel", "pv", "version",
                                              "unit_connected", "power", "mode",
-                                             "operating", "roomTemp", "targetTemp", "rs"};
+                                             "operating", "roomTemp", "targetTemp", "rs",
+                                             "freq"};
                 for (const char* k : keys) copy_if(o, sj, k);
             }
             cJSON_Delete(sj);
@@ -3435,9 +3622,7 @@ void house_task(void*) {
 // ── GET /api/house — every head on the LAN, across outdoor units ────────
 // Returns the last completed scan immediately and kicks a background rescan
 // when it is stale; "scanning" tells the UI to poll again shortly.
-esp_err_t handle_house_get(httpd_req_t* req) {
-    set_cors(req);
-    REQUIRE_API_AUTH(req);
+esp_err_t send_house(httpd_req_t* req) {
     std::string heads;
     int64_t at = 0;
     bool scanning = false;
@@ -3469,6 +3654,29 @@ esp_err_t handle_house_get(httpd_req_t* req) {
     httpd_resp_sendstr(req, str ? str : "{}");
     cJSON_free(str);
     return ESP_OK;
+}
+
+esp_err_t handle_house_get(httpd_req_t* req) {
+    set_cors(req);
+    REQUIRE_API_AUTH(req);
+    return send_house(req);
+}
+
+// ── GET /api/group/discover?t= ─ heads to offer for joining ─────────────
+// Same scan as /api/house, but also allowed before sign-in during setup (claim
+// token in @c t) or the reset window, so a new head can list groups to join.
+esp_err_t handle_group_discover(httpd_req_t* req) {
+    set_cors(req);
+    if (!admin_authorized(req)) {
+        char q[128] = "", t[AUTH_CLAIM_TOKEN_LEN + 2] = "";
+        if (httpd_req_get_url_query_str(req, q, sizeof(q)) == ESP_OK)
+            httpd_query_key_value(q, "t", t, sizeof(t));
+        if (!auth_mgr_join_authorized(t)) {
+            send_unauthorized(req);
+            return ESP_FAIL;
+        }
+    }
+    return send_house(req);
 }
 
 }  // namespace
@@ -3530,12 +3738,10 @@ esp_err_t init(const Hooks& hooks) {
         {"/api/device",              HTTP_POST,     handle_device_post,    nullptr},
         {"/api/group",               HTTP_GET,      handle_group_get,      nullptr},
         {"/api/group/state",         HTTP_GET,      handle_group_state,    nullptr},
-        {"/api/group/pair/start",    HTTP_POST,     handle_group_pair_start,  nullptr},
-        {"/api/group/pair/stop",     HTTP_POST,     handle_group_pair_stop,   nullptr},
-        {"/api/group/pair/status",   HTTP_GET,      handle_group_pair_status, nullptr},
-        {"/api/group/pair/discover", HTTP_GET,      handle_group_pair_discover, nullptr},
-        {"/api/group/pair/claim",    HTTP_POST,     handle_group_pair_claim,  nullptr},
-        {"/api/group/pair/join",     HTTP_POST,     handle_group_pair_join,   nullptr},
+        {"/api/group/join/params",   HTTP_GET,      handle_group_join_params, nullptr},
+        {"/api/group/join/claim",    HTTP_POST,     handle_group_join_claim,  nullptr},
+        {"/api/group/join",          HTTP_POST,     handle_group_join,        nullptr},
+        {"/api/group/discover",      HTTP_GET,      handle_group_discover,    nullptr},
         {"/api/group/leave",         HTTP_POST,     handle_group_leave,       nullptr},
         {"/api/group/sync",          HTTP_POST,     handle_group_sync,        nullptr},
         {"/api/group/resolve",       HTTP_POST,     handle_group_resolve,     nullptr},

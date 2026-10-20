@@ -31,6 +31,11 @@ extern "C" {
 #define AUTH_CLAIM_TOKEN_LEN 32
 // How long the admin-password reset procedure leaves the head claimable
 #define AUTH_RECOVERY_WINDOW_SEC (15 * 60)
+// Admin verifier record (version, iterations, salt, hash) as shared in a group
+#define AUTH_ADMIN_REC_LEN 56
+#define AUTH_SALT_LEN 16
+// Upper bound on PBKDF2 iterations accepted from another head
+#define AUTH_MAX_ITERS 100000
 
 /// Access role attached to a web session. The "user" role is a shared,
 /// climate-only login; "admin" has full access. Roles only apply to web
@@ -126,6 +131,43 @@ void auth_mgr_recover(void);
 
 /// Seconds left in the recovery window (0 = closed).
 int auth_mgr_recovery_secs_left(void);
+
+// ── Group join + admin-password sync ───────────────────────────────────────
+// Heads on one outdoor unit share a single admin password. A head joins a group
+// by proving it knows the password (HMAC keyed by the verifier hash), and the
+// verifier record then gossips between members: a newer epoch wins.
+
+/// Count a failed password attempt toward the login throttle.
+void auth_mgr_note_failed_login(void);
+/// Reset the failed-attempt counter after a successful password proof.
+void auth_mgr_note_good_login(void);
+
+/// This head's admin verifier: version (1 = SHA-256, 2 = PBKDF2), salt,
+/// iterations and the 32-byte hash. False when no admin password is set.
+bool auth_mgr_admin_verifier(int* ver, uint8_t salt[AUTH_SALT_LEN], uint32_t* iters,
+                             uint8_t key[32]);
+
+/// Derive the verifier hash for @p password under another head's parameters.
+bool auth_mgr_derive_key(const char* password, int ver, const uint8_t salt[AUTH_SALT_LEN],
+                         uint32_t iters, uint8_t key[32]);
+
+/// Epoch of the admin password; bumps on every local change.
+uint32_t auth_mgr_admin_epoch(void);
+
+/// Raw admin verifier record. False when no admin password is set.
+bool auth_mgr_admin_record(uint8_t rec[AUTH_ADMIN_REC_LEN]);
+
+/// Replace the admin password with another head's verifier @p rec at
+/// @p epoch. Completes a pending claim. Returns true if the password changed
+/// (all sessions are then logged out).
+bool auth_mgr_adopt_admin(const uint8_t rec[AUTH_ADMIN_REC_LEN], uint32_t epoch);
+
+/// Whether a not-signed-in client may join a group: the recovery window is
+/// open, or the head is unclaimed and @p token is its claim token.
+bool auth_mgr_join_authorized(const char* token);
+
+/// Create an admin session (token buffer AUTH_SESSION_TOKEN_LEN+1).
+bool auth_mgr_create_admin_session(char* session_token);
 
 // ── API-key authentication ─────────────────────────────────────────────────
 

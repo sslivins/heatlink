@@ -19,9 +19,6 @@ namespace hvac_group {
 constexpr size_t kGroupIdHexLen  = 32;  // 16 bytes
 constexpr size_t kGroupSecretHexLen = 64;  // 32 bytes
 
-/// Number of decimal digits in a pairing code shown/entered during join.
-constexpr size_t kPairingCodeLen = 6;
-
 /// Wire protocol version, advertised in mDNS TXT + peer messages. Heads with an
 /// incompatible value are shown but excluded from automated resolution.
 constexpr int kProtocolVersion = 1;
@@ -40,9 +37,6 @@ bool is_valid_group_id(const std::string& id);
 
 /// A group_secret is exactly kGroupSecretHexLen lowercase hex characters.
 bool is_valid_group_secret(const std::string& secret);
-
-/// A pairing code is exactly kPairingCodeLen ASCII decimal digits.
-bool is_valid_pairing_code(const std::string& code);
 
 /// A device_uid is 1..32 characters from [a-z0-9] (the firmware derives it from
 /// the MAC as lowercase hex, but we accept any short alnum id defensively).
@@ -84,25 +78,17 @@ bool add_peer(std::vector<std::string>& uids, const std::string& uid,
 bool remove_peer(std::vector<std::string>& uids, const std::string& uid);
 
 /// Constant-time string equality — compares every byte so a timing side-channel
-/// can't reveal how many leading characters of a pairing code matched. Unequal
+/// can't reveal how many leading characters of a secret matched. Unequal
 /// lengths return false (but still scan @p a fully).
 bool ct_equal(const std::string& a, const std::string& b);
 
-/// Outcome of validating an inbound pairing claim against the owner's active
-/// code, factored out of the (time/RNG-bearing) session so it is host-testable.
-enum class ClaimDecision {
-    Ok,            ///< code matches an active, unexpired, non-locked session.
-    NoActiveCode,  ///< no pairing window is open.
-    Expired,       ///< the window's TTL elapsed.
-    LockedOut,     ///< too many wrong attempts; the code is burned.
-    BadCode,       ///< wrong code (caller decrements the attempt counter).
-};
-
-/// Decide a claim from the session's observable state. Order matters: a closed
-/// or expired window is reported before any code comparison, and lockout is
-/// checked before accepting a match so a burned code can never succeed.
-ClaimDecision evaluate_claim(bool active, bool expired, bool code_matches,
-                             int attempts_left);
+/// Admin-password sync across a group. Each head gossips its admin verifier
+/// record (hex; "" = no admin password) with an epoch that bumps on every local
+/// password change. Returns true when this head should adopt the peer's record:
+/// a newer epoch wins; on equal epochs a head without a password adopts, and two
+/// different passwords converge on the larger record so the group agrees.
+bool should_adopt_admin(uint32_t my_epoch, const std::string& my_rec,
+                        uint32_t peer_epoch, const std::string& peer_rec);
 
 // ── Conflict / lock model (Phase 2) ─────────────────────────────────────────
 //

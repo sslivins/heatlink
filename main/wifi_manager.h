@@ -117,18 +117,6 @@ esp_err_t scan_json(std::string& out);
 /// Erase stored credentials so the next boot re-enters provisioning.
 esp_err_t erase_credentials();
 
-/// While an "add a zone" pairing window is open, advertise pair=1 in the
-/// _mmhvac._tcp TXT (plus the human-readable group label and this head's display
-/// name) so an ungrouped head can discover the session without typing an address.
-/// Call with active=false to clear it — the change is announced over mDNS so
-/// browsers stop offering it promptly. The pairing code is never advertised.
-void set_pairing_advert(bool active, const std::string& glabel = "",
-                        const std::string& name = "");
-
-/// Browse the LAN for heads currently advertising pair=1 and return a JSON array
-/// string: [{"uid":..,"name":..,"glabel":..,"host":"<ip>"}], excluding self.
-esp_err_t discover_pairing(std::string& out_json);
-
 /// Always-on House-view identity in the _mmhvac._tcp TXT: display name, the
 /// group fingerprint (hvac_group::group_fingerprint()) and group label. Empty
 /// values are removed from the TXT. Cheap no-op when nothing changed, so it can
@@ -143,7 +131,7 @@ struct HeadAdvert {
 };
 
 /// Browse _mmhvac._tcp for every HeatLink head on the LAN (excluding self),
-/// regardless of group or pairing state. Blocks ~2.5 s.
+/// regardless of group state. Blocks ~2.5 s.
 esp_err_t browse_heads(std::vector<HeadAdvert>& out);
 
 }  // namespace wifi

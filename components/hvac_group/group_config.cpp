@@ -31,16 +31,6 @@ GroupReplica      s_replica;  // authoritative for label + membership (Phase 6)
 std::string       s_self_uid;
 uint64_t          s_op_id = 0;  // monotonic resolution op counter (Phase 3)
 
-// Owner-side pairing window. Lives only in RAM (never persisted) and is guarded
-// by s_mtx like the config cache.
-struct PairSession {
-    bool        active = false;
-    std::string code;
-    int64_t     expires_us = 0;
-    int         attempts_left = 0;
-};
-PairSession s_pair;
-
 // Keep a group label printable and bounded before it hits NVS.
 std::string sanitize_label(const std::string& in) {
     std::string out;
@@ -65,15 +55,6 @@ bool nvs_get_str_std(nvs_handle_t h, const char* key, std::string& out) {
     if (!buf.empty() && buf.back() == '\0') buf.pop_back();  // drop NUL terminator
     out = buf;
     return true;
-}
-
-// Uniform 0..9 digit via rejection sampling (avoids modulo bias).
-char random_digit() {
-    for (;;) {
-        uint8_t b;
-        esp_fill_random(&b, 1);
-        if (b < 250) return static_cast<char>('0' + (b % 10));
-    }
 }
 
 std::string random_hex(size_t nbytes) {
@@ -454,13 +435,6 @@ esp_err_t remove_member(const std::string& uid) {
 std::string generate_group_id()     { return random_hex(kGroupIdHexLen / 2); }
 std::string generate_group_secret() { return random_hex(kGroupSecretHexLen / 2); }
 
-std::string generate_pairing_code() {
-    std::string code;
-    code.reserve(kPairingCodeLen);
-    for (size_t i = 0; i < kPairingCodeLen; ++i) code.push_back(random_digit());
-    return code;
-}
-
 std::string generate_nonce() { return random_hex(8); }  // 64-bit → 16 hex chars
 
 bool is_peer(const std::string& uid) {
@@ -487,28 +461,87 @@ bool accept_op_id(uint64_t incoming) {
     return true;
 }
 
-std::string hmac_hex(const std::string& message) {
-    std::string secret_hex;
-    { Lock lk; secret_hex = s_cfg.group_secret; }
-    std::vector<uint8_t> key;
-    if (!is_valid_group_secret(secret_hex) || !from_hex(secret_hex, key)) return "";
-
-    if (key.empty() || psa_crypto_init() != PSA_SUCCESS) return "";
+bool hmac_sha256(const uint8_t* key, size_t key_len, const std::string& msg,
+                 uint8_t out[32]) {
+    if (!key || key_len == 0 || psa_crypto_init() != PSA_SUCCESS) return false;
     psa_key_attributes_t attr = PSA_KEY_ATTRIBUTES_INIT;
     psa_set_key_type(&attr, PSA_KEY_TYPE_HMAC);
-    psa_set_key_bits(&attr, PSA_BYTES_TO_BITS(key.size()));
+    psa_set_key_bits(&attr, PSA_BYTES_TO_BITS(key_len));
     psa_set_key_usage_flags(&attr, PSA_KEY_USAGE_SIGN_MESSAGE);
     psa_set_key_algorithm(&attr, PSA_ALG_HMAC(PSA_ALG_SHA_256));
     psa_key_id_t key_id = 0;
-    if (psa_import_key(&attr, key.data(), key.size(), &key_id) != PSA_SUCCESS) return "";
-    uint8_t out[32];
+    if (psa_import_key(&attr, key, key_len, &key_id) != PSA_SUCCESS) return false;
     size_t out_len = 0;
     const psa_status_t st = psa_mac_compute(
         key_id, PSA_ALG_HMAC(PSA_ALG_SHA_256),
-        reinterpret_cast<const uint8_t*>(message.data()), message.size(),
-        out, sizeof(out), &out_len);
+        reinterpret_cast<const uint8_t*>(msg.data()), msg.size(), out, 32, &out_len);
     psa_destroy_key(key_id);
-    if (st != PSA_SUCCESS || out_len != sizeof(out)) return "";
+    return st == PSA_SUCCESS && out_len == 32;
+}
+
+namespace {
+bool secret_bytes(std::vector<uint8_t>& key) {
+    std::string secret_hex;
+    { Lock lk; secret_hex = s_cfg.group_secret; }
+    return is_valid_group_secret(secret_hex) && from_hex(secret_hex, key) && !key.empty();
+}
+
+constexpr size_t kGcmIv  = 12;
+constexpr size_t kGcmTag = 16;
+
+bool import_aes_key(const uint8_t key[32], psa_key_usage_t usage, psa_key_id_t& id) {
+    if (psa_crypto_init() != PSA_SUCCESS) return false;
+    psa_key_attributes_t attr = PSA_KEY_ATTRIBUTES_INIT;
+    psa_set_key_type(&attr, PSA_KEY_TYPE_AES);
+    psa_set_key_bits(&attr, 256);
+    psa_set_key_usage_flags(&attr, usage);
+    psa_set_key_algorithm(&attr, PSA_ALG_GCM);
+    return psa_import_key(&attr, key, 32, &id) == PSA_SUCCESS;
+}
+}  // namespace
+
+bool group_subkey(const std::string& label, uint8_t out[32]) {
+    std::vector<uint8_t> key;
+    return secret_bytes(key) && hmac_sha256(key.data(), key.size(), label, out);
+}
+
+bool seal(const uint8_t key[32], const std::string& plain, std::string& out_hex) {
+    psa_key_id_t id = 0;
+    if (!import_aes_key(key, PSA_KEY_USAGE_ENCRYPT, id)) return false;
+    std::vector<uint8_t> buf(kGcmIv + plain.size() + kGcmTag);
+    esp_fill_random(buf.data(), kGcmIv);
+    size_t olen = 0;
+    const psa_status_t st = psa_aead_encrypt(
+        id, PSA_ALG_GCM, buf.data(), kGcmIv, nullptr, 0,
+        reinterpret_cast<const uint8_t*>(plain.data()), plain.size(),
+        buf.data() + kGcmIv, buf.size() - kGcmIv, &olen);
+    psa_destroy_key(id);
+    if (st != PSA_SUCCESS || olen != plain.size() + kGcmTag) return false;
+    out_hex = to_hex(buf.data(), buf.size());
+    return true;
+}
+
+bool open_sealed(const uint8_t key[32], const std::string& sealed_hex,
+                 std::string& plain) {
+    std::vector<uint8_t> buf;
+    if (!from_hex(sealed_hex, buf) || buf.size() < kGcmIv + kGcmTag) return false;
+    psa_key_id_t id = 0;
+    if (!import_aes_key(key, PSA_KEY_USAGE_DECRYPT, id)) return false;
+    std::string out(buf.size() - kGcmIv - kGcmTag, '\0');
+    size_t olen = 0;
+    const psa_status_t st = psa_aead_decrypt(
+        id, PSA_ALG_GCM, buf.data(), kGcmIv, nullptr, 0, buf.data() + kGcmIv,
+        buf.size() - kGcmIv, reinterpret_cast<uint8_t*>(out.data()), out.size(), &olen);
+    psa_destroy_key(id);
+    if (st != PSA_SUCCESS || olen != out.size()) return false;
+    plain = std::move(out);
+    return true;
+}
+
+std::string hmac_hex(const std::string& message) {
+    std::vector<uint8_t> key;
+    uint8_t out[32];
+    if (!secret_bytes(key) || !hmac_sha256(key.data(), key.size(), message, out)) return "";
     return to_hex(out, sizeof(out));
 }
 
@@ -535,122 +568,45 @@ bool hmac_verify(const std::string& message, const std::string& provided_hex) {
     return diff == 0;
 }
 
-esp_err_t pairing_start(const std::string& label, std::string& out_code) {
+esp_err_t admit_joiner(const std::string& joiner_uid, const std::string& joiner_name,
+                       const std::string& form_label, AdmitOutcome& out) {
     Lock lk;
-    // Form a group on first pairing: mint a random id + secret so the owner has
-    // something to hand out. An already-grouped head keeps its existing id.
+    if (!is_valid_uid(joiner_uid) || joiner_uid == s_self_uid) return ESP_ERR_INVALID_ARG;
+    GroupReplica prev_rep = s_replica;
+    GroupConfig  prev_cfg = s_cfg;
+    out = AdmitOutcome{};
     if (!is_valid_group_id(s_cfg.group_id) || !is_valid_group_secret(s_cfg.group_secret)) {
-        GroupReplica prev_rep = s_replica;
-        GroupConfig  prev_cfg = s_cfg;
+        // Standalone: form a group with this head as its sole member.
         GroupConfig c;
         c.group_id     = generate_group_id();
         c.group_secret = generate_group_secret();
-        // Seed the authoritative replica with this owner as the sole member plus
-        // the initial label, so subsequent joiners inherit a consistent state.
-        seed_replica_locked(sanitize_label(label), {});
+        seed_replica_locked(sanitize_label(form_label), {});
         s_cfg = c;
+        out.formed = true;
+    }
+    // The joiner needs everyone already in the group (computed before adding it).
+    out.members.push_back(s_self_uid);
+    for (const auto& p : s_cfg.peers) out.members.push_back(p);
+    replica_add_member(s_replica, joiner_uid);
+    // Seed the joiner's name attributed to the joiner itself, preserving the
+    // "a head is named only by itself" invariant.
+    if (!joiner_name.empty())
+        replica_set_name(s_replica, joiner_uid, sanitize_label(joiner_name), joiner_uid);
+    reproject_locked();
+    esp_err_t err = persist_locked(s_cfg);
+    if (err != ESP_OK) {
+        s_replica = prev_rep;
+        s_cfg = prev_cfg;
         reproject_locked();
-        esp_err_t err = persist_locked(s_cfg);
-        if (err != ESP_OK) { s_replica = prev_rep; s_cfg = prev_cfg; return err; }
+        out = AdmitOutcome{};
+        return err;
     }
-    s_pair.active        = true;
-    s_pair.code          = generate_pairing_code();
-    s_pair.expires_us    = esp_timer_get_time() +
-                           static_cast<int64_t>(kPairingTtlSeconds) * 1000000;
-    s_pair.attempts_left = kPairingMaxAttempts;
-    out_code = s_pair.code;
-    ESP_LOGI(TAG, "pairing window open (%ds, %d attempts)",
-             kPairingTtlSeconds, kPairingMaxAttempts);
+    out.group_id     = s_cfg.group_id;
+    out.group_label  = s_cfg.group_label;
+    out.group_secret = s_cfg.group_secret;
+    out.replica_json = serialize_replica_locked(s_replica);
+    ESP_LOGI(TAG, "enrolled peer %s%s", joiner_uid.c_str(), out.formed ? " (group formed)" : "");
     return ESP_OK;
-}
-
-void pairing_stop() {
-    Lock lk;
-    s_pair = PairSession{};
-}
-
-PairingStatus pairing_status() {
-    Lock lk;
-    PairingStatus st;
-    if (!s_pair.active) return st;
-    const int64_t now = esp_timer_get_time();
-    if (now >= s_pair.expires_us) {  // lazily reap an expired window
-        s_pair = PairSession{};
-        return st;
-    }
-    st.active        = true;
-    st.seconds_left  = static_cast<int>((s_pair.expires_us - now) / 1000000);
-    st.attempts_left = s_pair.attempts_left;
-    return st;
-}
-
-ClaimOutcome pairing_claim(const std::string& code, const std::string& joiner_uid,
-                           const std::string& joiner_name) {
-    Lock lk;
-    ClaimOutcome out;
-
-    const int64_t now     = esp_timer_get_time();
-    const bool    active  = s_pair.active;
-    const bool    expired = active && now >= s_pair.expires_us;
-    const bool    matches = active && ct_equal(code, s_pair.code);
-
-    out.decision = evaluate_claim(active, expired, matches, s_pair.attempts_left);
-
-    switch (out.decision) {
-        case ClaimDecision::Ok: {
-            // A malformed joiner uid can't be enrolled; treat as a bad code so we
-            // don't leak the group secret to a garbage identity.
-            if (!is_valid_uid(joiner_uid) || joiner_uid == s_self_uid) {
-                out.decision = ClaimDecision::BadCode;
-                if (--s_pair.attempts_left <= 0) s_pair = PairSession{};
-                break;
-            }
-            // The joiner needs everyone already in the group: this owner plus any
-            // existing peers (computed BEFORE we add the joiner).
-            out.group_id     = s_cfg.group_id;
-            out.group_label  = s_cfg.group_label;
-            out.group_secret = s_cfg.group_secret;
-            out.members.push_back(s_self_uid);
-            for (const auto& p : s_cfg.peers) out.members.push_back(p);
-
-            // Enroll the joiner into the authoritative replica (OR-Set add), then
-            // reproject + persist. Snapshot so a persist failure fully rolls back.
-            GroupReplica prev = s_replica;
-            replica_add_member(s_replica, joiner_uid);
-            // Seed the joiner's self-reported name, attributed to the joiner as
-            // the writer — this preserves the "a head is named only by itself"
-            // invariant and no-ops when the joiner later re-asserts the same
-            // name via note_self_name.
-            if (!joiner_name.empty())
-                replica_set_name(s_replica, joiner_uid, sanitize_label(joiner_name), joiner_uid);
-            reproject_locked();
-            if (persist_locked(s_cfg) != ESP_OK) {
-                // Persist failed: report as if no code was active and leave the
-                // window open so a retry can succeed. Don't hand out the secret.
-                s_replica = prev;
-                reproject_locked();
-                out = ClaimOutcome{};
-                out.decision = ClaimDecision::NoActiveCode;
-                break;
-            }
-            // Hand the joiner our exact replicated state so membership/labels are
-            // immediately consistent (includes the joiner we just added).
-            out.replica_json = serialize_replica_locked(s_replica);
-            s_pair = PairSession{};  // single-use: burn on success
-            ESP_LOGI(TAG, "enrolled peer %s", joiner_uid.c_str());
-            break;
-        }
-        case ClaimDecision::BadCode:
-            if (--s_pair.attempts_left <= 0) s_pair = PairSession{};
-            break;
-        case ClaimDecision::Expired:
-        case ClaimDecision::LockedOut:
-            s_pair = PairSession{};  // window is dead; clear it
-            break;
-        case ClaimDecision::NoActiveCode:
-            break;
-    }
-    return out;
 }
 
 esp_err_t join_group(const std::string& group_id, const std::string& label,

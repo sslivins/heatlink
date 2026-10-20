@@ -49,6 +49,7 @@ static const char* NVS_KEY_USER_V2 = "user_v2";      // pw_rec_t (PBKDF2)
 static const char* NVS_KEY_API_KEY = "api_key";
 static const char* NVS_KEY_CLAIM_REQ = "claim_req";
 static const char* NVS_KEY_CLAIM_TOK = "claim_tok";
+static const char* NVS_KEY_ADMIN_EPOCH = "adm_ep";   // bumps on each admin password change
 
 // Password verifier record. ver 0 = unset, 1 = legacy unsalted SHA-256 (read
 // from old NVS keys, upgraded on the next successful login), 2 = salted
@@ -66,6 +67,7 @@ typedef struct {
     uint8_t salt[PW_SALT_LEN];
     uint8_t hash[32];
 } pw_rec_t;
+static_assert(sizeof(pw_rec_t) == AUTH_ADMIN_REC_LEN, "verifier record layout");
 
 // Failed-login throttle: after this many consecutive failures, refuse logins
 // for AUTH_LOCKOUT_SEC.
@@ -85,6 +87,7 @@ static struct {
     bool api_auth_enabled;
     char username[AUTH_MAX_USERNAME_LEN + 1];
     pw_rec_t admin;   // admin password verifier
+    uint32_t admin_epoch;  // group sync: newer epoch wins (see auth_mgr_adopt_admin)
     pw_rec_t user;    // shared climate-only user password verifier
     bool claim_required;
     char claim_token[AUTH_CLAIM_TOKEN_LEN + 1];
@@ -232,6 +235,8 @@ static bool load_from_nvs(void) {
         state.api_auth_enabled = u8 != 0;
     if (nvs_get_u8(nvs, NVS_KEY_CLAIM_REQ, &u8) == ESP_OK)
         state.claim_required = u8 != 0;
+    uint32_t u32 = 0;
+    if (nvs_get_u32(nvs, NVS_KEY_ADMIN_EPOCH, &u32) == ESP_OK) state.admin_epoch = u32;
 
     size_t len = sizeof(state.username);
     if (nvs_get_str(nvs, NVS_KEY_USERNAME, state.username, &len) != ESP_OK)
@@ -291,6 +296,7 @@ static esp_err_t save_to_nvs(void) {
     acc(nvs_set_u8(nvs, NVS_KEY_WEB_ENABLED, auth_mgr_web_auth_enabled() ? 1 : 0));
     acc(nvs_set_u8(nvs, NVS_KEY_API_ENABLED, state.api_auth_enabled ? 1 : 0));
     acc(nvs_set_u8(nvs, NVS_KEY_CLAIM_REQ, state.claim_required ? 1 : 0));
+    acc(nvs_set_u32(nvs, NVS_KEY_ADMIN_EPOCH, state.admin_epoch));
     if (state.username[0] != '\0')
         acc(nvs_set_str(nvs, NVS_KEY_USERNAME, state.username));
     save_rec(nvs, &state.admin, NVS_KEY_PASS_V2, NVS_KEY_PASS_HASH, e);
@@ -436,6 +442,7 @@ bool auth_mgr_set_admin_password(const char* password) {
     pw_rec_t r;
     if (!rec_make(password, &r)) return false;
     state.admin = r;
+    state.admin_epoch++;
     state.claim_required = false;
     state.claim_token[0] = '\0';
     state.recovery_until = 0;
@@ -501,11 +508,7 @@ auth_role_t auth_mgr_login(const char* password, char* session_token) {
         matched = &state.user;
     }
     if (role == AUTH_ROLE_NONE) {
-        if (++state.fail_count >= AUTH_MAX_FAILS) {
-            state.fail_count = 0;
-            state.lockout_until = monotonic_now() + AUTH_LOCKOUT_SEC;
-            ESP_LOGW(TAG, "too many failed logins — locked for %d s", AUTH_LOCKOUT_SEC);
-        }
+        auth_mgr_note_failed_login();
         return AUTH_ROLE_NONE;
     }
     state.fail_count = 0;
@@ -607,6 +610,89 @@ int auth_mgr_recovery_secs_left(void) {
     AUTH_LOCK();
     if (!recovery_open()) return 0;
     return (int)(state.recovery_until - monotonic_now());
+}
+
+// ── Group join + admin-password sync ─────────────────────────────────────
+
+void auth_mgr_note_failed_login(void) {
+    AUTH_LOCK();
+    if (++state.fail_count >= AUTH_MAX_FAILS) {
+        state.fail_count = 0;
+        state.lockout_until = monotonic_now() + AUTH_LOCKOUT_SEC;
+        ESP_LOGW(TAG, "too many failed logins — locked for %d s", AUTH_LOCKOUT_SEC);
+    }
+}
+
+void auth_mgr_note_good_login(void) {
+    AUTH_LOCK();
+    state.fail_count = 0;
+}
+
+bool auth_mgr_admin_verifier(int* ver, uint8_t salt[AUTH_SALT_LEN], uint32_t* iters,
+                             uint8_t key[32]) {
+    AUTH_LOCK();
+    if (!password_set()) return false;
+    if (ver) *ver = state.admin.ver;
+    if (salt) memcpy(salt, state.admin.salt, AUTH_SALT_LEN);
+    if (iters) *iters = state.admin.iters;
+    if (key) memcpy(key, state.admin.hash, 32);
+    return true;
+}
+
+bool auth_mgr_derive_key(const char* password, int ver, const uint8_t salt[AUTH_SALT_LEN],
+                         uint32_t iters, uint8_t key[32]) {
+    if (password == NULL || password[0] == '\0' || strlen(password) > AUTH_MAX_PASSWORD_LEN)
+        return false;
+    if (ver == PW_VER_SHA256) {
+        sha256_password(password, key);
+        return true;
+    }
+    if (ver != PW_VER_PBKDF2 || iters == 0 || iters > AUTH_MAX_ITERS) return false;
+    return pbkdf2_sha256(password, salt, AUTH_SALT_LEN, iters, key);
+}
+
+uint32_t auth_mgr_admin_epoch(void) {
+    AUTH_LOCK();
+    return state.admin_epoch;
+}
+
+bool auth_mgr_admin_record(uint8_t rec[AUTH_ADMIN_REC_LEN]) {
+    AUTH_LOCK();
+    if (!password_set()) return false;
+    memcpy(rec, &state.admin, AUTH_ADMIN_REC_LEN);
+    return true;
+}
+
+bool auth_mgr_adopt_admin(const uint8_t rec[AUTH_ADMIN_REC_LEN], uint32_t epoch) {
+    AUTH_LOCK();
+    pw_rec_t r;
+    memcpy(&r, rec, sizeof(r));
+    if (!(r.ver == PW_VER_SHA256 || (r.ver == PW_VER_PBKDF2 && r.iters > 0 &&
+                                     r.iters <= AUTH_MAX_ITERS)))
+        return false;
+    const bool changed = memcmp(&r, &state.admin, sizeof(r)) != 0;
+    if (!changed && epoch == state.admin_epoch) return false;
+    state.admin = r;
+    state.admin_epoch = epoch;
+    state.claim_required = false;
+    state.claim_token[0] = '\0';
+    if (changed) state.recovery_until = 0;
+    save_to_nvs();
+    if (changed) auth_mgr_logout_all();
+    ESP_LOGI(TAG, "admin password adopted from group (epoch %u)", (unsigned)epoch);
+    return changed;
+}
+
+bool auth_mgr_join_authorized(const char* token) {
+    AUTH_LOCK();
+    if (recovery_open()) return true;
+    return !password_set() && state.claim_required && token != NULL &&
+           state.claim_token[0] != '\0' && ct_equal_str(token, state.claim_token);
+}
+
+bool auth_mgr_create_admin_session(char* session_token) {
+    AUTH_LOCK();
+    return create_session(AUTH_ROLE_ADMIN, session_token);
 }
 
 // ── API-key auth ─────────────────────────────────────────────────────────
