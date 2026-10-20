@@ -302,6 +302,7 @@ esp_err_t handle_status(httpd_req_t* req) {
     cJSON_AddNumberToObject(d, "vin_min_ever_mv", dg.vin_min_ever_mv);
     cJSON_AddNumberToObject(d, "vin_sag_count", dg.vin_sag_count);
     cJSON_AddNumberToObject(d, "wifi_drop_count", dg.wifi_drop_count);
+    cJSON_AddNumberToObject(d, "wifi_drops_24h", wifi::drops_last_24h());
     cJSON_AddItemToObject(root, "diag", d);
 
     char* str = cJSON_PrintUnformatted(root);

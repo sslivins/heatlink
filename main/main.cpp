@@ -448,7 +448,8 @@ extern "C" void app_main() {
     // Record the boot in the activity log, tagging the reset cause.
     {
         diag::Snapshot ds = diag::get();
-        std::string boot = std::string("Device started (") + ds.reset_reason +
+        std::string boot = std::string("Device started v") + esp_app_get_description()->version +
+                           " (" + ds.reset_reason +
                            (ds.last_was_brownout ? ", brownout" : "") + ")";
         events::log(events::Cat::System, events::Actor::System, boot);
     }

@@ -73,6 +73,10 @@ char  s_ssid[33] = {0};
 char  s_pass[65] = {0};
 int   s_retries = 0;
 uint32_t s_wifi_drops = 0;   // outages (established assoc lost) this session
+// Uptime (s) of the most recent outages, for the "drops in the last 24 h" count.
+constexpr int kDropRing = 8;
+int64_t  s_drop_at[kDropRing] = {};
+uint32_t s_drop_head = 0;
 bool  s_established  = false; // true once we've obtained an IP at least once
 
 httpd_handle_t s_portal = nullptr;
@@ -216,7 +220,10 @@ void on_event(void*, esp_event_base_t base, int32_t id, void* data) {
         }
         // Count a genuine outage only on the established->lost transition, not
         // on the retry storm that follows or on initial connect attempts.
-        if (s_established) { s_wifi_drops++; s_established = false; }
+        if (s_established) {
+            s_wifi_drops++; s_established = false;
+            s_drop_at[s_drop_head++ % kDropRing] = esp_timer_get_time() / 1000000;
+        }
         s_retries++;
         ESP_LOGW(TAG, "STA disconnected (reason %d, attempt %d)", d ? d->reason : -1, s_retries);
 #if !CONFIG_ESP_WIFI_ENABLE_ROAMING_APP
@@ -843,7 +850,14 @@ bool has_password() { return s_pass[0] != '\0'; }
 const char* get_password() { return s_pass; }
 
 uint32_t disconnect_count() { return s_wifi_drops; }
-void reset_disconnect_count() { s_wifi_drops = 0; }
+void reset_disconnect_count() { s_wifi_drops = 0; s_drop_head = 0; }
+uint32_t drops_last_24h() {
+    const int64_t now = esp_timer_get_time() / 1000000;
+    const uint32_t n = std::min<uint32_t>(s_drop_head, kDropRing);
+    uint32_t c = 0;
+    for (uint32_t i = 0; i < n; i++) if (now - s_drop_at[i] < 24 * 3600) c++;
+    return c;
+}
 
 // Live RSSI (dBm) of the current STA association, or 0 when not connected.
 // Queries the driver each call so callers see the current signal, not the

@@ -97,6 +97,9 @@ uint32_t disconnect_count();
 /// Zero the session WiFi-drop counter.
 void reset_disconnect_count();
 
+/// Outages in the last 24 h of uptime (capped at 8; cleared by the reset above).
+uint32_t drops_last_24h();
+
 /// Whether a WiFi password is currently stored (the password itself is never
 /// exposed over the API — used server-side only to preserve it on partial saves).
 bool has_password();

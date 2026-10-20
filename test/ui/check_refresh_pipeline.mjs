@@ -175,7 +175,7 @@ function loadScript({ poison } = {}) {
 
   const harness = script + `
 ;globalThis.__probe = {
-  refresh, saveTxPow, syncTxSetting,
+  refresh, saveTxPow, syncTxSetting, statusIssues, actMerge,
   setClimate: (o) => Object.assign(climate, o),
   getTxSynced: () => txSynced,
 };`;
@@ -239,9 +239,9 @@ await testCase('healthy refresh paints state', async () => {
   const t = loadScript(); await flush(); t.reset();
   t.setFetch(goodStatusSettingsFetch);
   await t.probe.refresh();
-  eq(t.el('bWifi').className, 'badge on', 'WiFi badge is connected');
-  eq(t.el('bUnit').className, 'badge on', 'unit badge connected');
-  eq(t.el('bMqtt').className, 'badge on', 'mqtt badge connected');
+  eq(t.el('stBanner').className, 'sth ok', 'health banner is green');
+  eq(t.el('stBT').textContent, 'All good', 'health banner says all good');
+  eq(t.el('tHaV').textContent, 'Connected', 'Home Assistant tile connected');
   eq(t.el('subtitle').textContent, 'heatlink-test · 1.2.3.4', 'subtitle shows host/ip');
   eq(t.el('wsTx').textContent, '20 dBm', 'TX power stat rendered');
   eq(String(t.el('txPow').value), '20', 'TX slider seeded to current');
@@ -258,7 +258,7 @@ await testCase('render error does NOT disconnect', async () => {
   const t = loadScript({ poison: { id: 'uptime', prop: 'textContent' } }); await flush(); t.reset();
   t.setFetch(goodStatusSettingsFetch);
   await t.probe.refresh();
-  eq(t.el('bWifi').className, 'badge on', 'WiFi stays connected despite render throw');
+  ok(t.el('stBanner').className !== 'sth bad', 'banner does NOT say unreachable despite render throw');
   ok(t.el('subtitle').textContent !== 'Disconnected', 'subtitle is NOT "Disconnected"');
   eq(t.el('subtitle').textContent, 'heatlink-test · 1.2.3.4', 'subtitle still shows host/ip');
   ok(t.errors.some((e) => e.includes('status render failed')), 'render failure was logged via console.error');
@@ -272,7 +272,8 @@ await testCase('transport failure DOES disconnect', async () => {
     return jsonResp({});
   });
   await t.probe.refresh();
-  eq(t.el('bWifi').className, 'badge off', 'WiFi badge red on real transport failure');
+  eq(t.el('stBanner').className, 'sth bad', 'banner red on real transport failure');
+  eq(t.el('stBT').textContent, 'Can’t reach this controller', 'banner says unreachable');
   eq(t.el('subtitle').textContent, 'Disconnected', 'subtitle shows Disconnected');
   ok(!t.calls.some((c) => c.url.startsWith('/api/settings')), 'settings not fetched after transport failure');
 });
@@ -359,6 +360,43 @@ await testCase('syncTxSetting no-op on absent fields', async () => {
   const t = loadScript(); await flush();
   t.probe.syncTxSetting({});
   eq(t.probe.getTxSynced(), false, 'stays unsynced when no tx_power provided');
+});
+
+// 11) Status warnings: right problems, most serious first, healthy = none.
+await testCase('statusIssues ranks problems', async () => {
+  const t = loadScript(); await flush();
+  const si = t.probe.statusIssues;
+  eq(si(goodStatus, goodSettings, null).length, 0, 'healthy device has no issues');
+  const bad = {
+    ...goodStatus, unit_connected: false, rssi: -80, mqtt_connected: false,
+    diag: { ...goodStatus.diag, wifi_drops_24h: 3, brownout_count: 1 },
+  };
+  eq(si(bad, goodSettings, { update_available: true, latest: '9.9.9' }).map((i) => i.tile).join(','),
+     'tHp,tWifi,tHa,tPow,tSys', 'all five problems, heat pump first');
+  eq(si(bad, goodSettings, null)[0].lvl, 'bad', 'heat pump disconnected is red');
+  eq(si(goodStatus, { ...goodSettings, errorCode: 'Error 0x12 sub 0x00' }, null)[0].t, 'Heat pump fault', 'fault code flagged');
+  eq(si(goodStatus, { ...goodSettings, errorCode: 'No Error' }, null).length, 0, '"No Error" is not a fault');
+  eq(si({ ...goodStatus, diag: { ...goodStatus.diag, wifi_drops_24h: 2 } }, goodSettings, null).length, 0, '2 drops is not yet a warning');
+  eq(si({ ...goodStatus, mqtt_configured: false, mqtt_connected: false }, goodSettings, null).length, 0, 'MQTT not set up is not a warning');
+});
+
+// 12) Activity: each update's started/installed/boot entries collapse into one.
+await testCase('actMerge collapses updates', async () => {
+  const t = loadScript(); await flush();
+  const m = t.probe.actMerge([
+    { ts: 300, cat: 10, act: 0, msg: 'Device started v1.4.0 (sw)' },
+    { ts: 290, cat: 6, act: 0, msg: 'Firmware update installed — rebooting' },
+    { ts: 280, cat: 6, act: 0, msg: 'Firmware update started' },
+    { ts: 200, cat: 2, act: 1, msg: 'Target set to 21.0°C' },
+    { ts: 100, cat: 10, act: 0, msg: 'Device started (sw)' },
+    { ts: 95, cat: 6, act: 0, msg: 'Firmware update installed — rebooting' },
+    { ts: 90, cat: 6, act: 0, msg: 'Firmware update started' },
+    { ts: 50, cat: 10, act: 0, msg: 'Device started (poweron, brownout)' },
+  ]);
+  eq(m.map((e) => e.txt).join(' | '),
+     'Updated to v1.4.0 | Target set to 21.0°C | Firmware updated | Restarted after a power dip',
+     'updates merged, boots made friendly');
+  eq(m[0].ts, 300, 'merged update takes the boot time');
 });
 
 if (failures > 0) {
