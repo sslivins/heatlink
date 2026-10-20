@@ -1213,6 +1213,7 @@ components:
             vin_min_ever_mv: { type: integer }
             vin_sag_count: { type: integer }
             wifi_drop_count: { type: integer, description: WiFi outages this session (RAM, resets on boot) }
+            wifi_drops_24h: { type: integer, description: WiFi outages in the last 24 h of uptime (max 8) }
     Settings:
       type: object
       properties:

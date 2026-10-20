@@ -56,12 +56,6 @@ h1{font-size:1.2em;color:var(--accent);margin-bottom:2px;text-align:center}
 .sub{font-size:.8em;color:var(--fg-3);margin-bottom:14px;text-align:center}
 .card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:14px}
 .card h2{font-size:.78em;text-transform:uppercase;letter-spacing:.05em;color:var(--fg-3);margin-bottom:12px}
-.badges{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}
-.badge{font-size:.78em;padding:4px 10px;border-radius:20px;background:var(--chip);color:var(--fg-3);
-display:flex;align-items:center;gap:6px}
-.badge .dot{width:8px;height:8px;border-radius:50%;background:var(--dot-off)}
-.badge.on .dot{background:var(--green)}
-.badge.off .dot{background:var(--red)}
 .room{display:flex;align-items:baseline;gap:8px;margin-bottom:4px}
 .room .t{font-size:2.6em;font-weight:300}
 .room .u{font-size:1em;color:var(--fg-3)}
@@ -264,15 +258,34 @@ cursor:pointer;user-select:none;transition:.15s}
 .hist-nav .btn{width:auto;background:var(--chip);color:var(--fg);border:1px solid var(--border-strong)}
 .hist-nav .btn:disabled{opacity:.45;cursor:default}
 .hist-empty{padding:40px 10px;text-align:center;color:var(--fg-3);font-size:.88em}
-/* Status-tab section jump bar: sticky chips that scroll to each card. */
-.secnav{position:sticky;top:6px;z-index:5;display:flex;flex-wrap:wrap;gap:6px;
-  background:var(--bg);padding:8px 0;margin-bottom:8px}
-.secnav::-webkit-scrollbar{display:none}
-.secnav button{flex:0 0 auto;background:var(--surface);border:1px solid var(--border);
-  color:var(--fg-3);border-radius:20px;padding:7px 14px;font-size:.78em;white-space:nowrap;
-  cursor:pointer;transition:.15s}
-.secnav button:hover{color:var(--fg);border-color:var(--fg-3)}
-#panel-system .card[id]{scroll-margin-top:58px}
+/* Status dashboard: health banner, subsystem tiles, detail key/value rows. */
+.sth{display:flex;align-items:center;gap:14px;padding:16px;border-radius:14px;border:1px solid var(--border-strong);background:var(--surface);margin:4px 0 6px}
+.sth .ic{width:44px;height:44px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex:none;color:#fff;background:#22c55e}
+.sth .ic svg{width:26px;height:26px}
+.sth.warn .ic{background:#f59e0b}.sth.bad .ic{background:#ef4444}
+.sth .t{font-size:19px;font-weight:700}.sth .s{color:var(--fg-3);font-size:14px;margin-top:2px}
+.tiles{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px}
+.tile{position:relative;text-align:left;background:var(--surface);border:1px solid var(--border-strong);border-radius:14px;padding:14px;font:inherit;color:var(--fg);cursor:pointer;min-width:0}
+.tile:active{background:var(--hover)}
+.tile.wide{grid-column:1/-1}
+.tile .sl-ic{width:28px;height:28px;margin-bottom:10px}
+.tile .lbl{color:var(--fg-3);font-size:13px;font-weight:600;letter-spacing:.02em}
+.tile .big{font-size:20px;font-weight:700;margin-top:2px;line-height:1.2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tile .sm{color:var(--fg-3);font-size:13px;margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tile .dot{position:absolute;top:14px;right:14px;width:9px;height:9px;border-radius:50%;background:#22c55e}
+.tile.off .dot{background:var(--dot-off)}
+.tile.warn .dot{background:#f59e0b}.tile.warn .big{color:#d97706}
+.tile.bad .dot{background:#ef4444}.tile.bad .big{color:#dc2626}
+.tile.wide .trow{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
+.sl-gh.act{margin-top:24px}
+.stgrp-act .act-item{padding:12px 14px}
+.seeall{display:block;width:100%;text-align:center;padding:12px;border:none;border-top:1px solid var(--border);background:none;color:var(--blue);font:inherit;font-size:15px;cursor:pointer}
+.kv{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:13px 14px;border-top:1px solid var(--border);font-size:15px}
+.kv:first-child{border-top:none}
+.kv .k{color:var(--fg-2)}
+.kv .v{color:var(--fg);font-weight:500;text-align:right;display:flex;align-items:center;gap:8px;min-width:0;overflow-wrap:anywhere}
+.kv .warn{color:#d97706}.kv .bad{color:#dc2626}
+.st-hint{margin:10px 4px}
 .overlay{position:fixed;inset:0;background:var(--bg);display:flex;align-items:center;
 justify-content:center;padding:16px;z-index:100}
 .overlay .card{width:100%;max-width:360px;margin:0}
@@ -692,17 +705,107 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
   </div><!-- /panel-history -->
 
   <div class="panel" id="panel-system">
-  <div class="badges" id="statusBadges" data-grp="status">
-    <span class="badge" id="bWifi"><span class="dot"></span>WiFi</span>
-    <span class="badge" id="bUnit"><span class="dot"></span>Unit</span>
-    <span class="badge" id="bMqtt"><span class="dot"></span>MQTT</span>
+  <!-- Status home: a health banner (the most important problem, or "All good"),
+       one tile per subsystem, and the latest activity. Tapping a tile opens its
+       detail view (openStat); values are filled by renderStatus. -->
+  <div id="stHome" data-grp="status">
+    <div class="sth ok" id="stBanner"><div class="ic" id="stBIc"></div><div><div class="t" id="stBT">--</div><div class="s" id="stBS"></div></div></div>
+    <div class="tiles">
+      <button type="button" class="tile wide" id="tHp" onclick="openStat('st-hp')"><span class="dot"></span><span class="sl-ic" style="background:#ef4444"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="9" rx="2"/><path d="M7 18c0 1 1 2 2 2M12 17v3M17 18c0 1-1 2-2 2"/></svg></span>
+        <div class="trow">
+          <div><div class="lbl">Heat pump</div><div class="big" id="tHpV">--</div><div class="sm" id="tHpS"></div></div>
+          <div><div class="lbl" id="tHp2L">Power draw</div><div class="big" id="tHp2V">--</div><div class="sm" id="tHp2S"></div></div>
+          <div><div class="lbl">Room</div><div class="big" id="tHp3V">--</div><div class="sm">Head sensor</div></div>
+        </div></button>
+      <button type="button" class="tile" id="tWifi" onclick="openStat('st-wifi')"><span class="dot"></span><span class="sl-ic" style="background:#3b82f6"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 9a15 15 0 0 1 20 0M5 12.5a10 10 0 0 1 14 0M8.5 16a5 5 0 0 1 7 0"/><circle cx="12" cy="19.5" r=".8" fill="currentColor"/></svg></span><div class="lbl">Wi-Fi</div><div class="big" id="tWifiV">--</div><div class="sm" id="tWifiS"></div></button>
+      <button type="button" class="tile" id="tHa" onclick="openStat('st-ha')"><span class="dot"></span><span class="sl-ic" style="background:#06b6d4"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11l9-7 9 7v9H3z"/><path d="M9 20v-6h6v6"/></svg></span><div class="lbl">Home Assistant</div><div class="big" id="tHaV">--</div><div class="sm">MQTT</div></button>
+      <button type="button" class="tile" id="tPow" onclick="openStat('st-power')"><span class="dot"></span><span class="sl-ic" style="background:#eab308"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 2L4 14h7l-1 8 9-12h-7z"/></svg></span><div class="lbl">Power</div><div class="big" id="tPowV">--</div><div class="sm" id="tPowS"></div></button>
+      <button type="button" class="tile" id="tSys" onclick="openStat('st-sys')"><span class="dot"></span><span class="sl-ic" style="background:#6b7280"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"/></svg></span><div class="lbl">System</div><div class="big" id="tSysV">--</div><div class="sm" id="tSysS"></div></button>
+    </div>
+    <div class="sl-gh act">Recent activity</div>
+    <div class="sl-grp stgrp-act">
+      <div id="actList"><div class="act-empty">Loading…</div></div>
+      <button type="button" class="seeall" id="actSeeAll" onclick="toggleActivity()">See all activity</button>
+    </div>
+    <div id="actAll" style="display:none">
+      <div id="actMore" style="margin-top:10px;display:none"><button class="btn" onclick="loadMoreActivity()">Load older</button></div>
+      <button class="btn btn-danger" style="margin-top:10px" onclick="clearActivity()">Clear activity log</button>
+    </div>
   </div>
-  <div class="secnav" data-grp="status">
-    <button onclick="jumpTo('sec-controller')">Controller</button>
-    <button onclick="jumpTo('sec-wifi-status')">WiFi</button>
-    <button onclick="jumpTo('sec-power')">Power</button>
-    <button onclick="jumpTo('sec-heatpump')">Heat pump</button>
-    <button onclick="jumpTo('sec-activity')">Activity</button>
+
+  <div class="st-det" id="st-hp" data-grp="status">
+    <button type="button" class="sl-back" onclick="closeStat()"><span aria-hidden="true">&#x2039;</span><span>Status</span></button>
+    <div class="sl-gh">Heat pump</div>
+    <div class="sl-grp">
+      <div class="kv"><span class="k">Connection</span><span class="v" id="dgLink">--</span></div>
+      <div class="kv"><span class="k">Doing now</span><span class="v" id="dgOp">--</span></div>
+      <div class="kv"><span class="k">Compressor</span><span class="v" id="dgComp">--</span></div>
+      <div class="kv"><span class="k">Fan stage</span><span class="v" id="dgStg">--</span></div>
+      <div class="kv"><span class="k">Power draw</span><span class="v" id="dgPow">--</span></div>
+      <div class="kv"><span class="k">Room temp (head’s sensor)</span><span class="v" id="dgRoom">--</span></div>
+      <div class="kv"><span class="k">Outside temp</span><span class="v" id="dgOut">--</span></div>
+      <div class="kv"><span class="k">Target humidity</span><span class="v" id="dgHum">--</span></div>
+      <div class="kv"><span class="k">Sub-mode</span><span class="v" id="dgSub">--</span></div>
+      <div class="kv"><span class="k">Fault</span><span class="v" id="dgErr">--</span></div>
+    </div>
+    <div class="sl-gh" id="dgTotH">Totals</div>
+    <div class="sl-grp" id="dgTot">
+      <div class="kv"><span class="k">Energy</span><span class="v" id="dgEng">--</span></div>
+      <div class="kv"><span class="k">Runtime</span><span class="v" id="dgRun">--</span></div>
+    </div>
+    <p class="hint st-hint" id="dgMissing"></p>
+  </div>
+
+  <div class="st-det" id="st-wifi" data-grp="status">
+    <button type="button" class="sl-back" onclick="closeStat()"><span aria-hidden="true">&#x2039;</span><span>Status</span></button>
+    <div class="sl-gh">Wi-Fi</div>
+    <div class="sl-grp">
+      <div class="kv"><span class="k">Network</span><span class="v" id="wsNet">--</span></div>
+      <div class="kv"><span class="k">Signal</span><span class="v" id="wsSig">--</span></div>
+      <div class="kv"><span class="k">TX power</span><span class="v" id="wsTx">--</span></div>
+      <div class="kv"><span class="k">Drops (last 24 h)</span><span class="v" id="wsDrops24">--</span></div>
+      <div class="kv"><span class="k">Drops since restart</span><span class="v"><span id="wsDrops">--</span><button type="button" class="icon-btn" id="wdReset" onclick="resetWifiDrops(event)" title="Reset count" aria-label="Reset WiFi drop count">&#x21BB;</button></span></div>
+    </div>
+  </div>
+
+  <div class="st-det" id="st-ha" data-grp="status">
+    <button type="button" class="sl-back" onclick="closeStat()"><span aria-hidden="true">&#x2039;</span><span>Status</span></button>
+    <div class="sl-gh">Home Assistant</div>
+    <div class="sl-grp">
+      <div class="kv"><span class="k">Connection</span><span class="v" id="haConn">--</span></div>
+      <div class="kv"><span class="k">Broker</span><span class="v" id="haHost">--</span></div>
+    </div>
+  </div>
+
+  <div class="st-det" id="st-power" data-grp="status">
+    <button type="button" class="sl-back" onclick="closeStat()"><span aria-hidden="true">&#x2039;</span><span>Status</span></button>
+    <div class="sl-gh">Controller power</div>
+    <div class="sl-grp">
+      <div class="kv"><span class="k">Input</span><span class="v" id="vin">--</span></div>
+      <div class="kv"><span class="k">Source</span><span class="v" id="psrc">--</span></div>
+      <div class="kv"><span class="k">Lowest since restart</span><span class="v" id="vinMin">--</span></div>
+      <div class="kv"><span class="k">Lowest ever</span><span class="v" id="vinMinEver">--</span></div>
+      <div class="kv"><span class="k">Sags since restart</span><span class="v" id="vinSags">--</span></div>
+      <div class="kv"><span class="k">Brownouts</span><span class="v"><span id="bo">--</span><button type="button" class="icon-btn" id="boReset" onclick="resetBrownouts(event)" title="Reset count" aria-label="Reset brownout count">&#x21BB;</button></span></div>
+      <div class="kv"><span class="k">5VIN pin</span><span class="v" id="vinPin">--</span></div>
+      <div class="kv"><span class="k">5VINOUT port</span><span class="v" id="vinOut">--</span></div>
+      <div class="kv"><span class="k">Battery</span><span class="v" id="vbat">--</span></div>
+      <div class="kv"><span class="k">Charging</span><span class="v" id="chg">--</span></div>
+    </div>
+  </div>
+
+  <div class="st-det" id="st-sys" data-grp="status">
+    <button type="button" class="sl-back" onclick="closeStat()"><span aria-hidden="true">&#x2039;</span><span>Status</span></button>
+    <div class="sl-gh">System</div>
+    <div class="sl-grp">
+      <div class="kv"><span class="k">Firmware</span><span class="v" id="ver">--</span></div>
+      <div class="kv"><span class="k">IP address</span><span class="v" id="ip">--</span></div>
+      <div class="kv"><span class="k">Hostname</span><span class="v" id="sysHost">--</span></div>
+      <div class="kv"><span class="k">Uptime</span><span class="v" id="uptime">--</span></div>
+      <div class="kv"><span class="k">Last restart</span><span class="v" id="rst">--</span></div>
+      <div class="kv"><span class="k">Restarts</span><span class="v" id="sysBoots">--</span></div>
+      <div class="kv"><span class="k">Free memory</span><span class="v" id="heap">--</span></div>
+    </div>
   </div>
   <!-- Settings home: one row per section with its current value; tapping a row
        shows just that section's card (openSec). Values are filled by renderSetList. -->
@@ -735,42 +838,6 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
       <button type="button" class="sl-row" onclick="openSec('sec-device')"><span class="sl-ic" style="background:#6b7280"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="7" y="3" width="10" height="18" rx="2"/><path d="M11 18h2"/></svg></span><span class="sl-t">Device</span><span class="sl-v" id="svDev"></span><span class="sl-ch">&#x203A;</span></button>
     </div>
   </div>
-  <div class="card" data-grp="status" id="sec-controller">
-    <h2>Controller</h2>
-    <div class="grid">
-      <div class="stat"><div class="k">Firmware</div><div class="v" id="ver">--</div></div>
-      <div class="stat"><div class="k">IP</div><div class="v" id="ip">--</div></div>
-      <div class="stat"><div class="k">Uptime</div><div class="v" id="uptime">--</div></div>
-      <div class="stat"><div class="k">Free heap</div><div class="v" id="heap">--</div></div>
-      <div class="stat"><div class="k">Last reset</div><div class="v" id="rst">--</div></div>
-      <div class="stat"><div class="k">Brownouts</div><div class="v-row"><div class="v" id="bo">--</div><button type="button" class="icon-btn" id="boReset" onclick="resetBrownouts(event)" title="Reset count" aria-label="Reset brownout count">&#x21BB;</button></div></div>
-    </div>
-  </div>
-
-  <div class="card" data-grp="status" id="sec-wifi-status">
-    <h2>WiFi</h2>
-    <div class="grid">
-      <div class="stat"><div class="k">Network</div><div class="v" id="wsNet">--</div></div>
-      <div class="stat"><div class="k">Signal</div><div class="v" id="wsSig">--</div></div>
-      <div class="stat"><div class="k">TX power</div><div class="v" id="wsTx">--</div></div>
-      <div class="stat"><div class="k">Drops</div><div class="v-row"><div class="v" id="wsDrops">--</div><button type="button" class="icon-btn" id="wdReset" onclick="resetWifiDrops(event)" title="Reset count" aria-label="Reset WiFi drop count">&#x21BB;</button></div></div>
-    </div>
-  </div>
-
-  <div class="card" data-grp="status" id="sec-power">
-    <h2>Controller power</h2>
-    <div class="grid">
-      <div class="stat"><div class="k">Battery</div><div class="v" id="vbat">--</div></div>
-      <div class="stat"><div class="k">Input</div><div class="v" id="vin">--</div></div>
-      <div class="stat"><div class="k">Source</div><div class="v" id="psrc">--</div></div>
-      <div class="stat"><div class="k">Charging</div><div class="v" id="chg">--</div></div>
-      <div class="stat"><div class="k">5VIN pin</div><div class="v" id="vinPin">--</div></div>
-      <div class="stat"><div class="k">5VINOUT port</div><div class="v" id="vinOut">--</div></div>
-      <div class="stat"><div class="k">Min input</div><div class="v" id="vinMin">--</div></div>
-      <div class="stat"><div class="k">Sags</div><div class="v" id="vinSags">--</div></div>
-    </div>
-  </div>
-
   <div class="card" data-grp="settings" id="sec-display">
     <button type="button" class="sl-back" onclick="closeSec()"><span aria-hidden="true">&#x2039;</span><span>Settings</span></button>
     <h2>Display</h2>
@@ -1145,34 +1212,6 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
     </p>
   </div>
 
-  <div class="card" data-grp="status" id="sec-heatpump">
-    <h2>Heat pump sensors</h2>
-    <div class="grid">
-      <div class="stat"><div class="k">Unit link</div><div class="v" id="dgLink">--</div></div>
-      <div class="stat"><div class="k">Operating</div><div class="v" id="dgOp">--</div></div>
-      <div class="stat"><div class="k">Compressor</div><div class="v" id="dgComp">--</div></div>
-      <div class="stat"><div class="k">Unit room temp</div><div class="v" id="dgRoom">--</div></div>
-      <div class="stat"><div class="k">Outside temp</div><div class="v" id="dgOut">--</div></div>
-      <div class="stat"><div class="k">Input power</div><div class="v" id="dgPow">--</div></div>
-      <div class="stat"><div class="k">Energy</div><div class="v" id="dgEng">--</div></div>
-      <div class="stat"><div class="k">Runtime</div><div class="v" id="dgRun">--</div></div>
-      <div class="stat"><div class="k">Target humidity</div><div class="v" id="dgHum">--</div></div>
-      <div class="stat"><div class="k">Sub-mode</div><div class="v" id="dgSub">--</div></div>
-      <div class="stat"><div class="k">Fan stage</div><div class="v" id="dgStg">--</div></div>
-      <div class="stat"><div class="k">Error</div><div class="v" id="dgErr">--</div></div>
-    </div>
-  </div>
-
-  <div class="card" data-grp="status" id="sec-activity">
-    <h2>Activity</h2>
-    <div class="sub" style="margin:-4px 0 12px">Recent changes to this zone, with who made them.</div>
-    <div id="actList" class="act-list"><div class="act-empty">Loading…</div></div>
-    <div id="actMore" style="margin-top:10px;display:none">
-      <button class="btn" onclick="loadMoreActivity()">Load older</button>
-    </div>
-    <button class="btn btn-danger" style="margin-top:10px" onclick="clearActivity()">Clear activity log</button>
-  </div>
-
   <div class="card" data-grp="settings" id="sec-device">
     <button type="button" class="sl-back" onclick="closeSec()"><span aria-hidden="true">&#x2039;</span><span>Settings</span></button>
     <h2>Device</h2>
@@ -1231,6 +1270,39 @@ const I18N = { fr: {
   "Controller":"Contrôleur","Power":"Alimentation","Heat pump":"Pompe à chaleur",
   "Activity":"Activité","Display":"Affichage","Wide vane":"Volet large",
   "Firmware":"Micrologiciel","Web access":"Accès web","Device":"Appareil",
+  // Status dashboard
+  "Recent activity":"Activité récente","See all activity":"Voir toute l’activité","Show less":"Afficher moins",
+  "Head sensor":"Capteur de l’unité","Power draw":"Consommation","Doing now":"En cours",
+  "Room temp (head’s sensor)":"Temp. pièce (capteur de l’unité)","Fault":"Défaut","Totals":"Totaux",
+  "Drops (last 24 h)":"Coupures (24 h)","Drops since restart":"Coupures depuis le redémarrage",
+  "Broker":"Courtier","Lowest since restart":"Minimum depuis le redémarrage","Lowest ever":"Minimum absolu",
+  "Sags since restart":"Baisses depuis le redémarrage","IP address":"Adresse IP","Hostname":"Nom d’hôte",
+  "Last restart":"Dernier redémarrage","Restarts":"Redémarrages","Free memory":"Mémoire libre",
+  "Not measured":"Non mesuré","Software":"Logiciel","Power on":"Mise sous tension","Crash":"Plantage","Watchdog":"Chien de garde",
+  "Brownout":"Sous-tension","Reset pin":"Broche de réinitialisation","Wake from sleep":"Sortie de veille",
+  "outside temp":"temp. extérieure","humidity":"humidité","power draw":"consommation","energy":"énergie","runtime":"durée de fonctionnement",
+  "Not reported by this unit: {list}.":"Non fourni par cette unité : {list}.",
+  "Excellent":"Excellent","Fair":"Moyen",
+  "Heat pump not connected":"Pompe à chaleur non connectée","Heat pump fault":"Défaut de la pompe à chaleur",
+  "Wi-Fi signal weak":"Signal Wi-Fi faible","Wi-Fi keeps dropping":"Le Wi-Fi se coupe souvent",
+  "Home Assistant disconnected":"Home Assistant déconnecté","Power supply dipped":"Baisse d’alimentation",
+  "Can’t reach this controller":"Contrôleur injoignable","Retrying…":"Nouvel essai…",
+  "All good":"Tout va bien","Heat pump, Wi-Fi and Home Assistant connected":"Pompe à chaleur, Wi-Fi et Home Assistant connectés",
+  "Heat pump and Wi-Fi connected":"Pompe à chaleur et Wi-Fi connectés","No faults":"Aucun défaut",
+  "Compressor {n} Hz":"Compresseur {n} Hz","Compressor off":"Compresseur arrêté",
+  "1 drop":"1 coupure","{n} drops":"{n} coupures","1 brownout":"1 sous-tension","{n} brownouts":"{n} sous-tensions",
+  "1 sag":"1 baisse","{n} sags":"{n} baisses","Steady · no sags":"Stable · aucune baisse","Up {t}":"En marche depuis {t}",
+  "Updated to v{v}":"Mis à jour vers v{v}","Firmware updated":"Micrologiciel mis à jour","Powered on":"Mis sous tension",
+  "Restarted":"Redémarré","Restarted after a crash":"Redémarré après un plantage","Restarted by watchdog":"Redémarré par le chien de garde",
+  "Restarted after a power dip":"Redémarré après une baisse de tension","Restarted (reset pin)":"Redémarré (broche de réinitialisation)",
+  "No activity recorded yet.":"Aucune activité enregistrée.",
+  "1 brownout reset.":"1 redémarrage par sous-tension.","{n} brownout resets.":"{n} redémarrages par sous-tension.",
+  "1 voltage sag since restart.":"1 baisse de tension depuis le redémarrage.","{n} voltage sags since restart.":"{n} baisses de tension depuis le redémarrage.",
+  "Check the 5 V supply.":"Vérifiez l’alimentation 5 V.","Dropped {n} times in the last 24 h.":"{n} coupures en 24 h.",
+  "Move the router closer or add an access point.":"Rapprochez le routeur ou ajoutez un point d’accès.",
+  "Can’t reach the MQTT broker.":"Impossible de joindre le courtier MQTT.","The indoor unit reports {e}.":"L’unité intérieure signale {e}.",
+  "Version {v} is ready to install in Settings.":"La version {v} est prête à installer dans Réglages.",
+  "Check the cable between the controller and the indoor unit.":"Vérifiez le câble entre le contrôleur et l’unité intérieure.",
   // Settings list
   "Comfort":"Confort","Zone":"Zone","Connection":"Connexion","Security":"Sécurité","System":"Système",
   "Home Assistant":"Home Assistant","API access":"Accès API","Advanced":"Avancé",
@@ -1590,16 +1662,8 @@ async function jget(url,opts){
   finally{ clearTimeout(t); }
 }
 
-// Scroll a card into view below the sticky section nav, which wraps to several
-// rows on a phone (so a fixed scroll-margin would hide the card's title).
-function jumpTo(id){
-  const el=document.getElementById(id);
-  if(!el) return;
-  if(el.dataset.grp==='settings'){ openSec(id); return; }
-  const nav=[...document.querySelectorAll('.secnav')].find(n=>n.offsetParent!==null);
-  const off=(nav?nav.getBoundingClientRect().height:0)+16;
-  window.scrollTo({top:el.getBoundingClientRect().top+window.scrollY-off,behavior:'smooth'});
-}
+// Jump to a Settings section card (used by links elsewhere in the UI).
+function jumpTo(id){ if(document.getElementById(id)) openSec(id); }
 // Settings is a list of sections (#setList); one section card shows at a time.
 // Opening one pushes a history entry so the browser/phone Back returns to the list.
 let setSec=null, setListY=0;
@@ -1623,6 +1687,8 @@ function closeSec(){
   setSec=null; renderSettingsView(); window.scrollTo(0,setListY);
 }
 window.addEventListener('popstate',e=>{
+  const st=(e.state&&e.state.st)||null;
+  if(st!==stSec){ stSec=st; renderStatusView(); window.scrollTo(0,st?0:stHomeY); }
   const s=(e.state&&e.state.sec)||null;
   if(s===setSec) return;
   setSec=s;
@@ -1683,6 +1749,7 @@ function showTab(name){
   // current spike and these units have no LiPo buffer, so we never auto-scan.
   netTabActive=(name==='settings');
   statusTabActive=(name==='status');
+  if(statusTabActive){ stSec=null; actExpanded=false; renderStatusView(); renderStatus(); renderActivity(); }
   if(netTabActive){ setSec=null; renderSettingsView(); }
   if(statusTabActive && authState.role==='admin'){ refreshActivity(true); }
   if(netTabActive && authState.role==='admin'){ loadPark(); loadSensor(); }
@@ -1697,8 +1764,6 @@ function showTab(name){
   histTabActive=(name==='history');
   if(histTabActive && authState.role==='admin'){ hist.end=null; histLoad(); }
 }
-
-function badge(el,on){el.className='badge '+(on?'on':'off')}
 
 function fmtUptime(s){
   s=Math.floor(s);const d=Math.floor(s/86400);s%=86400;
@@ -1740,25 +1805,26 @@ async function refresh(){
     if(r.status===401){ $('loginGate').classList.remove('hidden'); $('lgPass').focus(); return; }
     s=await r.json();
   }catch(e){
-    badge($('bWifi'),false);
+    stOffline=true;
     $('subtitle').textContent=i18n('Disconnected');
+    try{ renderStatus(); }catch(_){}
     return;
   }
   // Phase 2 — render the status we successfully fetched. Guarded on its own so a
   // rendering bug logs (and stays visible) instead of faking a disconnect; the
-  // WiFi badge stays green because the device demonstrably answered.
+  // Status banner never says "can't reach" because the device demonstrably answered.
+  stOffline=false;
   try{
-    badge($('bWifi'),true);
-    badge($('bUnit'),s.unit_connected);
-    badge($('bMqtt'),s.mqtt_connected);
+    stS=s;
     maybeShowWizard(s.mqtt_configured);
     $('subtitle').textContent=s.hostname+' · '+s.ip;
     curHost=s.hostname||'';
     if(s.name!=null) curName=s.name;
     if(!nameEditing) applyHeaderName();
     $('hdrver').textContent='firmware v'+s.version;
-    $('ver').textContent=s.version;
+    $('ver').textContent='v'+s.version;
     $('ip').textContent=s.ip;
+    $('sysHost').textContent=s.hostname||'--';
     curRssi=s.rssi; renderCurrent();
     $('wsNet').textContent=s.ssid||'--';
     $('wsSig').innerHTML=(s.rssi?((s.rssi+' dBm')+' '+barsHtml(s.rssi)):'--');
@@ -1767,31 +1833,36 @@ async function refresh(){
     $('heap').textContent=(s.free_heap/1024|0)+' KB';
     const p=s.power||{};
     const hasBatt=p.present&&p.battery_present;
-    $('vbat').textContent=p.present?(hasBatt?(p.vbat_mv/1000).toFixed(2)+' V':i18n('None')):'N/A';
-    $('vin').textContent=p.present?((p.input_mv!=null?p.input_mv:p.vin_mv)/1000).toFixed(2)+' V':'N/A';
-    $('vinPin').textContent=p.present?(p.vin_mv/1000).toFixed(2)+' V':'N/A';
-    $('vinOut').textContent=p.present?((p.vinout_mv||0)/1000).toFixed(2)+' V':'N/A';
-    $('psrc').textContent=p.present?(p.source||'--'):'N/A';
-    $('chg').textContent=p.present?(hasBatt?(p.charging?i18n('Yes'):i18n('No')):i18n('None')):'N/A';
+    const V=mv=>(mv/1000).toFixed(2)+' V';
+    kvSet('vin',p.present?V(p.input_mv!=null?p.input_mv:p.vin_mv):i18n('Not measured'));
+    kvSet('psrc',p.present?i18n(PSRC[p.source]||p.source||'--'):null);
+    kvSet('vinPin',p.present?V(p.vin_mv):null);
+    kvSet('vinOut',p.present?V(p.vinout_mv||0):null);
+    kvSet('vbat',hasBatt?V(p.vbat_mv):null);
+    kvSet('chg',hasBatt?i18n(p.charging?'Yes':'No'):null);
     const d=s.diag||{};
-    $('vinMin').textContent=(d.vin_min_mv?((d.vin_min_mv/1000).toFixed(2)+' V'):'--');
-    $('vinSags').textContent=(d.vin_sag_count!=null?d.vin_sag_count:'--');
-    $('rst').textContent=(d.reset_reason||'--');
-    $('rst').style.color=d.last_was_brownout?'#ff5252':'';
+    kvSet('vinMin',d.vin_min_mv?V(d.vin_min_mv):null);
+    kvSet('vinMinEver',d.vin_min_ever_mv?V(d.vin_min_ever_mv):null);
+    kvSet('vinSags',d.vin_sag_count!=null?String(d.vin_sag_count):null,d.vin_sag_count>0?'warn':'');
+    const rr=d.last_was_brownout?'brownout':d.reset_reason;
+    kvSet('rst',rr?i18n(RST_TXT[rr]||rr):null,d.last_was_brownout?'warn':'');
+    kvSet('sysBoots',d.boot_count!=null?String(d.boot_count):null);
     $('bo').textContent=(d.brownout_count!=null?d.brownout_count:'--');
-    $('bo').style.color=(d.brownout_count>0)?'#ff5252':'';
+    $('bo').className=(d.brownout_count>0)?'warn':'';
     $('boReset').style.display=(d.brownout_count>0)?'inline-flex':'none';
+    kvSet('wsDrops24',d.wifi_drops_24h!=null?String(d.wifi_drops_24h):null,d.wifi_drops_24h>=3?'warn':'');
     $('wsDrops').textContent=(d.wifi_drop_count!=null?d.wifi_drop_count:'--');
-    $('wsDrops').style.color=(d.wifi_drop_count>0)?'#ff5252':'';
     $('wdReset').style.display=(d.wifi_drop_count>0)?'inline-flex':'none';
     $('stubNote').style.display=s.unit_connected?'none':'block';
     $('dgLink').textContent=s.unit_connected?i18n('Connected'):i18n('Not connected');
+    $('dgLink').className='v'+(s.unit_connected?'':' bad');
+    renderStatus();
   }catch(e){
     console.error('status render failed',e);
   }
 
   // Phase 3 — settings/climate render. Separate guard: a failure here must not
-  // touch the WiFi badge either.
+  // touch the connection state either.
   if(!userEditing){
     try{
       const c=await (await fetch('/api/settings')).json();
@@ -1811,25 +1882,147 @@ async function refresh(){
       if(c.wideVane&&confirmField('wideVane',c.wideVane))$('wideVane').value=c.wideVane;
       applyCaps(c.caps);
       renderClimate();
-      // Diagnostics tab — live serial telemetry.
-      const conn=!!c.connected;
-      $('dgOp').textContent=conn?(c.operating?i18n('Yes'):i18n('No')):'--';
-      $('dgComp').textContent=(conn&&c.compressorFrequency!=null)?(c.compressorFrequency+' Hz'):'--';
+      stC=c;
+      // Heat pump detail — live serial telemetry. Optional fields are only in
+      // the payload when the unit reports them; their rows hide otherwise.
+      const conn=!!c.connected, has=k=>conn&&c[k]!=null;
+      $('dgOp').textContent=conn?($('opState').textContent||'--'):'--';
+      const hz=c.compressorFrequency;
+      $('dgComp').textContent=(conn&&hz!=null)?(hz>0?hz+' Hz':i18n('Off')+' (0 Hz)'):'--';
       $('dgRoom').textContent=(conn&&c.roomTemperature!=null&&c.roomTemperature>0)?(fmtTemp(c.roomTemperature)+' '+unitSym()):'--';
-      // Extended telemetry — each field only present in the payload when the
-      // unit actually reported it, so absence renders as "--".
-      $('dgOut').textContent=(conn&&c.outsideTemp!=null)?(fmtTemp(c.outsideTemp)+' '+unitSym()):'--';
-      $('dgPow').textContent=(conn&&c.inputPowerW!=null)?(c.inputPowerW+' W'):'--';
-      $('dgEng').textContent=(conn&&c.energyKwh!=null)?(c.energyKwh.toFixed(1)+' kWh'):'--';
-      $('dgRun').textContent=(conn&&c.runtimeHours!=null)?(Math.round(c.runtimeHours)+' h'):'--';
-      $('dgHum').textContent=(conn&&c.targetHumidity!=null)?(c.targetHumidity+' %'):'--';
-      $('dgSub').textContent=(conn&&c.subMode)?c.subMode:'--';
-      $('dgStg').textContent=(conn&&c.stage)?c.stage:'--';
-      $('dgErr').textContent=(conn&&c.errorCode)?c.errorCode:'--';
+      const fault=conn&&c.errorCode&&c.errorCode!=='No Error';
+      $('dgErr').textContent=!conn?'--':fault?c.errorCode:i18n('None');
+      $('dgErr').className='v'+(fault?' bad':'');
+      kvSet('dgStg',conn&&c.stage?titleCase(c.stage):null);
+      kvSet('dgSub',conn&&c.subMode?titleCase(c.subMode):null);
+      kvSet('dgOut',has('outsideTemp')?(fmtTemp(c.outsideTemp)+' '+unitSym()):null);
+      kvSet('dgPow',has('inputPowerW')?(c.inputPowerW+' W'):null);
+      kvSet('dgHum',has('targetHumidity')?(c.targetHumidity+' %'):null);
+      kvSet('dgEng',has('energyKwh')?(c.energyKwh.toFixed(1)+' kWh'):null);
+      kvSet('dgRun',has('runtimeHours')?(Math.round(c.runtimeHours)+' h'):null);
+      const tot=has('energyKwh')||has('runtimeHours');
+      $('dgTot').style.display=$('dgTotH').style.display=tot?'':'none';
+      const miss=[['outsideTemp','outside temp'],['targetHumidity','humidity'],['inputPowerW','power draw'],
+                  ['energyKwh','energy'],['runtimeHours','runtime']].filter(([k])=>!has(k)).map(([,n])=>i18n(n));
+      $('dgMissing').textContent=(conn&&miss.length)?i18n('Not reported by this unit: {list}.',{list:miss.join(', ')}):'';
+      renderStatus();
     }catch(e){
       console.error('settings update failed',e);
     }
   }
+}
+
+// ── Status dashboard ──────────────────────────────────────────────────
+let stS=null, stC=null, stOffline=false, stSec=null, stHomeY=0;
+const RST_TXT={poweron:'Power on',sw:'Software',panic:'Crash',int_wdt:'Watchdog',task_wdt:'Watchdog',
+  wdt:'Watchdog',brownout:'Brownout',ext:'Reset pin',deepsleep:'Wake from sleep'};
+const PSRC={vin:'5VIN pin',vinout:'5VINOUT port',usb:'USB',battery:'Battery'};
+const ST_OK='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
+const ST_BANG='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" aria-hidden="true"><path d="M12 6v8"/><circle cx="12" cy="18.5" r=".6" fill="currentColor"/></svg>';
+// Set a detail row's value; null hides the row (field not reported).
+function kvSet(id,val,cls){
+  const e=$(id); if(!e) return;
+  e.textContent=val==null?'':val;
+  if(cls!==undefined) e.className='v'+(cls?' '+cls:'');
+  const row=e.closest?e.closest('.kv'):null;
+  if(row) row.style.display=val==null?'none':'';
+}
+function titleCase(x){ x=String(x); return x.charAt(0)+x.slice(1).toLowerCase(); }
+function plural(n,one,many){ return n===1?i18n(one):i18n(many,{n}); }
+function wifiQuality(r){ return !r?'--':r>=-55?'Excellent':r>=-67?'Good':r>=-75?'Fair':'Weak'; }
+// Problems worth flagging, most serious first. Each names the tile it tints.
+function statusIssues(s,c,upd){
+  const out=[]; if(!s) return out;
+  const d=s.diag||{};
+  if(!s.unit_connected)
+    out.push({lvl:'bad',tile:'tHp',t:'Heat pump not connected',s:i18n('Check the cable between the controller and the indoor unit.')});
+  else if(c&&c.connected&&c.errorCode&&c.errorCode!=='No Error')
+    out.push({lvl:'bad',tile:'tHp',t:'Heat pump fault',s:i18n('The indoor unit reports {e}.',{e:c.errorCode})});
+  const weak=!!s.rssi&&s.rssi<-75, drops=d.wifi_drops_24h||0;
+  if(weak||drops>=3)
+    out.push({lvl:'warn',tile:'tWifi',t:weak?'Wi-Fi signal weak':'Wi-Fi keeps dropping',
+      s:(drops>=3?i18n('Dropped {n} times in the last 24 h.',{n:drops})+' ':'')+i18n('Move the router closer or add an access point.')});
+  if(s.mqtt_configured&&!s.mqtt_connected)
+    out.push({lvl:'warn',tile:'tHa',t:'Home Assistant disconnected',s:i18n('Can’t reach the MQTT broker.')});
+  const bo=d.brownout_count||0, sags=d.vin_sag_count||0;
+  if(bo||sags)
+    out.push({lvl:'warn',tile:'tPow',t:'Power supply dipped',
+      s:(bo?plural(bo,'1 brownout reset.','{n} brownout resets.'):plural(sags,'1 voltage sag since restart.','{n} voltage sags since restart.'))+' '+i18n('Check the 5 V supply.')});
+  if(upd&&upd.update_available)
+    out.push({lvl:'warn',tile:'tSys',t:'Update available',s:i18n('Version {v} is ready to install in Settings.',{v:upd.latest})});
+  return out;
+}
+function stTile(id,lvl){ const t=$(id); if(t) t.className='tile'+(id==='tHp'?' wide':'')+(lvl?' '+lvl:''); }
+function stTxt(id,v){ const e=$(id); if(e) e.textContent=v; }
+function renderStatus(){
+  const b=$('stBanner'); if(!b) return;
+  const s=stS, c=stC, issues=stOffline?[]:statusIssues(s,c,updLast);
+  let lvl='ok', t, sub;
+  if(stOffline){ lvl='bad'; t='Can’t reach this controller'; sub=i18n('Retrying…'); }
+  else if(!s){ t='--'; sub=''; }
+  else if(issues.length){
+    lvl=issues[0].lvl; t=issues[0].t; sub=issues[0].s;   // other problems show on their tiles
+  }else{
+    t='All good';
+    sub=i18n(s.mqtt_configured?'Heat pump, Wi-Fi and Home Assistant connected':'Heat pump and Wi-Fi connected');
+  }
+  b.className='sth '+lvl;
+  $('stBIc').innerHTML=lvl==='ok'?ST_OK:ST_BANG;
+  stTxt('stBT',i18n(t)); stTxt('stBS',sub);
+  if(!s) return;
+  const lv={}; issues.forEach(i=>{ if(!lv[i.tile]) lv[i.tile]=i.lvl; });
+  // Heat pump: what it's doing, power draw (or compressor), and the head's own room reading.
+  const conn=s.unit_connected&&!!(c&&c.connected);
+  const fault=conn&&c.errorCode&&c.errorCode!=='No Error';
+  stTile('tHp',lv.tHp);
+  stTxt('tHpV',!s.unit_connected?i18n('Not connected'):conn?($('opState').textContent||'--'):'--');
+  stTxt('tHpS',!conn?'':fault?c.errorCode:i18n('No faults'));
+  const hz=conn?c.compressorFrequency:null;
+  if(conn&&c.inputPowerW!=null){
+    stTxt('tHp2L',i18n('Power draw')); stTxt('tHp2V',c.inputPowerW+' W');
+    stTxt('tHp2S',hz>0?i18n('Compressor {n} Hz',{n:hz}):i18n('Compressor off'));
+  }else{
+    stTxt('tHp2L',i18n('Compressor')); stTxt('tHp2V',hz==null?'--':hz>0?hz+' Hz':i18n('Off')); stTxt('tHp2S','');
+  }
+  stTxt('tHp3V',(conn&&c.roomTemperature>0)?fmtTemp(c.roomTemperature)+'°':'--');
+  // Wi-Fi
+  const d=s.diag||{}, drops=d.wifi_drops_24h||0;
+  stTile('tWifi',lv.tWifi);
+  stTxt('tWifiV',i18n(wifiQuality(s.rssi)));
+  stTxt('tWifiS',s.rssi?(s.rssi+' dBm \u00b7 '+(drops?plural(drops,'1 drop','{n} drops'):(s.ssid||''))):'');
+  // Home Assistant
+  stTile('tHa',lv.tHa||(s.mqtt_configured?'':'off'));
+  stTxt('tHaV',i18n(!s.mqtt_configured?'Not set up':s.mqtt_connected?'Connected':'Disconnected'));
+  stTxt('haConn',i18n(!s.mqtt_configured?'Not set up':s.mqtt_connected?'Connected':'Disconnected'));
+  kvSet('haHost',mqLast&&mqLast.host?mqLast.host+(mqLast.port?':'+mqLast.port:''):null);
+  // Power
+  const p=s.power||{}, bo=d.brownout_count||0, sags=d.vin_sag_count||0;
+  stTile('tPow',lv.tPow);
+  stTxt('tPowV',p.present?((p.input_mv!=null?p.input_mv:p.vin_mv)/1000).toFixed(2)+' V':'--');
+  stTxt('tPowS',bo?plural(bo,'1 brownout','{n} brownouts'):sags?plural(sags,'1 sag','{n} sags'):i18n('Steady \u00b7 no sags'));
+  // System
+  const upd=updLast&&updLast.update_available;
+  stTile('tSys',lv.tSys);
+  stTxt('tSysV','v'+s.version);
+  stTxt('tSysS',upd?i18n('Update available'):i18n('Up {t}',{t:fmtUptime(s.uptime_s)}));
+}
+// Tapping a tile shows its detail view; Back (button or browser) returns.
+function renderStatusView(){
+  if(!statusTabActive) return;
+  document.querySelectorAll('#panel-system [data-grp="status"]').forEach(c=>{
+    c.style.display=(stSec?c.id===stSec:c.id==='stHome')?'':'none';
+  });
+}
+function openStat(id){
+  if(!stSec) stHomeY=window.scrollY;
+  stSec=id;
+  history.pushState({st:id},'');
+  renderStatusView();
+  window.scrollTo(0,0);
+}
+function closeStat(){
+  if(history.state&&history.state.st){ history.back(); return; }
+  stSec=null; renderStatusView(); window.scrollTo(0,stHomeY);
 }
 
 // ── Climate dial ──────────────────────────────────────────────────────
@@ -2463,7 +2656,7 @@ function updMsg(m,cls){const el=$('updMsg');el.className='status '+cls;el.textCo
 async function refreshUpdate(){
   try{
     const u=await (await jget('/api/update')).json();
-    if(!u.checking){ updLast=u; renderSetList(); }
+    if(!u.checking){ updLast=u; renderSetList(); renderStatus(); }
     $('updCur').textContent=u.current||'--';
     $('updLatest').textContent=u.checked?(u.latest||'--'):(u.checking?i18n('Checking…'):'—');
     $('updCheckBtn').disabled=u.checking;
@@ -2514,7 +2707,7 @@ function mqChanged(){ $('mqSaveBtn').disabled=mqForm()===mqSaved&&!$('mqPass').v
 async function loadMqtt(){
   try{
     const m=await (await jget('/api/mqtt')).json();
-    mqLast=m; renderSetList();
+    mqLast=m; renderSetList(); renderStatus();
     // Don't clobber half-entered input while the user is editing the form; the
     // 30s poll would otherwise wipe values before they hit "Save".
     if(!mqEditing){
@@ -3861,7 +4054,7 @@ function histWire(){
 // cat: 0 Mode,1 Power,2 Setpoint,3 Fan,4 Group,5 Membership,6 Ota,7 Net,8 Unit,9 Fault,10 System
 const ACT_ICONS=['\u{1F504}','\u23FB','\u{1F321}\uFE0F','\u{1F4A8}','\u{1F465}',
                  '\u{1F517}','\u2B07\uFE0F','\u{1F4F6}','\u{1F50C}','\u26A0\uFE0F','\u2139\uFE0F'];
-let actLimit=20, actData=null;
+let actLimit=20, actData=null, actExpanded=false;
 function actAgo(secs){
   if(secs<0)secs=0;
   if(secs<45)return'just now';
@@ -3886,22 +4079,57 @@ function actWho(ev){
     default: return 'Device';
   }
 }
+// Friendly boot line from "Device started v1.4.0 (sw, brownout)" (version is
+// absent on firmware older than 1.4).
+const BOOT_TXT={poweron:'Powered on',sw:'Restarted',panic:'Restarted after a crash',int_wdt:'Restarted by watchdog',
+  task_wdt:'Restarted by watchdog',wdt:'Restarted by watchdog',brownout:'Restarted after a power dip',ext:'Restarted (reset pin)'};
+function actBoot(m){
+  const r=/^Device started(?: v(\S+))? \(([^,)]+)(, brownout)?\)/.exec(m);
+  if(!r) return null;
+  return {ver:r[1]||null,txt:BOOT_TXT[r[3]?'brownout':r[2]]||('Restarted ('+r[2]+')')};
+}
+// Collapse each update's "started" / "installed — rebooting" / boot entries into one.
+// Events arrive newest first.
+function actMerge(evs){
+  const out=[];
+  for(let i=0;i<evs.length;i++){
+    const e=evs[i], m=e.msg||'';
+    if(e.cat===6&&m.startsWith('Firmware update installed')){
+      const prev=out[out.length-1];
+      let ver=null, ts=e.ts;
+      if(prev&&prev._boot&&(!prev.ts||!e.ts||prev.ts-e.ts<600)){ out.pop(); ver=prev._ver; if(prev.ts) ts=prev.ts; }
+      const nx=evs[i+1];
+      if(nx&&nx.cat===6&&nx.msg==='Firmware update started') i++;
+      out.push(Object.assign({},e,{ts,txt:ver?i18n('Updated to v{v}',{v:ver}):i18n('Firmware updated')}));
+      continue;
+    }
+    const bt=e.cat===10?actBoot(m):null;
+    if(bt){ out.push(Object.assign({},e,{txt:i18n(bt.txt),_boot:true,_ver:bt.ver})); continue; }
+    out.push(Object.assign({},e,{txt:convTempStr(m)}));
+  }
+  return out;
+}
+function toggleActivity(){ actExpanded=!actExpanded; renderActivity(); }
 function renderActivity(){
   const list=$('actList'); if(!list) return;
   const evs=(actData&&actData.events)||[];
   const now=(actData&&actData.now_epoch)||0;
+  const all=actMerge(evs), shown=actExpanded?all:all.slice(0,5);
   list.textContent='';
-  if(!evs.length){
+  if(!actData){
     const e=document.createElement('div'); e.className='act-empty';
-    e.textContent='No activity recorded yet.'; list.appendChild(e);
+    e.textContent=i18n('Loading…'); list.appendChild(e);
+  }else if(!all.length){
+    const e=document.createElement('div'); e.className='act-empty';
+    e.textContent=i18n('No activity recorded yet.'); list.appendChild(e);
   }
-  evs.forEach(ev=>{
+  shown.forEach(ev=>{
     const row=document.createElement('div'); row.className='act-item';
     const ico=document.createElement('div'); ico.className='act-ico';
     ico.textContent=ACT_ICONS[ev.cat]||'\u2139\uFE0F';
     const main=document.createElement('div'); main.className='act-main';
     const msg=document.createElement('div'); msg.className='act-msg';
-    msg.textContent=convTempStr(ev.msg||'');   // trusted, but textContent regardless
+    msg.textContent=ev.txt;                    // trusted, but textContent regardless
     const meta=document.createElement('div'); meta.className='act-meta';
     meta.appendChild(document.createTextNode(actTime(ev,now)));
     const who=actWho(ev);
@@ -3914,6 +4142,12 @@ function renderActivity(){
     main.appendChild(msg); main.appendChild(meta);
     row.appendChild(ico); row.appendChild(main); list.appendChild(row);
   });
+  const sa=$('actSeeAll');
+  if(sa){
+    sa.style.display=(actExpanded||all.length>5)?'':'none';
+    sa.textContent=i18n(actExpanded?'Show less':'See all activity');
+  }
+  const box=$('actAll'); if(box) box.style.display=actExpanded?'':'none';
   const more=$('actMore');
   if(more) more.style.display=(evs.length>=actLimit && actLimit<100)?'':'none';
 }
