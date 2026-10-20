@@ -4072,7 +4072,7 @@ function actTime(ev,now){
 }
 function actWho(ev){
   switch(ev.act){
-    case 1: return ev.name || 'Web UI';       // WebUI (name = username)
+    case 1: return [ev.name||'Web UI',ev.ip].filter(Boolean).join(' \u00B7 ');  // WebUI: username · client IP
     case 2: return 'Home Assistant';
     case 3: return ev.name || 'another zone'; // Group (name = peer)
     case 4: return 'Local';

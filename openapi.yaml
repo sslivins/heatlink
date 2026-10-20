@@ -1519,6 +1519,7 @@ components:
           description: 'Actor: 0 System, 1 WebUI, 2 HomeAssistant, 3 Group, 4 Local.'
         msg: { type: string }
         name: { type: string, description: Username or peer name; omitted for system events }
+        ip: { type: string, description: IPv4 address of the web UI / API client that made the change; omitted otherwise }
     EventsResponse:
       type: object
       properties:

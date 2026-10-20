@@ -50,14 +50,16 @@ void init();
 /// Record one event. @p msg is a firmware-composed, trusted sentence and must
 /// NOT contain untrusted input. @p name is an optional label that MAY be
 /// untrusted (a peer friendly-name or a username); it is stored verbatim and
-/// escaped at render time. Thread-safe; cheap enough to call from any task.
+/// escaped at render time. @p ip is the requesting client's IPv4 address for
+/// web UI changes (empty otherwise). Thread-safe; cheap enough to call from any
+/// task.
 void log(Cat cat, Actor actor, const std::string& msg,
-         const std::string& name = "");
+         const std::string& name = "", const std::string& ip = "");
 
 /// Serialize the newest events with @c seq > @p since (most-recent first),
 /// capped at @p limit, as a JSON object:
 ///   { "now_epoch":N, "clock_valid":bool, "seq":N,
-///     "events":[ {seq,ts,uptime_ms,cat,actor,msg,name}, ... ] }
+///     "events":[ {seq,ts,uptime_ms,cat,actor,msg,name,ip}, ... ] }
 /// Served from the RAM ring, so this is fast even under polling.
 std::string get_json(uint32_t since, uint32_t limit);
 

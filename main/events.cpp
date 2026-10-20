@@ -35,7 +35,7 @@ constexpr const char* kSeqKey  = "seq";
 constexpr time_t kClockValidAfter = 1700000000;
 
 // RAM ring backing the web UI's Activity view. Sized so a typical overnight of
-// activity is served without touching the file. ~114 bytes each ⇒ ~11 KB.
+// activity is served without touching the file. ~130 bytes each ⇒ ~12 KB.
 constexpr int kRing = 96;
 
 struct Rec {
@@ -46,6 +46,7 @@ struct Rec {
     uint8_t  actor = 0;
     char     msg[80]  = {0};
     char     name[32] = {0};
+    char     ip[16]   = {0};  // web UI requester (dotted IPv4), else empty
 };
 
 std::mutex g_mtx;
@@ -87,6 +88,7 @@ cJSON* rec_to_json(const Rec& r) {
     cJSON_AddNumberToObject(j, "act", r.actor);
     cJSON_AddStringToObject(j, "msg", r.msg);
     if (r.name[0]) cJSON_AddStringToObject(j, "name", r.name);
+    if (r.ip[0]) cJSON_AddStringToObject(j, "ip", r.ip);
     return j;
 }
 
@@ -133,6 +135,7 @@ bool parse_line(const char* line, Rec& out) {
         const cJSON* act = cJSON_GetObjectItem(j, "act");
         const cJSON* msg = cJSON_GetObjectItem(j, "msg");
         const cJSON* nm  = cJSON_GetObjectItem(j, "name");
+        const cJSON* ip  = cJSON_GetObjectItem(j, "ip");
         if (cJSON_IsNumber(ts))  out.ts    = (uint32_t)ts->valuedouble;
         if (cJSON_IsNumber(up))  out.up_ms = (uint32_t)up->valuedouble;
         if (cJSON_IsNumber(cat)) out.cat   = (uint8_t)cat->valueint;
@@ -141,6 +144,8 @@ bool parse_line(const char* line, Rec& out) {
             strlcpy(out.msg, msg->valuestring, sizeof(out.msg));
         if (cJSON_IsString(nm) && nm->valuestring)
             strlcpy(out.name, nm->valuestring, sizeof(out.name));
+        if (cJSON_IsString(ip) && ip->valuestring)
+            strlcpy(out.ip, ip->valuestring, sizeof(out.ip));
         ok = true;
     }
     cJSON_Delete(j);
@@ -192,7 +197,8 @@ void init() {
              g_count, (unsigned long)g_seq, (int)g_mounted);
 }
 
-void log(Cat cat, Actor actor, const std::string& msg, const std::string& name) {
+void log(Cat cat, Actor actor, const std::string& msg, const std::string& name,
+         const std::string& ip) {
     Rec r;
     r.cat   = (uint8_t)cat;
     r.actor = (uint8_t)actor;
@@ -201,14 +207,15 @@ void log(Cat cat, Actor actor, const std::string& msg, const std::string& name) 
     r.ts = (now > kClockValidAfter) ? (uint32_t)now : 0;
     strlcpy(r.msg, msg.c_str(), sizeof(r.msg));
     if (!name.empty()) strlcpy(r.name, name.c_str(), sizeof(r.name));
+    if (!ip.empty()) strlcpy(r.ip, ip.c_str(), sizeof(r.ip));
 
     std::lock_guard<std::mutex> lock(g_mtx);
     r.seq = ++g_seq;
     ring_push(r);
     append_line(r);
     persist_seq(g_seq);
-    ESP_LOGI(TAG, "#%lu [%u/%u] %s%s%s", (unsigned long)r.seq, r.cat, r.actor,
-             r.msg, r.name[0] ? " :: " : "", r.name);
+    ESP_LOGI(TAG, "#%lu [%u/%u] %s%s%s%s%s", (unsigned long)r.seq, r.cat, r.actor,
+             r.msg, r.name[0] ? " :: " : "", r.name, r.ip[0] ? " @ " : "", r.ip);
 }
 
 std::string get_json(uint32_t since, uint32_t limit) {
