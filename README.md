@@ -343,7 +343,14 @@ vanes) is open to anyone on your network unless you set the optional per-head
 takes either password and the one entered decides the access level. Heads upgraded from older firmware without a password
 stay open and show a banner asking you to set one.
 
-**Forgot the admin password?** Run the reset procedure: **cut power to the head
+Climate-only users (e.g. renters) see the **Climate**, **Zones** (read-only) and
+**History** tabs. Under Web access the admin can also **limit the temperature
+range** climate-only users can set, and turn off **Reset by cutting power** so
+anyone with breaker access can't reset the admin password (the Home Assistant
+button still can). Both are per head; MQTT/Home Assistant and API-key clients
+are not limited.
+
+**Forgot the admin password?** Unless it was turned off, run the reset procedure: **cut power to the head
 5 times, with less than 30 s between cuts** (each time, power it back on and
 cut it again within 30 s). On a head without a battery a power-on reset counts
 as a cut; with a battery, the input dropping out for 2 s or more and coming

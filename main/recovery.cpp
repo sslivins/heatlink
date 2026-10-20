@@ -4,6 +4,7 @@
 
 #include <mutex>
 
+#include "access_policy.h"
 #include "auth_manager.h"
 #include "esp_log.h"
 #include "esp_system.h"
@@ -69,6 +70,18 @@ bool count_cut_locked() {
     return false;
 }
 
+// The power-cut sequence completed: open the reset window unless an admin
+// turned the power-cut reset off (e.g. a rental, where tenants reach the breaker).
+void power_cut_reset() {
+    if (!access_policy::power_reset_enabled()) {
+        ESP_LOGW(TAG, "power-cut reset sequence ignored (disabled by admin)");
+        events::log(events::Cat::System, events::Actor::Local,
+                    "Admin password reset by power cycles ignored (turned off)");
+        return;
+    }
+    trigger(false);
+}
+
 }  // namespace
 
 void init() {
@@ -88,7 +101,7 @@ void init() {
             save_cuts();
         }
     }
-    if (fire) trigger(false);
+    if (fire) power_cut_reset();
 }
 
 void note_power_restored() {
@@ -97,7 +110,7 @@ void note_power_restored() {
         std::lock_guard<std::mutex> lk(g_mtx);
         fire = count_cut_locked();
     }
-    if (fire) trigger(false);
+    if (fire) power_cut_reset();
 }
 
 void trigger(bool from_ha) {
