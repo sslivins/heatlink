@@ -51,7 +51,7 @@ typedef enum {
 
 typedef enum {
     AUTH_CLAIM_OK = 0,
-    AUTH_CLAIM_ALREADY,  ///< an admin password is already set
+    AUTH_CLAIM_ALREADY,  ///< an admin password is set and no recovery window is open
     AUTH_CLAIM_DENIED,   ///< claim token wrong/missing and no recovery window
     AUTH_CLAIM_INVALID,  ///< empty/too long, or equal to the user password
     AUTH_CLAIM_FAILED,   ///< couldn't hash/persist/create a session
@@ -111,15 +111,17 @@ void auth_mgr_logout_all(void);
 /// already set. Called by the setup portal.
 bool auth_mgr_begin_claim(char* token_out);
 
-/// Create the first admin password. Allowed when no password is set and either
-/// no claim is pending (legacy head), @p token matches the claim token, or the
-/// recovery window is open. On success an admin session is created.
+/// Set the admin password without logging in. Allowed while the recovery
+/// window is open (replacing any existing password; sessions are dropped and
+/// the API key rotated), or when no password is set and either no claim is
+/// pending (legacy head) or @p token matches the claim token. On success an
+/// admin session is created.
 auth_claim_result_t auth_mgr_claim(const char* password, const char* token,
                                    char* session_token);
 
-/// Admin-password reset procedure: clear the admin password, require a claim,
-/// rotate the API key, log everyone out and open the recovery window. The
-/// climate-only user password is kept.
+/// Admin-password reset procedure: open the recovery window, during which
+/// anyone can set a new admin password. Nothing else changes unless they do;
+/// the existing admin password keeps working meanwhile.
 void auth_mgr_recover(void);
 
 /// Seconds left in the recovery window (0 = closed).

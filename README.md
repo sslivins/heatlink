@@ -341,10 +341,11 @@ stay open and show a banner asking you to set one.
 cut it again within 30 s). On a head without a battery a power-on reset counts
 as a cut; with a battery, the input dropping out for 2 s or more and coming
 back counts. The Home Assistant **Reset admin password** button does the same
-thing. Either way the admin password is cleared, the API key is rotated, and
-for **15 minutes** anyone who opens the web UI can set a new admin password.
-After that the head stays locked until the procedure is run again. Wi-Fi,
-MQTT and the climate-only password are kept.
+thing. Either way, for the next **15 minutes** anyone who opens the web UI can
+set a new admin password without logging in; doing so also signs everyone out
+and rotates the API key. The old password keeps working meanwhile, and if no
+new one is set within the window nothing changes. Wi-Fi, MQTT and the
+climate-only password are never touched.
 
 ## Web UI / REST API
 

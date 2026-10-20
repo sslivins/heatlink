@@ -415,13 +415,17 @@ paths:
         once an admin password is set; `web_auth_enabled` is no longer settable.
 
         **Claim.** A head with no admin password is either `legacy` (upgraded
-        from older firmware; UI open) or `unclaimed` (freshly provisioned, or
-        after the admin password reset procedure; everything but the public
-        auth endpoints is locked). `{"claim":true,"password":"…","token":"…"}`
-        creates the admin password and returns an admin session cookie. On an
-        unclaimed head the `token` must be the claim token from the setup
-        portal link (`?claim=`), unless the 15-minute recovery window is open.
-        On a legacy head, setting `password` is itself a claim.
+        from older firmware; UI open) or `unclaimed` (freshly provisioned;
+        everything but the public auth endpoints is locked).
+        `{"claim":true,"password":"…","token":"…"}` creates the admin password
+        and returns an admin session cookie. On an unclaimed head the `token`
+        must be the claim token from the setup portal link (`?claim=`). On a
+        legacy head, setting `password` is itself a claim.
+
+        **Reset window.** The admin password reset procedure opens a 15-minute
+        window (`recovery_secs_left`) in which a claim needs no token and
+        replaces any existing admin password; that also logs every session out
+        and rotates the API key. If no claim is made, nothing changes.
 
         Changing the admin password logs every session out, then signs the
         caller back in (new cookie).
@@ -445,7 +449,7 @@ paths:
         '403':
           description: Claim not allowed (wrong/missing token and no recovery window)
         '409':
-          description: Claim attempted but an admin password is already set
+          description: Claim attempted but an admin password is already set and no reset window is open
   /api/capabilities:
     get:
       tags: [Capabilities]
@@ -1492,7 +1496,7 @@ components:
             password, locked until claimed; `claimed` = admin password set.
         recovery_secs_left:
           type: integer
-          description: Seconds left to set a new admin password after the reset procedure (0 = none).
+          description: Seconds left to set a new admin password without logging in, after the reset procedure (0 = none).
         web_auth_enabled:
           type: boolean
           description: Derived — true when an admin password is set or a claim is pending.

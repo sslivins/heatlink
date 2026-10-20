@@ -489,6 +489,7 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
           onkeydown="if(event.key==='Enter')doClaim()"></div>
       <div id="cgMsg" class="status hidden" style="margin:10px 0"></div>
       <button class="btn btn-accent wz-full" id="cgBtn" onclick="doClaim()">Continue</button>
+      <button class="btn wz-full hidden" id="cgSignIn" style="margin-top:8px" onclick="cgShowLogin()">Sign in with the current password</button>
     </div>
     <div id="cgLocked" class="hidden">
       <h2>Admin password required</h2>
@@ -1469,6 +1470,7 @@ const I18N = { fr: {
   "Admin password required":"Mot de passe administrateur requis",
   "This head has no admin password yet. Open the link shown at the end of Wi-Fi setup to create one, or run the admin password reset procedure.":"Cette tête n’a pas encore de mot de passe administrateur. Ouvrez le lien affiché à la fin de la configuration Wi-Fi pour en créer un, ou lancez la procédure de réinitialisation du mot de passe administrateur.",
   "Sign in with the climate-only password":"Se connecter avec le mot de passe climat uniquement",
+  "Sign in with the current password":"Se connecter avec le mot de passe actuel",
   "The admin password reset procedure was run at {t}. Set a new admin password within {n} min.":"La procédure de réinitialisation du mot de passe administrateur a été lancée à {t}. Définissez un nouveau mot de passe administrateur d’ici {n} min.",
   "This head has no admin password, so anyone on your network can change its settings.":"Cette tête n’a pas de mot de passe administrateur : n’importe qui sur votre réseau peut modifier ses réglages.",
   "Set an admin password":"Définir un mot de passe administrateur",
@@ -3032,7 +3034,7 @@ async function loadAuth(deferReveal){
     if(!nameEditing) applyHeaderName();
     updateNameEditVisibility();
     if(authState.state!=='unclaimed') try{sessionStorage.removeItem('hlClaim');}catch(e){}
-    if(authState.state==='unclaimed' && !a.authenticated){
+    if(!a.authenticated && (authState.state==='unclaimed' || (a.recovery_secs_left|0)>0)){
       showClaimGate(a.recovery_secs_left|0);
       return false;
     }
@@ -3067,6 +3069,7 @@ function showClaimGate(recoverySecs){
   $('cgForm').classList.toggle('hidden',!canClaim);
   $('cgLocked').classList.toggle('hidden',canClaim);
   $('cgUserBtn').classList.toggle('hidden',!authState.userSet);
+  $('cgSignIn').classList.toggle('hidden',!(recovery&&authState.pwSet));
   if(cgTimer){clearInterval(cgTimer);cgTimer=null;}
   if(!canClaim) return;
   $('cgTitle').textContent=i18n(recovery?'Set a new admin password':'Create an admin password');
@@ -3083,7 +3086,7 @@ function showClaimGate(recoverySecs){
       const left=cgDeadline-Date.now();
       if(left<=0){
         clearInterval(cgTimer);cgTimer=null;
-        $('cgForm').classList.add('hidden');$('cgLocked').classList.remove('hidden');
+        cgClosed();
         return;
       }
       const t=new Date(cgRanAt).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'});
@@ -3094,9 +3097,15 @@ function showClaimGate(recoverySecs){
   $('cgPass').focus();
 }
 function cgShowLogin(){
+  if(cgTimer){clearInterval(cgTimer);cgTimer=null;}
   $('claimGate').classList.add('hidden');
   $('loginGate').classList.remove('hidden');
   $('lgPass').focus();
+}
+// Reset window closed / claim refused: sign in if a password exists, else locked.
+function cgClosed(){
+  if(authState.pwSet){cgShowLogin();return}
+  $('cgForm').classList.add('hidden');$('cgLocked').classList.remove('hidden');
 }
 async function doClaim(){
   const p=$('cgPass').value, p2=$('cgPass2').value;
@@ -3112,7 +3121,7 @@ async function doClaim(){
       location.reload();return;
     }
     if(r.status===403){
-      $('cgForm').classList.add('hidden');$('cgLocked').classList.remove('hidden');
+      cgClosed();
       $('cgBtn').disabled=false;return;
     }
     if(r.status===409){location.reload();return}   // someone else already set it

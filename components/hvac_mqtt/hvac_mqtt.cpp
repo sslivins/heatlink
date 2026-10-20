@@ -366,8 +366,8 @@ esp_err_t publish_diag_discovery() {
                             "/diag/reset_brownout", "mdi:flash-alert") != ESP_OK) rc = ESP_FAIL;
     if (publish_diag_button("Reset WiFi drops", "reset_wifi_drops",
                             "/diag/reset_wifi_drops", "mdi:wifi-alert") != ESP_OK) rc = ESP_FAIL;
-    // Admin-password reset procedure without the power-cut dance: clears the
-    // admin password and opens the 15-minute window to set a new one.
+    // Admin-password reset procedure without the power-cut dance: opens the
+    // 15-minute window to set a new admin password.
     if (publish_diag_button("Reset admin password", "reset_admin_password",
                             "/auth/reset_admin", "mdi:lock-reset") != ESP_OK) rc = ESP_FAIL;
 

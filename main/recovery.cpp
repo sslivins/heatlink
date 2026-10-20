@@ -105,7 +105,7 @@ void trigger(bool from_ha) {
     auth_mgr_recover();
     events::log(events::Cat::System,
                 from_ha ? events::Actor::HomeAssistant : events::Actor::Local,
-                from_ha ? "Admin password reset from Home Assistant"
+                from_ha ? "Admin password reset procedure run from Home Assistant"
                         : "Admin password reset procedure run (power cycles)");
 }
 

@@ -7,11 +7,13 @@
 /// Admin-claim model:
 ///  - LEGACY: no admin password and no claim pending (a head upgraded from
 ///    older firmware). The UI stays open, with a banner asking for a password.
-///  - UNCLAIMED: no admin password but a claim is pending (fresh provisioning,
-///    or after the reset procedure). Everything except the public auth
-///    endpoints is locked until the password is created with the claim token
-///    from the portal, or within the recovery window.
+///  - UNCLAIMED: no admin password but a claim is pending (fresh
+///    provisioning). Everything except the public auth endpoints is locked
+///    until the password is created with the claim token from the portal, or
+///    within the recovery window.
 ///  - CLAIMED: admin password set; web login is always enforced.
+/// The reset procedure opens a 15-minute recovery window in which anyone may
+/// set a new admin password; if nobody does, nothing changes.
 #include "auth_manager.h"
 
 #include <mutex>
@@ -568,8 +570,10 @@ bool auth_mgr_begin_claim(char* token_out) {
 auth_claim_result_t auth_mgr_claim(const char* password, const char* token,
                                    char* session_token) {
     AUTH_LOCK();
-    if (password_set()) return AUTH_CLAIM_ALREADY;
-    if (state.claim_required) {
+    // During a reset window the existing admin password may be replaced.
+    const bool replacing = password_set();
+    if (replacing && !recovery_open()) return AUTH_CLAIM_ALREADY;
+    if (!replacing && state.claim_required) {
         bool token_ok = token != NULL && state.claim_token[0] != '\0' &&
                         ct_equal_str(token, state.claim_token);
         if (!token_ok && !recovery_open()) return AUTH_CLAIM_DENIED;
@@ -578,29 +582,30 @@ auth_claim_result_t auth_mgr_claim(const char* password, const char* token,
         rec_matches(&state.user, password))
         return AUTH_CLAIM_INVALID;
     if (!auth_mgr_set_admin_password(password)) return AUTH_CLAIM_FAILED;
+    if (replacing) {
+        // Whoever knew the old password loses access: drop sessions, new API key.
+        generate_random_hex(state.api_key, AUTH_API_KEY_LEN);
+        save_to_nvs();
+        auth_mgr_logout_all();
+    }
     if (!create_session(AUTH_ROLE_ADMIN, session_token)) return AUTH_CLAIM_FAILED;
-    ESP_LOGI(TAG, "admin password created (claimed)");
+    ESP_LOGI(TAG, "admin password %s", replacing ? "replaced (reset procedure)"
+                                                 : "created (claimed)");
     return AUTH_CLAIM_OK;
 }
 
 void auth_mgr_recover(void) {
     AUTH_LOCK();
-    memset(&state.admin, 0, sizeof(state.admin));
-    state.claim_required = true;
-    state.claim_token[0] = '\0';
-    generate_random_hex(state.api_key, AUTH_API_KEY_LEN);
+    // Nothing changes unless a new admin password is set within the window.
     state.recovery_until = monotonic_now() + AUTH_RECOVERY_WINDOW_SEC;
     state.fail_count = 0;
     state.lockout_until = 0;
-    save_to_nvs();
-    auth_mgr_logout_all();
-    ESP_LOGW(TAG, "admin password reset — recovery window open for %d s",
-             AUTH_RECOVERY_WINDOW_SEC);
+    ESP_LOGW(TAG, "admin password reset — window open for %d s", AUTH_RECOVERY_WINDOW_SEC);
 }
 
 int auth_mgr_recovery_secs_left(void) {
     AUTH_LOCK();
-    if (password_set() || !recovery_open()) return 0;
+    if (!recovery_open()) return 0;
     return (int)(state.recovery_until - monotonic_now());
 }
 

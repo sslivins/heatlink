@@ -2981,8 +2981,9 @@ esp_err_t handle_auth_get(httpd_req_t* req) {
 
 // ── POST /api/auth — update auth settings (admin only) ─────────────────
 // Also the claim endpoint: {"claim":true,"password":"…","token":"…"} creates
-// the first admin password on an unclaimed head (token from the setup portal,
-// or none needed while the recovery window is open) and signs the caller in.
+// the first admin password on an unclaimed head (token from the setup portal),
+// or replaces any admin password while the recovery window is open, and signs
+// the caller in.
 // On a legacy head (no password, UI open) setting "password" is a claim too.
 esp_err_t handle_auth_post(httpd_req_t* req) {
     set_cors(req);
@@ -3009,6 +3010,7 @@ esp_err_t handle_auth_post(httpd_req_t* req) {
         const cJSON* jt = cJSON_GetObjectItem(json, "token");
         const char* tok = (jt && cJSON_IsString(jt)) ? jt->valuestring : "";
         char session[AUTH_SESSION_TOKEN_LEN + 1] = {0};
+        const bool replacing = auth_mgr_web_password_set();
         auth_claim_result_t r = auth_mgr_claim(new_pw, tok, session);
         if (r != AUTH_CLAIM_OK) {
             cJSON_Delete(json);
@@ -3030,7 +3032,8 @@ esp_err_t handle_auth_post(httpd_req_t* req) {
             }
         }
         set_session_cookie(req, session);
-        events::log(events::Cat::System, events::Actor::WebUI, "Admin password created",
+        events::log(events::Cat::System, events::Actor::WebUI,
+                    replacing ? "Admin password changed after reset" : "Admin password created",
                     "", peer_ipv4(req));
         authed = claimed = true;
     }
