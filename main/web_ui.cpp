@@ -2788,15 +2788,17 @@ bool coordinate_group_to(hvac_group::Demand target, hvac_group::ResolveStrategy 
     return all_ok;
 }
 
-// ── POST /api/group/resolve ─ coordinate a group mode resolution (admin) ─
+// ── POST /api/group/resolve ─ coordinate a group mode resolution ───────
 // Body: {"target_mode":"HEAT|COOL","strategy":"flip|off_conflicting"}
+// Climate-only users may use off_conflicting (switch this head, turn the
+// opposing zones off); flipping other zones' modes is admin-only.
 // This head becomes the coordinator for one op: it allocates a monotonic op_id,
 // applies the change to itself, then fans the signed op out to every enrolled
 // peer. Reports "ok" only if every enrolled member converged; "partial" if any
 // peer was unreachable or rejected the change.
 esp_err_t handle_group_resolve(httpd_req_t* req) {
     set_cors(req);
-    REQUIRE_ADMIN(req);
+    REQUIRE_API_AUTH(req);
     if (slice_ctl::enabled())
         return send_json_error(req, "409 Conflict", "Tandem is enabled");
     char* body = recv_body(req);
@@ -2820,6 +2822,8 @@ esp_err_t handle_group_resolve(httpd_req_t* req) {
     if (target != hvac_group::Demand::Heat && target != hvac_group::Demand::Cool)
         return send_json_error(req, "400 Bad Request", "target_mode must be HEAT or COOL");
     hvac_group::ResolveStrategy strat = hvac_group::parse_strategy(stg);
+    if (strat != hvac_group::ResolveStrategy::OffConflicting && !admin_authorized(req))
+        return send_json_error(req, "403 Forbidden", "Only an admin can switch other zones' modes");
     const char* strat_tok = (strat == hvac_group::ResolveStrategy::OffConflicting)
                                 ? "off_conflicting" : "flip";
 

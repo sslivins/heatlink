@@ -1476,6 +1476,18 @@ const I18N = { fr: {
   "Remove climate-only password?":"Retirer le mot de passe climat uniquement ?",
   "Anyone on your network will be able to control climate without signing in.":"Toute personne sur votre réseau pourra contrôler le climat sans se connecter.",
   "Climate-only password removed":"Mot de passe climat uniquement retiré",
+  "Turn off cooling zones?":"Éteindre les zones en refroidissement ?",
+  "Turn off heating zones?":"Éteindre les zones en chauffage ?",
+  "The outdoor unit can only heat or cool. Switching to Heat turns off: {zones}.":"L’unité extérieure ne peut que chauffer ou refroidir. Passer en chauffage éteint : {zones}.",
+  "The outdoor unit can only heat or cool. Switching to Cool turns off: {zones}.":"L’unité extérieure ne peut que chauffer ou refroidir. Passer en refroidissement éteint : {zones}.",
+  "The outdoor unit can only heat or cool. Switching to Heat turns off any zones that are cooling.":"L’unité extérieure ne peut que chauffer ou refroidir. Passer en chauffage éteint les zones en refroidissement.",
+  "The outdoor unit can only heat or cool. Switching to Cool turns off any zones that are heating.":"L’unité extérieure ne peut que chauffer ou refroidir. Passer en refroidissement éteint les zones en chauffage.",
+  "Switch and turn off":"Changer et éteindre",
+  "and":"et",
+  "Could not switch":"Changement impossible",
+  "The group did not accept the change.":"Le groupe n’a pas accepté le changement.",
+  "Some zones did not respond":"Certaines zones n’ont pas répondu",
+  "Some zones may still be on. Check the Zones tab.":"Certaines zones sont peut-être encore allumées. Vérifiez l’onglet Zones.",
   "Reset by cutting power":"Réinitialiser en coupant le courant",
   "Lets anyone who can cut power to this head reset the admin password. Turn off if tenants or guests can reach the breaker; the Home Assistant reset button keeps working.":"Permet à toute personne pouvant couper le courant de cette tête de réinitialiser le mot de passe administrateur. Désactivez-le si des locataires ou invités ont accès au disjoncteur ; le bouton de réinitialisation Home Assistant reste disponible.",
   "Limit temperature range":"Limiter la plage de température",
@@ -2524,12 +2536,20 @@ async function post(body){
 
 function setField(k,v){const o={};o[k]=v;post(o)}
 async function setMode(m){
-  if((m==='HEAT'||m==='COOL') && await needsGroupSwitch(m)){
-    const ok=await uiConfirm({title:'Switch all zones to '+modeCap(m)+'?',
-      body:'Switching to '+modeCap(m)+' requires all zones to be switched to '+modeCap(m)+'.',
-      okText:'Switch all zones'});
+  const clash=(m==='HEAT'||m==='COOL') ? await conflictingZones(m) : null;
+  if(clash){
+    const heat=(m==='HEAT');
+    const names=listJoin(clash);
+    const ok=await uiConfirm({
+      title:i18n(heat?'Turn off cooling zones?':'Turn off heating zones?'),
+      body:names
+        ? i18n(heat?'The outdoor unit can only heat or cool. Switching to Heat turns off: {zones}.'
+                   :'The outdoor unit can only heat or cool. Switching to Cool turns off: {zones}.',{zones:names})
+        : i18n(heat?'The outdoor unit can only heat or cool. Switching to Heat turns off any zones that are cooling.'
+                   :'The outdoor unit can only heat or cool. Switching to Cool turns off any zones that are heating.'),
+      okText:i18n('Switch and turn off'),danger:true});
     if(!ok) return;
-    await switchAllZones(m);
+    await switchTurnOffOthers(m);
     return;
   }
   if(m==='OFF'){climate.power=false;renderClimate();post({power:'OFF'});return;}
@@ -3710,33 +3730,38 @@ async function refreshHouse(){
   clearTimeout(houseRetry);
   if(d.scanning&&groupTabActive) houseRetry=setTimeout(refreshHouse,3500);
 }
-// True when switching THIS head to Heat/Cool would diverge from the shared
-// outdoor unit's current direction — i.e. another zone is on the opposite mode,
-// or the unit is already inferred locked the other way. Only admins coordinate.
-async function needsGroupSwitch(m){
-  if(authState.role!=='admin') return false;
+// Switching THIS head to Heat/Cool while another zone on the shared outdoor
+// unit runs the opposite direction would conflict. Returns the names of those
+// zones ([] when only the unit's inferred lock says so), or null if no conflict.
+async function conflictingZones(m){
   let g;
-  try{ const r=await jget('/api/group'); if(!r.ok) return false; g=await r.json(); }
-  catch(e){ return false; }
-  if(!g.in_group || (g.member_count||1)<=1) return false;
-  if(g.slice&&g.slice.enabled) return false;  // mixed modes take turns instead
+  try{ const r=await jget('/api/group'); if(!r.ok) return null; g=await r.json(); }
+  catch(e){ return null; }
+  if(!g.in_group || (g.member_count||1)<=1) return null;
+  if(g.slice&&g.slice.enabled) return null;  // mixed modes take turns instead
   const opp=(m==='HEAT')?'COOL':'HEAT';
-  if(g.locked_mode===opp) return true;
-  return (g.members||[]).some(mem=>mem.state==='known' && mem.configured_demand===opp);
+  const names=(g.members||[]).filter(mem=>mem.state==='known' && mem.configured_demand===opp)
+                             .map(mem=>mem.name||mem.uid);
+  if(names.length) return names;
+  return g.locked_mode===opp ? [] : null;
 }
-// Coordinate the whole group onto one mode (every zone flips to it). Invoked by
-// the climate-page confirm when a plain mode switch would otherwise conflict.
-async function switchAllZones(m){
+function listJoin(a){
+  if(a.length<2) return a.join('');
+  return a.slice(0,-1).join(', ')+' '+i18n('and')+' '+a[a.length-1];
+}
+// Switch this head to m and turn off the zones on the opposite direction
+// (they are not switched to m). Invoked by the climate-page confirm.
+async function switchTurnOffOthers(m){
   try{
     const r=await fetch('/api/group/resolve',{method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({target_mode:m,strategy:'flip'})});
+      body:JSON.stringify({target_mode:m,strategy:'off_conflicting'})});
     const j=await r.json().catch(()=>({}));
-    if(!r.ok){ await uiAlert({title:'Could not switch zones',body:(j&&j.error)||'The group did not accept the change.'}); return; }
-    if(j.status!=='ok'){ await uiAlert({title:'Partially switched',body:'Some zones did not confirm the switch to '+modeCap(m)+'. Check the Zones tab.'}); }
+    if(!r.ok){ await uiAlert({title:i18n('Could not switch'),body:(j&&j.error)||i18n('The group did not accept the change.')}); return; }
+    if(j.status!=='ok'){ await uiAlert({title:i18n('Some zones did not respond'),body:i18n('Some zones may still be on. Check the Zones tab.')}); }
     climate.power=true; climate.mode=m; renderClimate();
-    setTimeout(()=>{ refresh(); if(authState.role==='admin') refreshGroup(); },700);
-  }catch(e){ await uiAlert({title:'Network error',body:'Could not reach the device.'}); }
+    setTimeout(()=>{ refresh(); refreshGroup(); },700);
+  }catch(e){ await uiAlert({title:i18n('Network error'),body:i18n('Could not reach the device.')}); }
 }
 // Set a status line by element id. hide=true clears it. cls is '', 'ok', 'err', 'info'.
 function setElMsg(id,text,cls,hide){
