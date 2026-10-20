@@ -76,7 +76,7 @@ select:focus{border-color:var(--accent)}
 .mqf{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px}
 .mqf label{font-size:.85em;color:var(--fg-2);white-space:nowrap}
 .mqf input{flex:1;max-width:62%;background:var(--bg);color:var(--fg);border:1px solid var(--border-strong);
-border-radius:8px;padding:8px 10px;font-size:16px;outline:none}
+border-radius:8px;padding:8px 10px;font-size:16px;font-family:inherit;outline:none}
 .mqf input:focus{border-color:var(--accent)}
 .name-row{display:flex;align-items:center;justify-content:center;gap:6px}
 .name-row h1{margin:0;color:var(--fg)}
@@ -384,18 +384,27 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
 .gmode{font-size:.8em;color:var(--fg-3)}
 .glock{font-size:.66em;color:var(--orange);white-space:nowrap}
 .gmctl{display:flex;gap:4px;flex:0 0 auto}
-.gmbtn{display:inline-flex;align-items:center;justify-content:center;min-width:40px;min-height:40px;background:none;border:1px solid var(--border);color:var(--fg-3);border-radius:8px;cursor:pointer;font-size:1.05em;line-height:1;padding:0 10px}
+.gmbtn{display:inline-flex;align-items:center;justify-content:center;min-width:40px;min-height:40px;background:none;border:1px solid var(--border);color:var(--fg-3);border-radius:8px;cursor:pointer;font-family:inherit;font-size:1.05em;line-height:1;padding:0 10px}
 .gmbtn:hover{color:var(--fg);border-color:var(--fg-3)}
 .gmbtn.leave{color:var(--red);font-size:.82em;font-weight:600}
 .gmbtn.leave:hover{border-color:var(--red)}
 .gname-row{display:flex;align-items:center;gap:8px;margin:12px 0 4px}
 .gname-row .role-name{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .gname-row .pill{margin-left:auto;flex:0 0 auto}
-.gedit{flex:0 0 auto;width:40px;height:40px;padding:0;border:1px solid var(--border);border-radius:8px;background:none;color:var(--fg-3);cursor:pointer;display:inline-flex;align-items:center;justify-content:center}
-.gedit:hover{color:var(--fg);border-color:var(--fg-3)}
-.gnamer{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:4px 0 8px}
-.gnamer input{flex:1 1 160px;min-width:0;background:var(--bg);color:var(--fg);border:1px solid var(--accent);border-radius:8px;padding:10px;font-size:1.05em;outline:none}
-.gnamer .btn{width:auto;padding:10px 16px;margin:0}
+/* Tandem line under the outdoor unit's name, and each head's turn badge. */
+.gtandem{display:flex;align-items:center;gap:6px;font-size:.86em;color:var(--fg-3);margin:0 0 6px}
+.gtandem b{color:var(--fg);font-weight:600}
+.gtandem svg{flex:0 0 auto;color:#f97316}
+.gturn{flex:0 0 auto;font-size:.74em;font-weight:600;padding:4px 10px;border-radius:999px;white-space:nowrap;background:var(--chip);color:var(--fg-3)}
+.gturn.heat{background:rgba(249,115,22,.18);color:#fdba74}
+.gturn.cool{background:rgba(59,130,246,.2);color:#93c5fd}
+@media (prefers-color-scheme:light){
+  .gturn.heat{background:rgba(249,115,22,.14);color:#c2410c}
+  .gturn.cool{background:rgba(59,130,246,.14);color:#1d4ed8}
+}
+.gempty{text-align:center;padding:22px 8px 8px;color:var(--fg-3)}
+.gempty svg{opacity:.5}
+.gempty-t{font-weight:600;color:var(--fg);margin-top:8px}
 .gbtns{display:flex;gap:8px}
 .gbtns .btn{margin-top:0;flex:1;display:flex;align-items:center;justify-content:center;gap:6px}
 .btn-accent{background:var(--accent);color:#fff;margin-top:8px}
@@ -411,8 +420,6 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
 .gcand-t{font-size:1em;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .gcand-s{font-size:.8em;color:var(--fg-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .gcand-arrow{flex:0 0 auto;color:var(--fg-3);font-size:1.2em}
-.gadv{margin-top:12px}
-.gadv summary{cursor:pointer;color:var(--fg-3);font-size:.86em;padding:8px 0}
 /* Reusable modal dialog (replaces native alert/confirm) */
 .dlg-back{position:fixed;inset:0;z-index:1000;display:flex;align-items:center;justify-content:center;
   padding:20px;background:rgba(0,0,0,.55);opacity:0;transition:opacity .15s ease}
@@ -474,9 +481,9 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
     <!-- Step 2a: join an existing multizone group -->
     <div id="wzJoin" class="hidden">
       <h1>Join a group</h1>
-      <p class="sub" style="margin:-4px 0 14px">On a controller that's already in the group, open its <b>Zones</b> tab and tap
-        <b>Add a zone</b>. Then scan below and pick it.</p>
-      <button class="btn btn-warn wz-full" onclick="wzScan()">Scan for groups</button>
+      <p class="sub" style="margin:-4px 0 14px">On a controller that's already on the outdoor unit, open
+        <b>Settings › Outdoor unit</b> and tap <b>Add a head</b>. Then scan below and pick it.</p>
+      <button class="btn btn-warn wz-full" onclick="wzScan()">Scan for outdoor units</button>
       <div id="wzScanMsg" class="status hidden" style="margin-top:8px"></div>
       <div id="wzCandidates"></div>
       <div id="wzJoinCard" class="gjoincard hidden" style="margin-top:10px">
@@ -624,98 +631,27 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
   <div class="panel" id="panel-group">
   <div class="card">
     <h2>Zones</h2>
-    <p class="hint">Coordinate HEAT / COOL across heads that share one outdoor
-      compressor, so opposing demands don't fight.</p>
+    <p class="hint hidden" id="gSub"></p>
 
-    <div id="gNeedsAdmin" class="note" style="margin-top:12px">Sign in as admin to manage the compressor group.</div>
+    <div id="gNeedsAdmin" class="note" style="margin-top:12px">Sign in as admin to see the zones.</div>
 
-    <!-- Not in a group -->
-    <div id="gNotInGroup" class="hidden">
-      <p class="role-desc" style="margin-top:12px">This head isn't in a group yet. Join an existing group so it
-        coordinates the shared compressor with the other zones — or start a new group here.</p>
-
-      <div class="wf-head"><span class="wf-head-t">Join an existing group</span></div>
-      <p class="role-desc">On any head already in the group, open its <b>Zones</b> tab and tap
-        <b>Add a zone</b>. Then scan below and pick it — that head just relays the invite on the group's
-        behalf, so this zone joins the whole group, not that one head.</p>
-      <button class="btn btn-warn gwide" onclick="groupDiscover()">Scan for groups</button>
-      <div id="gDiscoverMsg" class="status hidden" style="margin-top:8px"></div>
-      <div id="gCandidates"></div>
-
-      <!-- Code entry for the tapped candidate -->
-      <div id="gJoinCard" class="gjoincard hidden">
-        <div id="gJoinTitle" class="gjoin-t"></div>
-        <div id="gJoinSub" class="role-desc" style="margin:2px 0 8px"></div>
-        <div class="mqf"><label for="gJoinCode">6-digit code</label>
-          <input id="gJoinCode" type="text" inputmode="numeric" maxlength="6" placeholder="000000" autocomplete="off"></div>
-        <div class="gbtns">
-          <button class="btn btn-accent" onclick="groupJoinSelected()">Add this zone</button>
-          <button class="btn" onclick="groupJoinCancel()">Cancel</button>
-        </div>
-        <div id="gJoinMsg" class="status hidden" style="margin-top:8px"></div>
-      </div>
-
-      <details class="gadv">
-        <summary>Can't find it? Enter the head's address manually</summary>
-        <div class="mqf"><label for="gJoinHost">Owner host</label>
-          <input id="gJoinHost" type="text" placeholder="heatlink-xxxx.local" autocomplete="off"></div>
-        <div class="mqf"><label for="gJoinCodeM">6-digit code</label>
-          <input id="gJoinCodeM" type="text" inputmode="numeric" maxlength="6" placeholder="000000" autocomplete="off"></div>
-        <button class="btn btn-warn" onclick="groupPairJoinManual()">Join by address</button>
-      </details>
-
-      <div class="wf-head"><span class="wf-head-t">Or start a new group</span></div>
-      <div class="mqf"><label for="gNewLabel">Group name</label>
-        <input id="gNewLabel" type="text" maxlength="32" placeholder="e.g. Upstairs" autocomplete="off"></div>
-      <button class="btn btn-accent" onclick="groupPairStart()">Create group &amp; show code</button>
+    <!-- View only: the outdoor unit is set up and edited in Settings › Outdoor unit. -->
+    <div id="gNotInGroup" class="gempty hidden">
+      <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
+        stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="7" height="7" rx="1.5"/><rect x="14" y="4" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><path d="M17.5 14v7M14 17.5h7"/></svg>
+      <div class="gempty-t">Not linked to an outdoor unit</div>
     </div>
 
-    <!-- In a group -->
     <div id="gInGroup" class="hidden">
       <div class="gname-row">
         <span class="role-name" id="gLabel">—</span>
-        <button id="gEditBtn" class="gedit" aria-label="Rename group" title="Rename group" onclick="groupNameEdit()">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
-        </button>
         <span class="pill" id="gStatus">—</span>
       </div>
-      <div id="gRenameRow" class="gnamer hidden">
-        <input id="gRenameInput" type="text" maxlength="32" placeholder="e.g. Upstairs"
-               autocomplete="off" autocorrect="off" spellcheck="false" onkeydown="onGroupNameKey(event)">
-        <button class="btn btn-warn" onclick="groupRename()">Save</button>
-        <button class="btn" onclick="groupNameEditCancel()">Cancel</button>
-      </div>
-      <div id="gRenameMsg" class="status hidden" style="margin:2px 0 8px"></div>
+      <!-- Tandem (#133) status; hidden while Tandem is off. -->
+      <div id="gTandem" class="gtandem hidden"></div>
       <div id="gMembers"></div>
-
-      <!-- Tandem status (#133); the controls live in Settings → Tandem. -->
-      <div class="row" id="gSliceRow" style="margin:6px 0"><label>Tandem</label>
-        <span class="v"><span id="gSliceNow">--</span> · <a href="#" onclick="openTandemSettings();return false">Settings</a></span></div>
-
-      <!-- Owner: open a pairing window so a new head can join this group -->
-      <button class="btn btn-accent gwide" onclick="groupAddZone()">+ Add a zone</button>
-      <div id="gAddZoneCard" class="gjoincard hidden">
-        <div class="gjoin-t">Add a zone to this group</div>
-        <div class="role-desc" style="margin:2px 0 6px">On the new head, choose <b>Join an existing group</b>,
-          pick this one, then enter this code:</div>
-        <div id="gAddCode" class="gcode">------</div>
-        <div id="gAddCountdown" class="role-desc" style="text-align:center"></div>
-        <button class="btn gwide" onclick="groupAddZoneCancel()">Cancel</button>
-      </div>
-
-      <!-- Mode switching is coordinated from the Climate tab: switching to
-           Heat/Cool there prompts to move every zone, so there are no manual
-           "resolve" buttons here. -->
-
-      <!-- Group name rename moved to the header pencil; Leave moved to the
-           self row's button so removing any room is one consistent gesture. -->
     </div>
-
-    <div id="gPairMsg" class="status hidden" style="margin-top:10px"></div>
-  </div>
-  <!-- House: every head on the LAN across all outdoor units (read-only; tap to open) -->
+  </div>  <!-- House: every head on the LAN across all outdoor units (read-only; tap to open) -->
   <div class="card hidden" id="houseCard">
     <h2>House</h2>
     <p class="hint">Every HeatLink head on your network, grouped by outdoor unit. Tap one to open it.</p>
@@ -779,6 +715,7 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
     </div>
     <div class="sl-gh">Zone</div>
     <div class="sl-grp">
+      <button type="button" class="sl-row" onclick="openSec('sec-outdoor')"><span class="sl-ic" style="background:#6366f1"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="7" height="7" rx="1.5"/><rect x="14" y="4" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><path d="M17.5 14v7M14 17.5h7"/></svg></span><span class="sl-t">Outdoor unit</span><span class="sl-v" id="svUnit"></span><span class="sl-ch">&#x203A;</span></button>
       <button type="button" class="sl-row" onclick="openSec('sec-tandem')"><span class="sl-ic" style="background:#f97316"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 7h11l-3-3M17 17H6l3 3"/></svg></span><span class="sl-t">Tandem™</span><span class="sl-v" id="svTandem"></span><span class="sl-ch">&#x203A;</span></button>
     </div>
     <div class="sl-gh">Connection</div>
@@ -956,6 +893,79 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
     <button class="btn btn-primary" id="pkSave" onclick="savePark()" disabled>Save</button>
   </div>
 
+  <!-- Outdoor unit (zone group): the heads piped to one outdoor unit. Joining,
+       setting up, renaming, adding and removing heads all happen here; the
+       Zones tab only shows them. -->
+  <div class="card" data-grp="settings" id="sec-outdoor">
+    <button type="button" class="sl-back" onclick="closeSec()"><span aria-hidden="true">&#x2039;</span><span>Settings</span></button>
+    <h2>Outdoor unit</h2>
+    <div class="sub" style="margin:-4px 0 8px;text-align:left">Heads piped to the same outdoor unit share one
+      compressor, so they must agree on heat or cool. Add every head on this unit.</div>
+
+    <!-- Not linked yet -->
+    <div id="ouNotIn" class="hidden">
+      <p class="role-desc">This head isn't linked to an outdoor unit yet. Join the heads already on
+        its outdoor unit, or set up a new one.</p>
+      <div class="wf-head"><span class="wf-head-t">Join heads on an existing unit</span></div>
+      <p class="role-desc">On any head already on the unit, open <b>Settings › Outdoor unit</b> and tap
+        <b>Add a head</b>. Then scan below and pick it.</p>
+      <button class="btn btn-warn gwide" onclick="groupDiscover()">Scan for outdoor units</button>
+      <div id="gDiscoverMsg" class="status hidden" style="margin-top:8px"></div>
+      <div id="gCandidates"></div>
+
+      <!-- Code entry for the tapped candidate -->
+      <div id="gJoinCard" class="gjoincard hidden">
+        <div id="gJoinTitle" class="gjoin-t"></div>
+        <div id="gJoinSub" class="role-desc" style="margin:2px 0 8px"></div>
+        <div class="mqf"><label for="gJoinCode">6-digit code</label>
+          <input id="gJoinCode" type="text" inputmode="numeric" maxlength="6" placeholder="000000" autocomplete="off"></div>
+        <div class="gbtns">
+          <button class="btn btn-accent" onclick="groupJoinSelected()">Add this head</button>
+          <button class="btn" onclick="groupJoinCancel()">Cancel</button>
+        </div>
+        <div id="gJoinMsg" class="status hidden" style="margin-top:8px"></div>
+      </div>
+
+      <div class="wf-head"><span class="wf-head-t">Or set up a new outdoor unit</span></div>
+      <div class="mqf"><label for="gNewLabel">Name</label>
+        <input id="gNewLabel" type="text" maxlength="32" placeholder="e.g. Upstairs" autocomplete="off"></div>
+      <button class="btn btn-accent" onclick="groupPairStart()">Set up outdoor unit</button>
+
+      <details class="sl-adv">
+      <summary>Advanced</summary>
+      <p class="role-desc">Can't find it? Enter the address of a head that's on the unit.</p>
+      <div class="mqf"><label for="gJoinHost">Head address</label>
+        <input id="gJoinHost" type="text" placeholder="heatlink-xxxx.local" autocomplete="off"></div>
+      <div class="mqf"><label for="gJoinCodeM">6-digit code</label>
+        <input id="gJoinCodeM" type="text" inputmode="numeric" maxlength="6" placeholder="000000" autocomplete="off"></div>
+      <button class="btn btn-warn" onclick="groupPairJoinManual()">Join by address</button>
+      </details>
+    </div>
+
+    <!-- Linked -->
+    <div id="ouIn" class="hidden">
+      <div class="mqf"><label for="ouName">Name</label>
+        <input id="ouName" type="text" maxlength="32" placeholder="e.g. Upstairs" autocomplete="off"
+          autocorrect="off" spellcheck="false" oninput="ouChanged()" onkeydown="onOuNameKey(event)"></div>
+      <div id="ouMsg" class="status hidden" style="margin:0 0 8px"></div>
+      <button class="btn btn-primary" id="ouSave" onclick="groupRename()" disabled>Save</button>
+      <div class="wf-head" style="margin-top:18px"><span class="wf-head-t">Heads</span></div>
+      <div id="ouMembers"></div>
+      <!-- Open a pairing window so a new head can join this outdoor unit -->
+      <button class="btn btn-accent gwide" onclick="groupAddZone()">+ Add a head</button>
+      <div id="gAddZoneCard" class="gjoincard hidden">
+        <div class="gjoin-t">Add a head to this outdoor unit</div>
+        <div class="role-desc" style="margin:2px 0 6px">On the new head, open <b>Settings › Outdoor unit</b>,
+          scan, pick this unit, then enter this code:</div>
+        <div id="gAddCode" class="gcode">------</div>
+        <div id="gAddCountdown" class="role-desc" style="text-align:center"></div>
+        <button class="btn gwide" onclick="groupAddZoneCancel()">Cancel</button>
+      </div>
+    </div>
+
+    <div id="gPairMsg" class="status hidden" style="margin-top:10px"></div>
+  </div>
+
   <!-- Tandem (#133): heads on one outdoor unit take turns heating and cooling.
        Shared per outdoor unit (zone group); editable from any of its heads. -->
   <div class="card" data-grp="settings" id="sec-tandem">
@@ -966,8 +976,8 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
       heating and cooling, automatically. Paused rooms are switched off
       (settings kept) and restart on their own. Auto mode isn't available with Tandem.</div>
     <div class="row"><label>Outdoor unit</label><span class="v" id="slUnit">--</span></div>
-    <div id="slNoGroup" class="sub hidden" style="margin:0 0 8px">Pair this head with the other
-      heads on its outdoor unit in the Zones tab to use Tandem.</div>
+    <div id="slNoGroup" class="sub hidden" style="margin:0 0 8px">Set up this head's outdoor unit
+      first to use Tandem.</div>
     <div class="row">
       <label>Enabled</label>
       <div class="toggle"><input type="checkbox" id="slEn" onchange="slChanged()"><span class="slider" onclick="document.getElementById('slEn').click()"></span></div>
@@ -1201,7 +1211,7 @@ const I18N = { fr: {
   "Choose how to get this controller connected.":"Choisissez comment connecter ce contrôleur.",
   "Join an existing multizone group":"Rejoindre un groupe multizone existant",
   "Manual setup":"Configuration manuelle","Skip wizard":"Ignorer l’assistant",
-  "Join a group":"Rejoindre un groupe","Scan for groups":"Rechercher des groupes",
+  "Join a group":"Rejoindre un groupe","Scan for outdoor units":"Rechercher des unités extérieures",
   "6-digit code":"Code à 6 chiffres","Join":"Rejoindre","Cancel":"Annuler",
   "← Back":"← Retour","Broker host":"Hôte du courtier","Port":"Port",
   "Username":"Nom d’utilisateur","Base topic":"Sujet de base",
@@ -1210,7 +1220,7 @@ const I18N = { fr: {
   "Applying settings and restarting…":"Application des réglages et redémarrage…",
   "Done":"Terminé",
   // Climate card
-  "° room":"° pièce","idle":"ralenti",
+  "° room":"° pièce","idle":"au repos",
   "Off":"Arrêt","Heat":"Chaud","Cool":"Froid","Auto":"Auto","Dry":"Sec","Fan":"Ventilo",
   "Idle":"Ralenti","Heating":"Chauffage","Cooling":"Refroidissement",
   "Drying":"Déshumidification","Fan running":"Ventilation active","Active":"Actif",
@@ -1258,9 +1268,12 @@ const I18N = { fr: {
   "An outdoor unit can heat or cool, but not both, so a warm room and a cold room can't both get comfortable. Tandem™ fixes that by taking turns heating and cooling, automatically. Paused rooms are switched off (settings kept) and restart on their own. Auto mode isn't available with Tandem.":"Une unité extérieure peut chauffer ou refroidir, mais pas les deux : une pièce trop chaude et une pièce trop froide ne peuvent pas être confortables en même temps. Tandem™ règle cela en alternant automatiquement chauffage et refroidissement. Les pièces en pause sont arrêtées (réglages conservés) et redémarrent d’elles-mêmes. Le mode Auto n’est pas disponible avec Tandem.",
   "Now":"Maintenant","Minimum turn":"Tour minimal","Maximum turn":"Tour maximal",
   "Pause between modes":"Pause entre les modes","Paused while other rooms heat":"En pause pendant que les autres pièces chauffent","Paused while other rooms cool":"En pause pendant que les autres pièces refroidissent","Paused while modes switch":"En pause pendant le changement de mode",
-  "Heating now":"Chauffe","Cooling now":"Refroidit","Paused":"En pause",
   "Switching modes":"Changement de mode",
-  "Nobody needs heat or cool":"Aucun besoin de chauffage ou de refroidissement",
+  "No room needs heat or cool":"Aucune pièce n’a besoin de chauffage ou de refroidissement",
+  "heating":"chauffage","cooling":"refroidissement","starting…":"démarrage…",
+  "switching to heating…":"passage au chauffage…","switching to cooling…":"passage au refroidissement…",
+  "heating within {n} min":"chauffage d’ici {n} min","cooling within {n} min":"refroidissement d’ici {n} min",
+  "Up next":"À suivre",
   "Starting…":"Démarrage…",
   // Room sensor (#142)
   "Room sensor":"Capteur de pièce",
@@ -1323,8 +1336,8 @@ const I18N = { fr: {
   "room sensor":"capteur de pièce",
   "Outdoor unit":"Unité extérieure",
   "Not paired":"Non jumelé",
-  "(unnamed group)":"(groupe sans nom)",
-  "Pair this head with the other heads on its outdoor unit in the Zones tab to use Tandem.":"Jumelez cette tête avec les autres têtes de son unité extérieure dans l'onglet Zones pour utiliser Tandem.",
+  "(unnamed group)":"(sans nom)",
+  "Set up this head's outdoor unit first to use Tandem.":"Configurez d’abord l’unité extérieure de cette tête pour utiliser Tandem.",
   "Shared by every head on this outdoor unit.":"Partagé par toutes les têtes de cette unité extérieure.",
   "Shared by every head on this outdoor unit (except the turn-back-on threshold).":"Partagé par toutes les têtes de cette unité extérieure (sauf le seuil de remise en marche).",
 "Kept on while the zone group runs in Tandem.":"Maintenu actif pendant que le groupe est en mode Tandem.",
@@ -1379,13 +1392,20 @@ const I18N = { fr: {
   // Device
   "Restart the controller. Settings and WiFi are preserved.":"Redémarrer le contrôleur. Les réglages et le Wi-Fi sont conservés.",
   "Restart":"Redémarrer","Factory reset":"Réinitialisation d’usine",
-  // Zones / group
-  "Coordinate HEAT / COOL across heads that share one outdoor compressor, so opposing demands don't fight.":"Coordonnez CHAUD / FROID entre les têtes qui partagent un compresseur extérieur, pour que les demandes opposées ne se contrarient pas.",
-  "Sign in as admin to manage the compressor group.":"Connectez-vous en tant qu’administrateur pour gérer le groupe de compresseur.",
-  "Add this zone":"Ajouter cette zone","Join by address":"Rejoindre par adresse",
-  "Owner host":"Hôte propriétaire","Group name":"Nom du groupe",
-  "Create group & show code":"Créer le groupe et afficher le code",
-  "+ Add a zone":"+ Ajouter une zone","Add a zone to this group":"Ajouter une zone à ce groupe",
+  // Zones / outdoor unit
+  "Sign in as admin to see the zones.":"Connectez-vous en tant qu’administrateur pour voir les zones.",
+  "Not linked to an outdoor unit":"Non reliée à une unité extérieure",
+  "Rooms on the {name} outdoor unit. Tap one to open it.":"Pièces de l’unité extérieure {name}. Touchez-en une pour l’ouvrir.",
+  "Rooms on this outdoor unit. Tap one to open it.":"Pièces de cette unité extérieure. Touchez-en une pour l’ouvrir.",
+  "Heads piped to the same outdoor unit share one compressor, so they must agree on heat or cool. Add every head on this unit.":"Les têtes raccordées à la même unité extérieure partagent un compresseur : elles doivent s’accorder sur chaud ou froid. Ajoutez toutes les têtes de cette unité.",
+  "This head isn't linked to an outdoor unit yet. Join the heads already on its outdoor unit, or set up a new one.":"Cette tête n’est pas encore reliée à une unité extérieure. Rejoignez les têtes déjà sur son unité extérieure, ou configurez-en une nouvelle.",
+  "Join heads on an existing unit":"Rejoindre les têtes d’une unité existante",
+  "Or set up a new outdoor unit":"Ou configurer une nouvelle unité extérieure",
+  "Set up outdoor unit":"Configurer l’unité extérieure",
+  "Can't find it? Enter the address of a head that's on the unit.":"Introuvable ? Saisissez l’adresse d’une tête de cette unité.",
+  "Head address":"Adresse de la tête","Add this head":"Ajouter cette tête","Join by address":"Rejoindre par adresse",
+  "Heads":"Têtes","+ Add a head":"+ Ajouter une tête","Add a head to this outdoor unit":"Ajouter une tête à cette unité extérieure",
+  "1 head":"1 tête","{n} heads":"{n} têtes",
   "Save":"Enregistrer","Save failed":"Échec de l’enregistrement",
   // History
   "History":"Historique","7 d":"7 j","Room":"Pièce","Target":"Consigne","Outdoor":"Extérieur",
@@ -1546,7 +1566,6 @@ function uiConfirm(opts){ return uiDialog(opts); }
 function uiAlert(opts){ return uiDialog(Object.assign({showCancel:false},opts)); }
 let userEditing=false;
 let nameEditing=false;
-let groupEditing=false;
 let mqEditing=false;   // pause background overwrites while the user edits the MQTT form
 let curName='';   // last-known canonical device name ('' = none set)
 let curHost='';   // mDNS hostname, used as the display fallback
@@ -1597,6 +1616,7 @@ function openSec(id){
   history.pushState({sec:id},'');
   renderSettingsView();
   window.scrollTo(0,0);
+  if(id==='sec-outdoor'||id==='sec-tandem') refreshGroup();
 }
 function closeSec(){
   if(history.state&&history.state.sec){ history.back(); return; }
@@ -1621,8 +1641,9 @@ function renderSetList(){
   setSv('svVane',!wv?'':i18n(wv.override==='show'?'Always show':wv.override==='hide'?'Always hide':
     wv.detected==='supported'?'Powered':wv.detected==='unsupported'?'Manual louver':'Not detected yet'));
   const g=slLastG;
-  setSv('svTandem',!g?'':!g.in_group?i18n('Not paired'):
-    (g.slice&&g.slice.enabled)?i18n('On')+(g.group_label?' \u00b7 '+g.group_label:''):i18n('Off'));
+  setSv('svUnit',!g?'':!g.in_group?i18n('Not set up'):(g.group_label||i18n('(unnamed group)'))+' \u00b7 '+
+    ((g.member_count||1)===1?i18n('1 head'):i18n('{n} heads',{n:g.member_count})));
+  setSv('svTandem',!g?'':i18n(g.in_group&&g.slice&&g.slice.enabled?'On':'Off'));
   setSv('svWifi',!wifiInfoKnown?'':(wifiConnected&&wfCurSsid)?wfCurSsid:i18n('Not connected'));
   setSv('svMqtt',!mqLast?'':!mqLast.host?i18n('Not set up'):i18n(mqLast.connected?'Connected':'Disconnected'));
   setSv('svWeb',i18n(authState.web?'Login required':'Off'));
@@ -2968,10 +2989,10 @@ function memberRow(o){
   if(o.uid && o.isPeer){
     ctrls='<span class="gmctl"><button class="gmbtn" data-gact="remove" '+
       'data-guid="'+gEsc(o.uid)+'" data-gname="'+gEsc(o.name)+'" '+
-      'title="Remove from group" aria-label="Remove '+gEsc(o.name)+' from group">\u2715</button></span>';
+      'title="Remove from this outdoor unit" aria-label="Remove '+gEsc(o.name)+' from this outdoor unit">\u2715</button></span>';
   } else if(o.uid && !o.isPeer){
     ctrls='<span class="gmctl"><button class="gmbtn leave" data-gact="leave" '+
-      'title="Leave the group" aria-label="Leave the group">Leave</button></span>';
+      'title="Leave this outdoor unit" aria-label="Leave this outdoor unit">Leave</button></span>';
   }
   const nameHtml='<span class="gname">'+gEsc(o.name)+(o.tag?' <span class="gmode">('+gEsc(o.tag)+')</span>':'')+'</span>';
   const lockHtml=o.isLock?'<span class="glock">holds unit</span>':'';
@@ -2983,9 +3004,11 @@ function memberRow(o){
   if(o.room!=null) parts.push('<span class="gmstat">Current <b>'+fmtTemp(o.room)+unitSym()+'</b>'
     +(o.rs?'<span title="'+gEsc(i18n(o.rs==='ok'?'Room temperature from wall sensors':'Wall sensors not heard'))+'">'+RS_ICON(o.rs==='ok'?'gm-rs':'gm-rs warn')+'</span>':'')+'</span>');
   if(o.target!=null) parts.push('<span class="gmstat">Target <b>'+fmtTemp(o.target)+unitSym()+'</b></span>');
-  if(o.slice==='run') parts.push('<span class="gmstat"><b>'+gEsc(i18n(o.mode==='COOL'||o.mode==='DRY'?'Cooling now':'Heating now'))+'</b></span>');
-  else if(o.slice==='hold') parts.push('<span class="gmstat"><b>'+gEsc(i18n('Paused'))+'</b></span>');
   if(parts.length) stats='<div class="gmstats">'+parts.join('')+'</div>';
+  // Tandem turn: Heating / Cooling while it has the outdoor unit, "Up next"
+  // while it waits for the other mode's turn to end.
+  const TURN={heat:'Heating',cool:'Cooling',next:'Up next'};
+  const turn=TURN[o.turn]?'<span class="gturn '+o.turn+'">'+gEsc(i18n(TURN[o.turn]))+'</span>':'';
   // A whole card is a link to that zone's own UI. Buttons live inside and are
   // handled first by the delegated listener (so a tap on ✕/Leave never
   // navigates). data-* only — never interpolate names into an onclick.
@@ -2996,6 +3019,7 @@ function memberRow(o){
       '<div class="gmtop">'+nameHtml+lockHtml+'</div>'+
       stats+
     '</div>'+
+    turn+
     ctrls+
   '</div>';
 }
@@ -3021,17 +3045,32 @@ function renderGroupBanner(g){
   b.textContent=msg;
   b.className='gbanner'+(msg?(' show '+cls):'');
 }
+// Each head is listed twice: on the Zones tab (view only; tap to open it, with
+// its Tandem turn) and in Settings › Outdoor unit (✕ / Leave, no navigation).
+let ouSaved='';
 function renderGroupPanel(g){
   const inG=!!(g&&g.in_group);
   groupInGroup=inG;
   $('gNeedsAdmin').classList.add('hidden');
   $('gNotInGroup').classList.toggle('hidden',inG);
   $('gInGroup').classList.toggle('hidden',!inG);
+  $('ouNotIn').classList.toggle('hidden',inG);
+  $('ouIn').classList.toggle('hidden',!inG);
+  $('gSub').classList.toggle('hidden',!inG);
   if(!inG) return;
-  $('gLabel').textContent=g.group_label?g.group_label:'(unnamed group)';
+  $('gLabel').textContent=g.group_label||i18n('(unnamed group)');
+  $('gSub').textContent=g.group_label?i18n('Rooms on the {name} outdoor unit. Tap one to open it.',{name:g.group_label})
+    :i18n('Rooms on this outdoor unit. Tap one to open it.');
   const st=$('gStatus');
   st.textContent=groupStatusText(g.status);
   st.className='pill '+(g.status==='ok'?'':(g.status==='indeterminate'?'limited':'full'));
+  const sl=g.slice||{};
+  const tn=tandemNow(sl), tl=$('gTandem');
+  tl.classList.toggle('hidden',!tn);
+  if(tn){
+    tl.innerHTML=TANDEM_ICON+'<span>Tandem: <b>'+gEsc(i18n(tn.s))+(tn.next?' \u00b7 '+gEsc(tn.next):'')+'</b></span>';
+    tl.title=tn.tip?i18n(tn.tip):'';
+  }
   const self=g.self||{};
   // The "holds unit" badge only makes sense during a conflict: it names the head
   // whose mode won the shared compressor while blocking someone. When everyone
@@ -3040,66 +3079,92 @@ function renderGroupPanel(g){
   // flickers. So gate the badge on an actual conflict.
   const inConflict=(g.status==='conflict'||g.status==='pending_conflict');
   const lockMatch=(nm,uid)=>inConflict&&g.locked_by&&(g.locked_by===nm||g.locked_by===uid);
-  const sl=g.slice||{};
-  const slOf=uid=>{ if(!sl.enabled) return null; const m=(sl.members||[]).find(x=>x.uid===uid); return m?m.directive:null; };
-  const rows=[ memberRow({
-      name:self.name||self.uid, dotcls:'selfdot', tag:'This device',
-      isLock:lockMatch(self.name,self.uid), uid:self.uid, isPeer:false,
-      mode:self.mode, room:self.roomTemp, target:self.targetTemp, rs:self.rs, url:null, slice:slOf(self.uid) }) ];
+  const heads=[{ name:self.name||self.uid, dotcls:'selfdot', tag:'This device', uid:self.uid, isPeer:false,
+    known:true, mode:self.mode, room:self.roomTemp, target:self.targetTemp, rs:self.rs, url:null }];
   (g.members||[]).forEach(m=>{
     const known=(m.state==='known');
     // An unreachable peer (no fresh signed poll within ~45s) comes back as
     // state!=='known' — surface that plainly as "offline" so it's obvious a
     // zone dropped off, rather than the ambiguous "unknown".
-    const tag=known?'':(m.state==='incompatible'?'Incompatible':'Offline');
-    rows.push(memberRow({
-      name:m.name||m.uid, dotcls:known?'known':'unknown', tag:tag,
-      isLock:lockMatch(m.name,m.uid), uid:m.uid, isPeer:true,
+    heads.push({ name:m.name||m.uid, dotcls:known?'known':'unknown',
+      tag:known?'':(m.state==='incompatible'?'Incompatible':'Offline'), uid:m.uid, isPeer:true, known:known,
       mode:known?m.mode:null, room:known?m.roomTemp:null, target:known?m.targetTemp:null, rs:known?m.rs:null,
-      url:m.ip?('http://'+m.ip+'/'):null, slice:known?slOf(m.uid):null }));
+      url:m.ip?('http://'+m.ip+'/'):null });
   });
-  $('gMembers').innerHTML=rows.join('');
+  $('gMembers').innerHTML=heads.map(h=>memberRow({ name:h.name, dotcls:h.dotcls, tag:h.tag,
+    isLock:lockMatch(h.name,h.uid), uid:null, mode:h.mode, room:h.room, target:h.target, rs:h.rs,
+    url:h.url, turn:h.known?tandemTurn(sl,h.uid):null })).join('');
+  $('ouMembers').innerHTML=heads.map(h=>memberRow({ name:h.name, dotcls:h.dotcls, tag:h.tag,
+    uid:h.uid, isPeer:h.isPeer, url:null })).join('');
   wireMemberCtrls();
-  const ri=$('gRenameInput'); if(ri&&!groupEditing&&document.activeElement!==ri) ri.value=g.group_label||'';
+  // Refresh the name field unless it holds an unsaved edit.
+  const ni=$('ouName');
+  if(document.activeElement!==ni && ni.value.trim()===ouSaved) ni.value=g.group_label||'';
+  ouSaved=g.group_label||'';
+  ouChanged();
 }
-// Delegate member-row button clicks. Using data-* attributes + one listener
+const TANDEM_ICON='<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '+
+  'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 7h11l-3-3M17 17H6l3 3"/></svg>';
+// Tandem summary for this outdoor unit, or null while Tandem is off. While a
+// room waits for the other mode, `next` gives the latest the switch can come:
+// the maximum turn. It can come sooner once every room on the current turn
+// reaches its target. The turn clock stops during defrost.
+function tandemNow(sl){
+  if(!sl||!sl.enabled) return null;
+  if(!sl.active) return {s:'starting…'};
+  if(sl.phase==='changeover') return {s:sl.mode==='heat'?'switching to heating…':'switching to cooling…'};
+  if(sl.phase==='run'){
+    const r={s:sl.mode==='heat'?'heating':'cooling'};
+    if((sl.members||[]).some(m=>m.directive==='hold')){
+      const n=Math.max(1,Math.ceil(((sl.max_slice_s||0)-(sl.elapsed_s||0))/60));
+      r.next=i18n(sl.mode==='heat'?'cooling within {n} min':'heating within {n} min',{n:n});
+    }
+    return r;
+  }
+  return {s:'idle',tip:'No room needs heat or cool'};
+}
+// One head's Tandem turn: 'heat'/'cool' while it has the outdoor unit, 'next'
+// while it waits for the other mode, null when it isn't taking part.
+function tandemTurn(sl,uid){
+  if(!sl||!sl.enabled||!sl.active) return null;
+  const m=(sl.members||[]).find(x=>x.uid===uid);
+  if(!m) return null;
+  if(sl.phase==='run') return m.directive==='run'?sl.mode:(m.directive==='hold'?'next':null);
+  if(sl.phase==='changeover') return m.wants===sl.mode?'next':null;
+  return null;
+}
+// Delegate member-row clicks. Using data-* attributes + one listener per list
 // (instead of inline onclick with interpolated names) keeps names containing
 // quotes/apostrophes — e.g. "Eric's Room" — from breaking the handler.
 let memberCtrlsWired=false;
 function wireMemberCtrls(){
   if(memberCtrlsWired) return;
-  const box=$('gMembers'); if(!box) return;
-  box.addEventListener('click',e=>{
-    const btn=e.target.closest('button[data-gact]');
-    if(btn){
-      const act=btn.dataset.gact;
-      if(act==='leave'){ groupLeave(); }
-      else if(act==='remove'){ groupRemoveMember(btn.dataset.guid, btn.dataset.gname); }
-      return;  // a button tap never also navigates the card
-    }
+  const ctl=$('ouMembers'), view=$('gMembers'); if(!ctl||!view) return;
+  ctl.addEventListener('click',e=>{
+    const btn=e.target.closest('button[data-gact]'); if(!btn) return;
+    if(btn.dataset.gact==='leave') groupLeave();
+    else if(btn.dataset.gact==='remove') groupRemoveMember(btn.dataset.guid,btn.dataset.gname);
+  });
+  view.addEventListener('click',e=>{
     const card=e.target.closest('.gmember[data-gurl]');
-    if(card && card.dataset.gurl){ window.open(card.dataset.gurl,'_blank','noopener'); }
+    if(card&&card.dataset.gurl) window.open(card.dataset.gurl,'_blank','noopener');
   });
   memberCtrlsWired=true;
 }
 let slDirty=false;
 function sliceNowText(sl){
-  if(!sl.enabled) return i18n('Off');
-  if(!sl.active) return i18n('Starting…');
-  const mins=' \u00b7 '+Math.floor((sl.elapsed_s||0)/60)+' min';
-  if(sl.phase==='changeover') return i18n('Switching modes')+mins;
-  if(sl.phase==='run') return i18n(sl.mode==='heat'?'Heating':'Cooling')+mins;
-  return i18n('Nobody needs heat or cool');
+  const t=tandemNow(sl);
+  if(!t) return i18n('Off');
+  const s=i18n(t.s);
+  return s.charAt(0).toUpperCase()+s.slice(1)+(t.next?' \u00b7 '+t.next:'');
 }
 // Tandem is a per-outdoor-unit (zone group) setting: shown in Settings with the
-// group's name, and as a read-only status line in Zones.
+// unit's name, and as a status line in Zones.
 function renderSlice(g){
   const inG=!!(g&&g.in_group), sl=(inG&&g.slice)||{};
   slLastG=g||null; slInG=inG; renderSetList();
-  const now=inG?sliceNowText(sl):i18n('Off');
-  $('slNow').textContent=now;
-  $('gSliceNow').textContent=now;
-  $('slUnit').textContent=inG?(g.group_label||i18n('(unnamed group)')):i18n('Not paired');
+  $('slNow').textContent=inG?sliceNowText(sl):i18n('Off');
+  $('slUnit').textContent=inG?(g.group_label||i18n('(unnamed group)')):i18n('Not set up');
   $('slNoGroup').classList.toggle('hidden',inG);
   $('slShared').classList.toggle('hidden',!inG);
   ['slEn','slMin','slMax','slSettle'].forEach(id=>{ $(id).disabled=!inG; });
@@ -3110,8 +3175,7 @@ function renderSlice(g){
   pkFill('slSettle',[180,240,300,600],pkMin,sl.settle_s||180);
   slSaved=JSON.stringify(slForm()); slChanged();
 }
-let slSaved='', slInG=false;
-function slForm(){
+let slSaved='', slInG=false;function slForm(){
   return {enabled:$('slEn').checked,min_slice_s:parseInt($('slMin').value,10),
     max_slice_s:parseInt($('slMax').value,10),settle_s:parseInt($('slSettle').value,10)};
 }
@@ -3144,12 +3208,7 @@ async function refreshGroup(){
   renderGroupBanner(g);
   renderGroupPanel(g);
   renderSlice(g);
-}
-function openTandemSettings(){
-  showTab('settings');
-  setTimeout(()=>jumpTo('sec-tandem'),50);
-}
-function modeCap(m){ return m.charAt(0)+m.slice(1).toLowerCase(); }
+}function modeCap(m){ return m.charAt(0)+m.slice(1).toLowerCase(); }
 // ── House view (all heads across outdoor units) ─────────────────────────
 let groupTabActive=false, houseRetry=null;
 function houseRow(h,isSelf){
@@ -3280,7 +3339,7 @@ async function groupDiscover(){
     const j=await r.json().catch(()=>({candidates:[]}));
     const list=(j&&j.candidates)||[];
     if(!list.length){
-      msg.className='status'; msg.textContent='No head is inviting a new zone right now. On a head already in the group, tap “Add a zone”, then scan again.';
+      msg.className='status'; msg.textContent='No head is inviting right now. On a head already on the outdoor unit, tap “Add a head” in Settings › Outdoor unit, then scan again.';
       return;
     }
     msg.classList.add('hidden');
@@ -3290,7 +3349,7 @@ async function groupDiscover(){
 function renderCandidates(list){
   const box=$('gCandidates'); box.innerHTML='';
   list.forEach(c=>{
-    const group=c.glabel&&c.glabel.trim()?c.glabel:'Unnamed group';
+    const group=c.glabel&&c.glabel.trim()?c.glabel:'Unnamed outdoor unit';
     const via=c.name&&c.name.trim()?c.name:(c.uid||'a head');
     const b=document.createElement('button'); b.className='gcand';
     const x=document.createElement('div'); x.className='gcand-x';
@@ -3305,8 +3364,8 @@ function renderCandidates(list){
 }
 function selectCandidate(host,group,via){
   gSelHost=host;
-  $('gJoinTitle').textContent='Add this zone to “'+group+'”';
-  $('gJoinSub').textContent='“'+via+'” is relaying the invite for the group. Enter the 6-digit code shown on it.';
+  $('gJoinTitle').textContent='Add this head to “'+group+'”';
+  $('gJoinSub').textContent='“'+via+'” is relaying the invite. Enter the 6-digit code shown on it.';
   $('gJoinCode').value='';
   $('gJoinCard').classList.remove('hidden');
   $('gJoinCode').focus();
@@ -3314,7 +3373,7 @@ function selectCandidate(host,group,via){
 function groupJoinCancel(){ gSelHost=''; $('gJoinCard').classList.add('hidden'); setElMsg('gJoinMsg','',null,true); }
 async function groupJoinSelected(){
   const code=($('gJoinCode').value||'').trim();
-  if(!gSelHost){ setElMsg('gJoinMsg','Pick a group to join first.','err'); return; }
+  if(!gSelHost){ setElMsg('gJoinMsg','Pick an outdoor unit to join first.','err'); return; }
   if(!code){ setElMsg('gJoinMsg','Enter the 6-digit code shown on the other head.','err'); return; }
   await joinViaHost(gSelHost,code,'gJoinMsg');
 }
@@ -3325,16 +3384,16 @@ async function groupPairJoinManual(){
   await joinViaHost(host,code,'gPairMsg');
 }
 async function joinViaHost(host,code,targetId){
-  setElMsg(targetId,'Adding this zone\u2026','info');
+  setElMsg(targetId,'Adding this head\u2026','info');
   try{
     const r=await fetch('/api/group/pair/join',{method:'POST',
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({owner_host:host,code:code})});
     const j=await r.json().catch(()=>({}));
-    if(!r.ok){ setElMsg(targetId,(j&&j.error)||'Could not add this zone. Please try again.','err'); return; }
+    if(!r.ok){ setElMsg(targetId,(j&&j.error)||'Could not add this head. Please try again.','err'); return; }
     setElMsg(targetId,'',null,true);
     groupJoinCancel();
-    pairMsg('Added to \u201c'+(j.group_label||'the group')+'\u201d.','ok',6000);
+    pairMsg('Added to \u201c'+(j.group_label||'the outdoor unit')+'\u201d.','ok',6000);
     setTimeout(refreshGroup,700);
   }catch(e){ setElMsg(targetId,'Network error \u2014 could not reach this device.','err'); }
 }
@@ -3382,10 +3441,10 @@ async function pollAddZone(){
     const r=await jget('/api/group'); const g=await r.json();
     if((g.member_count||0)>gAddBaseCount){
       const nu=(g.members||[]).find(m=>gAddBaseUids.indexOf(m.uid)<0);
-      joinedName=nu?(nu.name||nu.uid):'A new zone';
+      joinedName=nu?(nu.name||nu.uid):'A new head';
     }
   }catch(e){}
-  if(joinedName!==null){ pairMsg('\u201c'+joinedName+'\u201d joined the group.','ok',6000); }
+  if(joinedName!==null){ pairMsg('\u201c'+joinedName+'\u201d joined the outdoor unit.','ok',6000); }
   else{ pairMsg('Pairing window closed.','',6000); }
   refreshGroup();
 }
@@ -3400,28 +3459,35 @@ async function groupAddZoneCancel(){
   refreshGroup();
 }
 async function groupLeave(){
-  if(!(await uiConfirm({title:'Leave the group?',body:'This head will stop coordinating mode with the others.',okText:'Leave',danger:true}))) return;
+  if(!(await uiConfirm({title:'Leave this outdoor unit?',body:'This head will stop coordinating heat and cool with the others.',okText:'Leave',danger:true}))) return;
   pairMsg('Leaving\u2026','info');
   try{
     const r=await fetch('/api/group/leave',{method:'POST'});
     if(!r.ok){ pairMsg('Leave failed. Please try again.','err',6000); return; }
-    pairMsg('Left the group.','ok',5000);
+    pairMsg('Left the outdoor unit.','ok',5000);
     setTimeout(refreshGroup,700);
   }catch(e){ pairMsg('Network error \u2014 could not reach this device.','err',6000); }
 }
+function ouChanged(){
+  const v=($('ouName').value||'').trim();
+  $('ouSave').disabled=(v===ouSaved);
+}
+function onOuNameKey(e){
+  if(e.key==='Enter'){ e.preventDefault(); if(!$('ouSave').disabled) groupRename(); }
+}
 async function groupRename(){
-  const label=($('gRenameInput').value||'').trim();
-  const msg=$('gRenameMsg'); msg.className='status info'; msg.classList.remove('hidden');
-  msg.textContent='Renaming\u2026';
+  const label=($('ouName').value||'').trim();
+  $('ouSave').disabled=true;
+  setElMsg('ouMsg','',null,true);
   try{
     const r=await fetch('/api/group/label',{method:'POST',
       headers:{'Content-Type':'application/json'},body:JSON.stringify({label:label})});
     const j=await r.json().catch(()=>({}));
-    if(!r.ok){ msg.className='status err'; msg.textContent=(j&&j.error)||'Rename failed'; return; }
-    msg.classList.add('hidden');
-    groupEditing=false; $('gRenameRow').classList.add('hidden');
+    if(!r.ok){ setElMsg('ouMsg',(j&&j.error)||i18n('Save failed'),'err'); ouChanged(); return; }
+    ouSaved=label; $('ouName').value=label;
+    toast(i18n('Saved'));
     setTimeout(refreshGroup,700);
-  }catch(e){ msg.className='status err'; msg.textContent='Network error'; }
+  }catch(e){ setElMsg('ouMsg',i18n('Save failed'),'err'); ouChanged(); }
 }
 async function groupRemoveMember(uid,name){
   if(!(await uiConfirm({title:'Remove '+(name||uid)+'?',body:'It will stop coordinating and can be re-paired later.',okText:'Remove',danger:true}))) return;
@@ -3431,22 +3497,6 @@ async function groupRemoveMember(uid,name){
     if(!r.ok){ const j=await r.json().catch(()=>({})); await uiAlert({title:'Remove failed',body:(j&&j.error)||'Could not remove that member.'}); return; }
     setTimeout(refreshGroup,700);
   }catch(e){ await uiAlert({title:'Network error',body:'Could not reach the device.'}); }
-}
-function groupNameEdit(){
-  groupEditing=true;
-  const ri=$('gRenameInput');
-  $('gRenameMsg').classList.add('hidden');
-  $('gRenameRow').classList.remove('hidden');
-  ri.focus(); ri.select();
-}
-function groupNameEditCancel(){
-  groupEditing=false;
-  $('gRenameRow').classList.add('hidden');
-  $('gRenameMsg').classList.add('hidden');
-}
-function onGroupNameKey(e){
-  if(e.key==='Enter'){e.preventDefault();groupRename();}
-  else if(e.key==='Escape'){e.preventDefault();groupNameEditCancel();}
 }
 // ── History chart (History tab, admin-only) ───────────────────────────
 // /api/history rows are [t, room, target, outdoor, sensor, freq, mode, flags,
@@ -3967,13 +4017,13 @@ async function wzScan(){
     const j=await r.json().catch(()=>({candidates:[]}));
     const list=(j&&j.candidates)||[];
     if(!list.length){
-      setElMsg('wzScanMsg','No group is inviting a new zone right now. On a controller already in the group, tap \u201cAdd a zone\u201d, then scan again.','');
+      setElMsg('wzScanMsg','No head is inviting right now. On a controller already on the outdoor unit, tap \u201cAdd a head\u201d in Settings \u203a Outdoor unit, then scan again.','');
       return;
     }
     setElMsg('wzScanMsg','',null,true);
     const box=$('wzCandidates'); box.innerHTML='';
     list.forEach(c=>{
-      const group=c.glabel&&c.glabel.trim()?c.glabel:'Unnamed group';
+      const group=c.glabel&&c.glabel.trim()?c.glabel:'Unnamed outdoor unit';
       const via=c.name&&c.name.trim()?c.name:(c.uid||'a controller');
       const b=document.createElement('button'); b.className='gcand';
       const x=document.createElement('div'); x.className='gcand-x';
