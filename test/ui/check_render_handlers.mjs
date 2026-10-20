@@ -121,3 +121,31 @@ if (failures > 0) {
   process.exit(1);
 }
 console.log(`member-row render check passed: ${HOSTILE.length} hostile name(s) render safely`);
+
+// Tandem line + per-head turn badges on the Zones tab.
+{
+  const ctx = vm.createContext({});
+  vm.runInContext('function i18n(s,p){ return p ? s.replace(/\\{(\\w+)\\}/g,(m,k)=>p[k]) : s; }\n' +
+    ['tandemNow', 'tandemTurn'].map(h => extractFn(script, h)).join('\n'), ctx);
+  const tandemNow = vm.runInContext('tandemNow', ctx);
+  const tandemTurn = vm.runInContext('tandemTurn', ctx);
+  const base = { enabled: true, active: true, max_slice_s: 1800, min_slice_s: 600 };
+  const heatRun = { ...base, phase: 'run', mode: 'heat', elapsed_s: 720, members: [
+    { uid: 'a', wants: 'heat', directive: 'run' }, { uid: 'b', wants: 'cool', directive: 'hold' },
+    { uid: 'c', wants: 'none', directive: 'free' }] };
+  const expect = (got, want, what) => { if (JSON.stringify(got) !== JSON.stringify(want)) fail(`${what}: got ${JSON.stringify(got)}, want ${JSON.stringify(want)}`); };
+  expect(tandemNow({ enabled: false }), null, 'Tandem off hides the line');
+  // 30 min max − 12 min elapsed → the switch comes within 18 min.
+  expect(tandemNow(heatRun), { s: 'heating', next: 'cooling within 18 min' }, 'countdown while a room waits');
+  expect(tandemNow({ ...heatRun, elapsed_s: 1799 }), { s: 'heating', next: 'cooling within 1 min' }, 'countdown rounds up');
+  expect(tandemNow({ ...heatRun, elapsed_s: 1900 }), { s: 'heating', next: 'cooling within 1 min' }, 'countdown never hits 0');
+  expect(tandemNow({ ...heatRun, members: [heatRun.members[0]] }), { s: 'heating' }, 'no countdown when nobody waits');
+  expect(tandemNow({ ...base, phase: 'idle', members: [] }).s, 'idle', 'idle');
+  expect(['a', 'b', 'c'].map(u => tandemTurn(heatRun, u)), ['heat', 'next', null], 'run-phase badges');
+  const change = { ...base, phase: 'changeover', mode: 'cool', elapsed_s: 30, members: heatRun.members.map(m => ({ ...m, directive: m.wants === 'none' ? 'free' : 'hold' })) };
+  expect(tandemNow(change).s, 'switching to cooling…', 'changeover line');
+  expect(['a', 'b', 'c'].map(u => tandemTurn(change, u)), [null, 'next', null], 'changeover: incoming side is up next');
+  expect(['a', 'b'].map(u => tandemTurn({ ...base, phase: 'idle', members: change.members }, u)), [null, null], 'idle: no badges');
+  if (failures > 0) { console.error(`tandem status check FAILED: ${failures} problem(s)`); process.exit(1); }
+  console.log('tandem status check passed: countdown + turn badges');
+}
