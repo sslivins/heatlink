@@ -18,6 +18,7 @@
 #include "web_ui.h"
 #include "ota.h"
 #include "devlog.h"
+#include "recovery.h"
 #include "diag.h"
 #include "events.h"
 #include "capability.h"
@@ -85,6 +86,11 @@ constexpr uint16_t kVinSagFloorMv = 4800; ///< diag sag early-warning threshold 
 // Skip VIN min/sag tracking during a post-boot warm-up so ADC settling glitches
 // (seen as spurious low-mV all-time lows) never get persisted.
 constexpr int64_t  kVinWarmupUs      = 15LL * 1000000; ///< 15 s
+// Battery-path power-cut detection for the admin reset procedure: input below
+// kCutLowMv for kCutLowSamples consecutive 1 Hz samples, then back above kCutRestoreMv.
+constexpr uint16_t kCutLowMv      = 3000;
+constexpr uint16_t kCutRestoreMv  = 4000;
+constexpr int      kCutLowSamples = 2;
 // Battery-presence detection. The LGS4056 charger holds the (unloaded) BAT node
 // near float even with no cell, and periodically runs a recharge/detect cycle
 // that swings VBAT by many hundreds of mV between 1 s samples. A real Li-ion
@@ -118,6 +124,7 @@ void pmic_task(void*) {
     uint16_t prev_vbat  = 0;      // last VBAT sample, for jump detection
     bool     have_prev  = false;
     uint32_t stable_sec = 0;      // seconds since the last large VBAT jump
+    int      low_input  = 0;      // consecutive samples with input below kCutLowMv
     while (true) {
         if (g_pmic.present()) {
             g_pmic.feed_watchdog();
@@ -162,6 +169,17 @@ void pmic_task(void*) {
             // Feed the sag/brownout tracker with effective input, but only after
             // the warm-up window so post-boot ADC glitches never persist a low.
             if (elapsed >= kVinWarmupUs) diag::note_vin(snap.input_mv, kVinSagFloorMv);
+
+            // Running on the battery through an external power cut: count it
+            // toward the admin reset procedure once input comes back.
+            if (elapsed >= kVinWarmupUs) {
+                if (snap.input_mv < kCutLowMv) {
+                    if (low_input < kCutLowSamples) low_input++;
+                } else if (snap.input_mv >= kCutRestoreMv) {
+                    if (low_input >= kCutLowSamples) recovery::note_power_restored();
+                    low_input = 0;
+                }
+            }
         }
         // Push diagnostics to HA on sag/record-low change, and at least every
         // ~30 s so RSSI (which drifts continuously) stays fresh without spamming.
@@ -297,6 +315,9 @@ void on_mqtt_command(const hvac_mqtt::Command& cmd) {
             }
             break;
         }
+        case K::ResetAdminPassword:
+            recovery::trigger(true);
+            break;
         case K::ResetWifiDrops: {
             wifi::reset_disconnect_count();
             diag::Snapshot ds = diag::get();
@@ -421,6 +442,9 @@ extern "C" void app_main() {
 
     // Activity log (mounts the SPIFFS `storage` partition, loads persisted tail).
     events::init();
+
+    // Admin-password reset procedure: count this boot if it was a power cut.
+    recovery::init();
 
     ota::init();
 

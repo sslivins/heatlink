@@ -2909,6 +2909,14 @@ esp_err_t handle_login(httpd_req_t* req) {
 
     httpd_resp_set_type(req, "application/json");
     if (role == AUTH_ROLE_NONE) {
+        int wait = auth_mgr_login_lockout_secs();
+        if (wait > 0) {
+            char out[96];
+            snprintf(out, sizeof(out),
+                     "{\"error\":\"too many attempts\",\"retry_after\":%d}", wait);
+            httpd_resp_set_status(req, "429 Too Many Requests");
+            return httpd_resp_sendstr(req, out);
+        }
         httpd_resp_set_status(req, "401 Unauthorized");
         return httpd_resp_sendstr(req, "{\"error\":\"invalid password\"}");
     }
@@ -2944,6 +2952,11 @@ esp_err_t handle_auth_get(httpd_req_t* req) {
     const char* rname = role == AUTH_ROLE_ADMIN ? "admin"
                         : role == AUTH_ROLE_USER ? "user" : "none";
     cJSON* root = cJSON_CreateObject();
+    auth_state_t st = auth_mgr_state();
+    cJSON_AddStringToObject(root, "state", st == AUTH_STATE_CLAIMED     ? "claimed"
+                                           : st == AUTH_STATE_UNCLAIMED ? "unclaimed"
+                                                                        : "legacy");
+    cJSON_AddNumberToObject(root, "recovery_secs_left", auth_mgr_recovery_secs_left());
     cJSON_AddBoolToObject(root, "web_auth_enabled", auth_mgr_web_auth_enabled());
     cJSON_AddBoolToObject(root, "api_auth_enabled", auth_mgr_api_auth_enabled());
     cJSON_AddStringToObject(root, "username", auth_mgr_get_username());
@@ -2967,9 +2980,13 @@ esp_err_t handle_auth_get(httpd_req_t* req) {
 }
 
 // ── POST /api/auth — update auth settings (admin only) ─────────────────
+// Also the claim endpoint: {"claim":true,"password":"…","token":"…"} creates
+// the first admin password on an unclaimed head (token from the setup portal,
+// or none needed while the recovery window is open) and signs the caller in.
+// On a legacy head (no password, UI open) setting "password" is a claim too.
 esp_err_t handle_auth_post(httpd_req_t* req) {
     set_cors(req);
-    if (!admin_authorized(req)) { send_unauthorized(req); return ESP_FAIL; }
+    bool authed = admin_authorized(req);  // evaluated before any claim
     char* body = recv_body(req);
     if (!body) {
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Empty or oversized body");
@@ -2983,18 +3000,59 @@ esp_err_t handle_auth_post(httpd_req_t* req) {
     }
 
     const cJSON* v;
-    bool admin_pw_provided = false;
-    // Admin password first, so enabling web auth in the same request uses it.
-    if ((v = cJSON_GetObjectItem(json, "password")) && cJSON_IsString(v) &&
-        v->valuestring[0] != '\0') {
-        if (!auth_mgr_set_admin_password(v->valuestring)) {
+    const cJSON* jpw = cJSON_GetObjectItem(json, "password");
+    const char* new_pw = (jpw && cJSON_IsString(jpw)) ? jpw->valuestring : "";
+    bool claim = (v = cJSON_GetObjectItem(json, "claim")) && cJSON_IsTrue(v);
+    if (!claim && new_pw[0] != '\0' && auth_mgr_state() == AUTH_STATE_LEGACY) claim = true;
+    bool claimed = false;
+    if (claim) {
+        const cJSON* jt = cJSON_GetObjectItem(json, "token");
+        const char* tok = (jt && cJSON_IsString(jt)) ? jt->valuestring : "";
+        char session[AUTH_SESSION_TOKEN_LEN + 1] = {0};
+        auth_claim_result_t r = auth_mgr_claim(new_pw, tok, session);
+        if (r != AUTH_CLAIM_OK) {
+            cJSON_Delete(json);
+            httpd_resp_set_type(req, "application/json");
+            switch (r) {
+                case AUTH_CLAIM_ALREADY:
+                    httpd_resp_set_status(req, "409 Conflict");
+                    return httpd_resp_sendstr(req, "{\"error\":\"admin password already set\"}");
+                case AUTH_CLAIM_DENIED:
+                    httpd_resp_set_status(req, "403 Forbidden");
+                    return httpd_resp_sendstr(req, "{\"error\":\"claim not allowed\"}");
+                case AUTH_CLAIM_INVALID:
+                    httpd_resp_set_status(req, "400 Bad Request");
+                    return httpd_resp_sendstr(req,
+                        "{\"error\":\"Admin password must be set and differ from the user password\"}");
+                default:
+                    httpd_resp_set_status(req, "500 Internal Server Error");
+                    return httpd_resp_sendstr(req, "{\"error\":\"could not save password\"}");
+            }
+        }
+        set_session_cookie(req, session);
+        events::log(events::Cat::System, events::Actor::WebUI, "Admin password created",
+                    "", peer_ipv4(req));
+        authed = claimed = true;
+    }
+    if (!authed) {
+        cJSON_Delete(json);
+        send_unauthorized(req);
+        return ESP_FAIL;
+    }
+
+    // Change the admin password (already done above when this was a claim).
+    if (!claimed && new_pw[0] != '\0') {
+        if (!auth_mgr_set_admin_password(new_pw)) {
             cJSON_Delete(json);
             httpd_resp_set_status(req, "400 Bad Request");
             httpd_resp_set_type(req, "application/json");
             return httpd_resp_sendstr(req,
                 "{\"error\":\"Admin password must differ from the user password\"}");
         }
-        admin_pw_provided = true;
+        // The change logged every session out; keep the caller signed in.
+        char session[AUTH_SESSION_TOKEN_LEN + 1] = {0};
+        if (auth_mgr_login(new_pw, session) == AUTH_ROLE_ADMIN && session[0])
+            set_session_cookie(req, session);
     }
 
     // Climate-only "user" account: set its password, or remove it.
@@ -3011,32 +3069,8 @@ esp_err_t handle_auth_post(httpd_req_t* req) {
     if ((v = cJSON_GetObjectItem(json, "remove_user")) && cJSON_IsTrue(v))
         auth_mgr_set_user_password(nullptr);
 
-    if ((v = cJSON_GetObjectItem(json, "web_auth_enabled")) && cJSON_IsBool(v)) {
-        bool want_web = cJSON_IsTrue(v);
-        bool was_web = auth_mgr_web_auth_enabled();
-        // Turning login ON from OFF requires a freshly-typed admin password in
-        // this same request — not merely a password that happens to already be
-        // stored (which the user may have set long ago and forgotten). This
-        // closes the "flip login on with a blank field" lockout vector.
-        if (want_web && !was_web && !admin_pw_provided) {
-            cJSON_Delete(json);
-            httpd_resp_set_status(req, "400 Bad Request");
-            httpd_resp_set_type(req, "application/json");
-            httpd_resp_sendstr(req,
-                "{\"error\":\"Enter an administrator password to enable login\"}");
-            return ESP_FAIL;
-        }
-        // auth_mgr enforces the "no password → can't enable" invariant too and
-        // returns false if violated (defence in depth against a bad state).
-        if (!auth_mgr_set_web_auth_enabled(want_web)) {
-            cJSON_Delete(json);
-            httpd_resp_set_status(req, "400 Bad Request");
-            httpd_resp_set_type(req, "application/json");
-            httpd_resp_sendstr(req,
-                "{\"error\":\"Set a web-UI password before requiring login\"}");
-            return ESP_FAIL;
-        }
-    }
+    // "web_auth_enabled" is no longer settable: login is always required once
+    // an admin password exists.
     if ((v = cJSON_GetObjectItem(json, "api_auth_enabled")) && cJSON_IsBool(v))
         auth_mgr_set_api_auth_enabled(cJSON_IsTrue(v));
 
@@ -3049,6 +3083,7 @@ esp_err_t handle_auth_post(httpd_req_t* req) {
 
     cJSON* root = cJSON_CreateObject();
     cJSON_AddStringToObject(root, "status", "ok");
+    if (claimed) cJSON_AddStringToObject(root, "role", "admin");
     cJSON_AddBoolToObject(root, "web_auth_enabled", auth_mgr_web_auth_enabled());
     cJSON_AddBoolToObject(root, "api_auth_enabled", auth_mgr_api_auth_enabled());
     cJSON_AddBoolToObject(root, "web_password_set", auth_mgr_web_password_set());

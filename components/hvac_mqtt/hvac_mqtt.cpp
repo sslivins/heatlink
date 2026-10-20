@@ -82,6 +82,7 @@ bool topic_to_kind(const std::string& topic, Command::Kind& kind) {
         {"/update/install",  Command::Kind::UpdateInstall},
         {"/diag/reset_brownout", Command::Kind::ResetBrownout},
         {"/diag/reset_wifi_drops", Command::Kind::ResetWifiDrops},
+        {"/auth/reset_admin", Command::Kind::ResetAdminPassword},
     };
     for (const auto& m : kMap) {
         if (topic == g_base + m.suffix) { kind = m.kind; return true; }
@@ -94,6 +95,7 @@ void subscribe_all() {
         "/mode/set", "/temp/set", "/remote_temp/set", "/fan/set",
         "/vane/set", "/wideVane/set", "/system/set", "/ota/set",
         "/update/install", "/diag/reset_brownout", "/diag/reset_wifi_drops",
+        "/auth/reset_admin",
     };
     for (const char* s : suffixes) {
         std::string topic = g_base + s;
@@ -364,6 +366,10 @@ esp_err_t publish_diag_discovery() {
                             "/diag/reset_brownout", "mdi:flash-alert") != ESP_OK) rc = ESP_FAIL;
     if (publish_diag_button("Reset WiFi drops", "reset_wifi_drops",
                             "/diag/reset_wifi_drops", "mdi:wifi-alert") != ESP_OK) rc = ESP_FAIL;
+    // Admin-password reset procedure without the power-cut dance: clears the
+    // admin password and opens the 15-minute window to set a new one.
+    if (publish_diag_button("Reset admin password", "reset_admin_password",
+                            "/auth/reset_admin", "mdi:lock-reset") != ESP_OK) rc = ESP_FAIL;
 
     ESP_LOGI(TAG, "publish_diag_discovery");
     return rc;

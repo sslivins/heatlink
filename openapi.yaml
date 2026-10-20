@@ -379,6 +379,10 @@ paths:
           description: Invalid body
         '401':
           description: Invalid credentials
+        '429':
+          description: |
+            Too many failed attempts (10 in a row locks logins for 30 s).
+            Body: `{"error":"too many attempts","retry_after":<seconds>}`.
   /api/logout:
     post:
       tags: [Auth]
@@ -404,11 +408,23 @@ paths:
               schema: { $ref: '#/components/schemas/AuthState' }
     post:
       tags: [Auth]
-      summary: Update auth settings (browser-session gated)
+      summary: Update auth settings, or create the first admin password (claim)
       description: |
-        Requires a valid session when web login is enabled. Only the fields
-        present in the body are applied. Enabling `web_auth_enabled` without a
-        stored or supplied password is rejected.
+        Requires an admin session once an admin password exists. Only the
+        fields present in the body are applied. Web login is always required
+        once an admin password is set; `web_auth_enabled` is no longer settable.
+
+        **Claim.** A head with no admin password is either `legacy` (upgraded
+        from older firmware; UI open) or `unclaimed` (freshly provisioned, or
+        after the admin password reset procedure; everything but the public
+        auth endpoints is locked). `{"claim":true,"password":"…","token":"…"}`
+        creates the admin password and returns an admin session cookie. On an
+        unclaimed head the `token` must be the claim token from the setup
+        portal link (`?claim=`), unless the 15-minute recovery window is open.
+        On a legacy head, setting `password` is itself a claim.
+
+        Changing the admin password logs every session out, then signs the
+        caller back in (new cookie).
       security:
         - SessionCookie: []
       requestBody:
@@ -423,9 +439,13 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/AuthPostResult' }
         '400':
-          description: Invalid body, or enabling web login with no password
+          description: Invalid body, or admin password empty / equal to the user password
         '401':
           description: Not authorized to change auth settings
+        '403':
+          description: Claim not allowed (wrong/missing token and no recovery window)
+        '409':
+          description: Claim attempted but an admin password is already set
   /api/capabilities:
     get:
       tags: [Capabilities]
@@ -1464,7 +1484,18 @@ components:
     AuthState:
       type: object
       properties:
-        web_auth_enabled: { type: boolean }
+        state:
+          type: string
+          enum: [legacy, unclaimed, claimed]
+          description: |
+            `legacy` = no admin password, UI open; `unclaimed` = no admin
+            password, locked until claimed; `claimed` = admin password set.
+        recovery_secs_left:
+          type: integer
+          description: Seconds left to set a new admin password after the reset procedure (0 = none).
+        web_auth_enabled:
+          type: boolean
+          description: Derived — true when an admin password is set or a claim is pending.
         api_auth_enabled: { type: boolean }
         username: { type: string }
         web_password_set: { type: boolean }
@@ -1477,13 +1508,23 @@ components:
       properties:
         username: { type: string }
         password: { type: string, format: password }
-        web_auth_enabled: { type: boolean }
+        user_password: { type: string, format: password }
+        remove_user: { type: boolean }
+        claim:
+          type: boolean
+          description: Create the first admin password (see description).
+        token:
+          type: string
+          description: Claim token from the setup portal link.
         api_auth_enabled: { type: boolean }
         regenerate_key: { type: boolean }
     AuthPostResult:
       type: object
       properties:
         status: { type: string, example: ok }
+        role:
+          type: string
+          description: "`admin` when this request claimed the head."
         web_auth_enabled: { type: boolean }
         api_auth_enabled: { type: boolean }
         username: { type: string }

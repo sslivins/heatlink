@@ -46,7 +46,7 @@ struct Config {
 
 /// A command parsed from a .../*/set topic, to be applied to the heat pump.
 struct Command {
-    enum class Kind { Power, Mode, Temperature, Fan, Vane, WideVane, RemoteTemp, System, Ota, UpdateInstall, ResetBrownout, ResetWifiDrops };
+    enum class Kind { Power, Mode, Temperature, Fan, Vane, WideVane, RemoteTemp, System, Ota, UpdateInstall, ResetBrownout, ResetWifiDrops, ResetAdminPassword };
     Kind kind;
     std::string value;  ///< raw payload (e.g. "HEAT", "21.5", "AUTO")
 };
