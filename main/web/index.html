@@ -1168,6 +1168,11 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
       <div class="mqf"><label>Confirm password</label>
         <input type="password" id="secPass2" autocomplete="new-password" placeholder="" oninput="updateWebAccessState()"></div>
       <div id="secWebHint" class="hint">No password set yet.</div>
+      <div class="row" style="margin-top:10px">
+        <label>Reset by cutting power</label>
+        <div class="toggle"><input type="checkbox" id="secPwrRst" onchange="savePowerReset()"><span class="slider" onclick="document.getElementById('secPwrRst').click()"></span></div>
+      </div>
+      <div class="hint">Lets anyone who can cut power to this head reset the admin password. Turn off if tenants or guests can reach the breaker; the Home Assistant reset button keeps working.</div>
     </div>
 
     <div class="role">
@@ -1177,6 +1182,15 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
         <input type="password" id="secUserPass" autocomplete="new-password" placeholder="" oninput="updateWebAccessState()"></div>
       <div id="secUserHint" class="hint">No climate-only password set.</div>
       <button class="btn btn-danger hidden" id="secUserRemoveBtn" onclick="removeUserLogin()">Remove climate-only password</button>
+      <div class="row" style="margin-top:10px">
+        <label>Limit temperature range</label>
+        <div class="toggle"><input type="checkbox" id="secLimEn" onchange="saveLimits()"><span class="slider" onclick="document.getElementById('secLimEn').click()"></span></div>
+      </div>
+      <div id="secLimRow" class="row hidden">
+        <label>Allowed range</label>
+        <span style="display:flex;align-items:center;gap:6px;flex-shrink:0"><select id="secLimLo" style="width:auto" onchange="saveLimits()"></select>–<select id="secLimHi" style="width:auto" onchange="saveLimits()"></select></span>
+      </div>
+      <div id="secLimMsg" class="status hidden" style="margin:8px 0 0"></div>
     </div>
     </div>
 
@@ -1462,6 +1476,15 @@ const I18N = { fr: {
   "Remove climate-only password?":"Retirer le mot de passe climat uniquement ?",
   "Anyone on your network will be able to control climate without signing in.":"Toute personne sur votre réseau pourra contrôler le climat sans se connecter.",
   "Climate-only password removed":"Mot de passe climat uniquement retiré",
+  "Reset by cutting power":"Réinitialiser en coupant le courant",
+  "Lets anyone who can cut power to this head reset the admin password. Turn off if tenants or guests can reach the breaker; the Home Assistant reset button keeps working.":"Permet à toute personne pouvant couper le courant de cette tête de réinitialiser le mot de passe administrateur. Désactivez-le si des locataires ou invités ont accès au disjoncteur ; le bouton de réinitialisation Home Assistant reste disponible.",
+  "Limit temperature range":"Limiter la plage de température",
+  "Allowed range":"Plage autorisée",
+  "The lowest temperature can’t be above the highest.":"La température minimale ne peut pas dépasser la maximale.",
+  "Limits must be 16-31 C in 0.5 steps, min not above max":"Limites : 16 à 31 °C par pas de 0,5, minimum pas au-dessus du maximum",
+  "Turn off reset by cutting power?":"Désactiver la réinitialisation par coupure de courant ?",
+  "If you forget the admin password, only the Home Assistant reset button will be able to reset it.":"Si vous oubliez le mot de passe administrateur, seul le bouton de réinitialisation Home Assistant pourra le réinitialiser.",
+  "Turn off":"Désactiver",
   "Not now":"Plus tard",
   "Save web access":"Enregistrer l’accès web",
   // API
@@ -1805,10 +1828,10 @@ function showTab(name){
   // and the toggle reflect the current server state, not a stale snapshot.
   if(name==='settings'){ loadAuth(); }
   groupTabActive=(name==='group');
-  if(name==='group' && authState.role==='admin'){ refreshGroup(); }
+  if(name==='group'){ refreshGroup(); }
   if(groupTabActive){ refreshHouse(); }
   histTabActive=(name==='history');
-  if(histTabActive && authState.role==='admin'){ hist.end=null; histLoad(); }
+  if(histTabActive){ hist.end=null; histLoad(); }
 }
 
 function fmtUptime(s){
@@ -2080,7 +2103,9 @@ let TUNIT='C';
 function isF(){return TUNIT==='F';}
 function cToF(c){return c*9/5+32;}
 function fToC(f){return (f-32)*5/9;}
-function snapC(c){return Math.max(T_MIN,Math.min(T_MAX,Math.round(c*2)/2));}
+// Setpoint range the signed-in role may pick (admin-set limits for climate-only users).
+let U_LO=T_MIN,U_HI=T_MAX;
+function snapC(c){return Math.max(U_LO,Math.min(U_HI,Math.round(c*2)/2));}
 function unitSym(){return isF()?'°F':'°C';}
 // Format a °C value for display: whole °F, or one-decimal °C. Returns '--' for null.
 function fmtTemp(c){return c==null?'--':(isF()?String(Math.round(cToF(c))):Number(c).toFixed(1));}
@@ -2585,7 +2610,7 @@ function dialTemp(ev){
   let rel=a-A_START; if(rel<0)rel+=360;
   if(rel>A_SWEEP) rel=(rel-A_SWEEP)<(360-rel)?A_SWEEP:0;  // clamp out of the bottom gap
   let t=T_MIN+rel/A_SWEEP*(T_MAX-T_MIN);
-  return Math.max(T_MIN,Math.min(T_MAX,Math.round(t*2)/2));
+  return Math.max(U_LO,Math.min(U_HI,Math.round(t*2)/2));
 }
 function dialDown(ev){
   if(!climate.power)return;
@@ -3004,9 +3029,10 @@ function updateWebAccessState(){
 function applyRole(){
   const user=authState.role==='user';
   document.querySelectorAll('.tab').forEach(t=>{
-    if(t.dataset.tab!=='climate') t.style.display=user?'none':'';
+    if(!['climate','group','history'].includes(t.dataset.tab)) t.style.display=user?'none':'';
   });
-  if(user) showTab('climate');
+  const act=document.querySelector('.tab.active');
+  if(user && !(act && ['climate','group','history'].includes(act.dataset.tab))) showTab('climate');
 }
 
 // One-time claim token from the setup portal's link (?claim=…). Kept for this
@@ -3034,6 +3060,10 @@ async function loadAuth(deferReveal){
     authState.userSet=!!a.user_password_set;
     authState.role=a.role||'admin';
     authState.guest=!!a.guest;
+    authState.lim=a.user_limits||{enabled:false,min:16,max:26};
+    authState.pwrRst=a.power_reset!==false;
+    const limOn=authState.role==='user'&&authState.lim.enabled;
+    U_LO=limOn?authState.lim.min:T_MIN; U_HI=limOn?authState.lim.max:T_MAX;
     if(a.name!=null) curName=a.name;
     curHost=a.hostname||curHost;
     $('lgHost').textContent=a.hostname||'';
@@ -3062,6 +3092,7 @@ async function loadAuth(deferReveal){
     $('logoutIcon').classList.toggle('hidden',!a.web_auth_enabled||authState.guest);
     $('signinIcon').classList.toggle('hidden',!authState.guest);
     updateWebAccessState();
+    renderPolicy();
     renderSetList();
     return true;
   }catch(e){ if(!deferReveal) $('appWrap').classList.remove('hidden'); return true }
@@ -3287,6 +3318,44 @@ async function saveWebAccess(){
   updateWebAccessState();
 }
 
+// Climate-only setpoint limits + power-cut reset (save on change).
+function renderPolicy(){
+  const l=authState.lim||{enabled:false,min:16,max:26};
+  $('secPwrRst').checked=authState.pwrRst!==false;
+  $('secLimEn').checked=!!l.enabled;
+  $('secLimRow').classList.toggle('hidden',!l.enabled);
+  ['secLimLo','secLimHi'].forEach((id,i)=>{
+    const sel=$(id); if(document.activeElement===sel) return;
+    let h=''; for(let c=T_MIN;c<=T_MAX;c+=0.5) h+='<option value="'+c+'">'+fmtTemp(c)+unitSym()+'</option>';
+    sel.innerHTML=h; sel.value=String(i?l.max:l.min);
+  });
+}
+async function postPolicy(body,msgEl){
+  try{
+    const r=await fetch('/api/auth',{method:'POST',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    if(r.status===401||r.status===403){ loadAuth(); return false; }
+    if(!r.ok){ let m='Save failed';try{const j=await r.json();if(j.error)m=j.error;}catch(_){}
+      if(msgEl){msgEl.textContent=i18n(m);msgEl.className='status err';msgEl.classList.remove('hidden');} return false; }
+    if(msgEl) msgEl.classList.add('hidden');
+    toast(i18n('Saved'));
+    return true;
+  }catch(e){ if(msgEl){msgEl.textContent=i18n('Save failed');msgEl.className='status err';msgEl.classList.remove('hidden');} return false; }
+}
+async function saveLimits(){
+  const l={enabled:$('secLimEn').checked,min:parseFloat($('secLimLo').value),max:parseFloat($('secLimHi').value)};
+  if(l.min>l.max){ const m=$('secLimMsg'); m.textContent=i18n('The lowest temperature can\u2019t be above the highest.');m.className='status err';m.classList.remove('hidden'); return; }
+  if(await postPolicy({user_limits:l},$('secLimMsg'))) authState.lim=l;
+  renderPolicy();
+}
+async function savePowerReset(){
+  const on=$('secPwrRst').checked;
+  if(!on && !(await uiConfirm({title:'Turn off reset by cutting power?',
+      body:'If you forget the admin password, only the Home Assistant reset button will be able to reset it.',
+      okText:'Turn off',danger:true}))){ $('secPwrRst').checked=true; return; }
+  if(await postPolicy({power_reset:on},null)) authState.pwrRst=on;
+  renderPolicy();
+}
 async function removeUserLogin(){
   if(!(await uiConfirm({title:'Remove climate-only password?',body:'Anyone on your network will be able to control climate without signing in.',okText:'Remove',danger:true})))return;
   secWebMsg('Removing…','info');
@@ -3573,7 +3642,6 @@ async function saveSlice(){
   }catch(e){ msg.textContent=i18n('Save failed');msg.className='status err';msg.classList.remove('hidden'); slChanged(); }
 }
 async function refreshGroup(){
-  if(authState.role!=='admin') return;
   let g;
   try{ const r=await jget('/api/group'); if(!r.ok) return; g=await r.json(); }
   catch(e){ return; }
@@ -4369,7 +4437,10 @@ async function resetWifiDrops(ev){
 async function pollOnce(){
   await refresh();
   if(groupTabActive && tickN%3===0) await refreshHouse();
-  if(authState.role!=='admin'){ tickN++; return; }  // user role: climate only
+  if(authState.role!=='admin'){                      // user role: climate, zones, history
+    if(tickN%2===0) await refreshGroup();
+    tickN++; return;
+  }
   if(tickN%3===0) await loadWifi();
   if(tickN%6===0){ await refreshUpdate(); await loadMqtt(); }
   if(tickN%2===0) await refreshGroup();

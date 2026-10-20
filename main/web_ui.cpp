@@ -2,6 +2,7 @@
 /// @brief On-device diagnostics/control web server (implementation).
 
 #include "web_ui.h"
+#include "access_policy.h"
 #include "park_ctl.h"
 #include "room_sensor_ctl.h"
 #include "slice_ctl.h"
@@ -523,6 +524,7 @@ esp_err_t handle_post_settings(httpd_req_t* req) {
     std::string who = web_actor_name(req);
     const char* wname = who.empty() ? "" : who.c_str();
     const std::string wip = peer_ipv4(req);
+    const bool admin = admin_authorized(req);
     // A mode command also powers the head on (HA expresses on/off as a mode),
     // so apply power after it: {"power":"OFF","mode":"COOL"} stores COOL and
     // leaves the head off.
@@ -551,14 +553,16 @@ esp_err_t handle_post_settings(httpd_req_t* req) {
     if ((v = cJSON_GetObjectItem(json, "wideVane")) && cJSON_IsString(v))
         apply(K::WideVane, v->valuestring);
     if ((v = cJSON_GetObjectItem(json, "temperature")) && cJSON_IsNumber(v)) {
+        double t = admin ? v->valuedouble
+                         : access_policy::clamp_user_setpoint((float)v->valuedouble);
         char buf[16];
-        snprintf(buf, sizeof(buf), "%.1f", v->valuedouble);
+        snprintf(buf, sizeof(buf), "%.1f", t);
         apply(K::Temperature, buf);
         char msg[48];
-        snprintf(msg, sizeof(msg), "Target set to %.1f\xC2\xB0""C", v->valuedouble);
+        snprintf(msg, sizeof(msg), "Target set to %.1f\xC2\xB0""C", t);
         events::log(events::Cat::Setpoint, events::Actor::WebUI, msg, wname, wip);
     }
-    if ((v = cJSON_GetObjectItem(json, "remoteTemp")) && cJSON_IsNumber(v)) {
+    if (admin && (v = cJSON_GetObjectItem(json, "remoteTemp")) && cJSON_IsNumber(v)) {
         char buf[16];
         snprintf(buf, sizeof(buf), "%.1f", v->valuedouble);
         apply(K::RemoteTemp, buf);
@@ -857,7 +861,7 @@ esp_err_t handle_capabilities_get(httpd_req_t* req) {
 //       {"wideVane":{"detect":true}} to trigger an on-demand detection run.
 esp_err_t handle_capabilities_post(httpd_req_t* req) {
     set_cors(req);
-    REQUIRE_API_AUTH(req);
+    REQUIRE_ADMIN(req);
     char* body = recv_body(req);
     if (!body) {
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Empty or oversized body");
@@ -2046,7 +2050,7 @@ esp_err_t handle_group_get(httpd_req_t* req) {
     const hvac_group::MemberObs& self_obs = members[0];
 
     cJSON* root = cJSON_CreateObject();
-    cJSON_AddStringToObject(root, "group_id", g.group_id.c_str());
+    if (admin_authorized(req)) cJSON_AddStringToObject(root, "group_id", g.group_id.c_str());
     cJSON_AddStringToObject(root, "group_label", g.group_label.c_str());
     cJSON_AddBoolToObject(root, "in_group", grouped);
     cJSON_AddNumberToObject(root, "protocol_version", hvac_group::kProtocolVersion);
@@ -3163,6 +3167,12 @@ esp_err_t handle_auth_get(httpd_req_t* req) {
     cJSON_AddBoolToObject(root, "authenticated", authed);
     cJSON_AddBoolToObject(root, "open_climate", open_climate());
     cJSON_AddBoolToObject(root, "guest", guest);
+    access_policy::Limits lim = access_policy::limits();
+    cJSON* jl = cJSON_AddObjectToObject(root, "user_limits");
+    cJSON_AddBoolToObject(jl, "enabled", lim.enabled);
+    cJSON_AddNumberToObject(jl, "min", lim.min_c);
+    cJSON_AddNumberToObject(jl, "max", lim.max_c);
+    cJSON_AddBoolToObject(root, "power_reset", access_policy::power_reset_enabled());
     // Only reveal the API key to an admin client.
     if (role == AUTH_ROLE_ADMIN) {
         char key[AUTH_API_KEY_LEN + 1] = {0};
@@ -3269,6 +3279,31 @@ esp_err_t handle_auth_post(httpd_req_t* req) {
     if ((v = cJSON_GetObjectItem(json, "remove_user")) && cJSON_IsTrue(v))
         auth_mgr_set_user_password(nullptr);
 
+    if ((v = cJSON_GetObjectItem(json, "user_limits")) && cJSON_IsObject(v)) {
+        access_policy::Limits l = access_policy::limits();
+        const cJSON* f;
+        if ((f = cJSON_GetObjectItem(v, "enabled")) && cJSON_IsBool(f)) l.enabled = cJSON_IsTrue(f);
+        if ((f = cJSON_GetObjectItem(v, "min")) && cJSON_IsNumber(f)) l.min_c = (float)f->valuedouble;
+        if ((f = cJSON_GetObjectItem(v, "max")) && cJSON_IsNumber(f)) l.max_c = (float)f->valuedouble;
+        if (!access_policy::set_limits(l)) {
+            cJSON_Delete(json);
+            httpd_resp_set_status(req, "400 Bad Request");
+            httpd_resp_set_type(req, "application/json");
+            return httpd_resp_sendstr(req,
+                "{\"error\":\"Limits must be 16-31 C in 0.5 steps, min not above max\"}");
+        }
+    }
+    if ((v = cJSON_GetObjectItem(json, "power_reset")) && cJSON_IsBool(v)) {
+        bool on = cJSON_IsTrue(v);
+        if (on != access_policy::power_reset_enabled()) {
+            access_policy::set_power_reset_enabled(on);
+            events::log(events::Cat::System, events::Actor::WebUI,
+                        on ? "Power-cut admin password reset turned on"
+                           : "Power-cut admin password reset turned off",
+                        web_actor_name(req).c_str(), peer_ipv4(req));
+        }
+    }
+
     // "web_auth_enabled" is no longer settable: login is always required once
     // an admin password exists.
     if ((v = cJSON_GetObjectItem(json, "api_auth_enabled")) && cJSON_IsBool(v))
@@ -3362,7 +3397,7 @@ esp_err_t handle_events_clear(httpd_req_t* req) {
 // most history::kMaxPoints rows come back. Streamed in chunks.
 esp_err_t handle_history_get(httpd_req_t* req) {
     set_cors(req);
-    REQUIRE_ADMIN(req);
+    REQUIRE_API_AUTH(req);
     uint32_t end_q = 0, window = 0;
     size_t qlen = httpd_req_get_url_query_len(req);
     if (qlen > 0 && qlen < 128) {

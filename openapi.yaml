@@ -466,7 +466,7 @@ paths:
               schema: { $ref: '#/components/schemas/Capabilities' }
     post:
       tags: [Capabilities]
-      summary: Set a capability override or trigger detection
+      summary: Set a capability override or trigger detection (admin only)
       description: |
         Set `override` to force the wide-vane control shown/hidden regardless of
         detection, and/or set `detect: true` to run an on-demand detection probe
@@ -740,7 +740,7 @@ paths:
   /api/history:
     get:
       tags: [Activity]
-      summary: Recorded climate history (admin only)
+      summary: Recorded climate history (admin or climate-only user)
       description: |
         One sample every 30 s is kept on flash for 14 days. Windows longer
         than 4 h are averaged into `bucket`-second buckets (24 h → 60 s,
@@ -1522,6 +1522,16 @@ components:
           type: boolean
           description: Claimed with no climate-only password set; clients without a session get the climate-only `user` role.
         guest: { type: boolean, description: This client has the `user` role through open climate control (no session). }
+        user_limits:
+          type: object
+          description: Setpoint range allowed for the climate-only `user` role (admin and API key are not limited). Per head.
+          properties:
+            enabled: { type: boolean }
+            min: { type: number, description: °C, 16-31 in 0.5 steps }
+            max: { type: number, description: °C, 16-31 in 0.5 steps, not below `min` }
+        power_reset:
+          type: boolean
+          description: Whether the power-cut procedure can reset the admin password (default true). The Home Assistant reset button always works. Per head.
         api_key:
           type: string
           description: Only present when the client is authenticated.
@@ -1532,6 +1542,16 @@ components:
         password: { type: string, format: password }
         user_password: { type: string, format: password }
         remove_user: { type: boolean }
+        user_limits:
+          type: object
+          description: Admin only. Setpoint range allowed for the climate-only `user` role (admin and API key are not limited). Per head.
+          properties:
+            enabled: { type: boolean }
+            min: { type: number, description: °C, 16-31 in 0.5 steps }
+            max: { type: number, description: °C, 16-31 in 0.5 steps, not below `min` }
+        power_reset:
+          type: boolean
+          description: Admin only. Whether the power-cut procedure can reset the admin password (default true). The Home Assistant reset button always works. Per head.
         claim:
           type: boolean
           description: Create the first admin password (see description).
