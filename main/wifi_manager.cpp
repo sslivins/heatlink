@@ -456,41 +456,13 @@ esp_err_t start_provisioning() {
 }
 }  // namespace
 
-// ── Pairing discovery (public) ─────────────────────────────────────────
-// While an "add a zone" pairing window is open, the owning head advertises
-// pair=1 in its _mmhvac._tcp TXT (plus the human-readable group label and its
-// own display name) so an ungrouped head can *discover* the pairing session
-// without the user typing an address. The TXT is cleared the moment the window
-// closes (join/cancel/expiry/lockout) — mDNS announces the update so browsers
-// stop offering it promptly. The pairing code itself is NEVER advertised; it is
-// only ever exchanged over the authenticated claim, so pair=1 leaks nothing but
-// "this head is currently accepting one new member".
-// The House-view identity (name/ghash/glabel) is always advertised, so the
-// pairing advert only toggles pair=1 and, while active, the label/name the
-// pairing UI shows; closing the window restores the house values.
+// House-view identity (name/ghash/glabel) advertised in the _mmhvac._tcp TXT.
 static std::mutex  s_advert_mtx;
 static std::string s_house_name, s_house_ghash, s_house_glabel;
 
 static void txt_set_or_remove(const char* key, const std::string& v) {
     if (!v.empty()) mdns_service_txt_item_set("_mmhvac", "_tcp", key, v.c_str());
     else            mdns_service_txt_item_remove("_mmhvac", "_tcp", key);
-}
-
-static bool s_pairing_active = false;
-
-void set_pairing_advert(bool active, const std::string& glabel,
-                        const std::string& name) {
-    std::lock_guard<std::mutex> lk(s_advert_mtx);
-    s_pairing_active = active;
-    if (active) {
-        mdns_service_txt_item_set("_mmhvac", "_tcp", "pair", "1");
-        txt_set_or_remove("glabel", glabel);
-        txt_set_or_remove("name", name);
-    } else {
-        mdns_service_txt_item_remove("_mmhvac", "_tcp", "pair");
-        txt_set_or_remove("glabel", s_house_glabel);
-        txt_set_or_remove("name", s_house_name);
-    }
 }
 
 void set_house_advert(const std::string& name, const std::string& ghash,
@@ -502,10 +474,8 @@ void set_house_advert(const std::string& name, const std::string& ghash,
     s_house_ghash = ghash;
     s_house_glabel = glabel;
     txt_set_or_remove("ghash", ghash);
-    if (!s_pairing_active) {
-        txt_set_or_remove("glabel", glabel);
-        txt_set_or_remove("name", name);
-    }
+    txt_set_or_remove("glabel", glabel);
+    txt_set_or_remove("name", name);
 }
 
 // First IPv4 address of an mDNS result as dotted quad; "" if none.
@@ -521,54 +491,6 @@ static std::string result_ipv4(const mdns_result_t* r) {
         }
     }
     return "";
-}
-
-// Browse the LAN for heads currently advertising pair=1 and return a JSON array
-// [{"uid":..,"name":..,"glabel":..,"host":"<ip>"}], excluding ourselves. The
-// caller (the ungrouped head's web UI) presents this list so the user taps the
-// intended group — the code is then sent to that ONE selected host only, never
-// fanned out. Bounded to a handful of results with a short query timeout.
-esp_err_t discover_pairing(std::string& out_json) {
-    mdns_result_t* results = nullptr;
-    esp_err_t err = mdns_query_ptr("_mmhvac", "_tcp", 2500, 20, &results);
-    if (err != ESP_OK) return err;
-
-    const std::string self_uid = device_uid();
-    cJSON* arr = cJSON_CreateArray();
-    for (mdns_result_t* r = results; r; r = r->next) {
-        // Read TXT: require pair=1; collect uid/name/glabel.
-        bool pairing = false;
-        std::string uid, name, glabel;
-        for (size_t i = 0; i < r->txt_count; i++) {
-            const char* k = r->txt[i].key;
-            const char* v = r->txt[i].value ? r->txt[i].value : "";
-            if (!k) continue;
-            if (!strcmp(k, "pair"))        pairing = (!strcmp(v, "1"));
-            else if (!strcmp(k, "uid"))    uid = v;
-            else if (!strcmp(k, "name"))   name = v;
-            else if (!strcmp(k, "glabel")) glabel = v;
-        }
-        if (!pairing) continue;
-        if (!uid.empty() && uid == self_uid) continue;  // never offer ourselves
-
-        std::string ip = result_ipv4(r);
-        if (ip.empty()) continue;  // no usable address
-
-        cJSON* o = cJSON_CreateObject();
-        cJSON_AddStringToObject(o, "uid",    uid.c_str());
-        cJSON_AddStringToObject(o, "name",   name.c_str());
-        cJSON_AddStringToObject(o, "glabel", glabel.c_str());
-        cJSON_AddStringToObject(o, "host",   ip.c_str());
-        cJSON_AddItemToArray(arr, o);
-    }
-    mdns_query_results_free(results);
-
-    char* s = cJSON_PrintUnformatted(arr);
-    cJSON_Delete(arr);
-    if (!s) return ESP_ERR_NO_MEM;
-    out_json = s;
-    cJSON_free(s);
-    return ESP_OK;
 }
 
 esp_err_t browse_heads(std::vector<HeadAdvert>& out) {

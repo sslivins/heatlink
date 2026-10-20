@@ -331,8 +331,12 @@ unit without knowing the hostname.
 
 A freshly provisioned head is **locked until you create an admin password**.
 The portal's success screen shows the head's address with a one-time claim
-link (`http://heatlink-<id>.local/?claim=…`); open it to set the password. Once
-set, the web UI always requires a login (admin, or the optional per-head
+link (`http://heatlink-<id>.local/?claim=…`). Opening it first lists the outdoor
+units already on your network (the one whose compressor frequency matches this
+head's is marked *Likely*): pick yours and enter that unit's admin password to
+join it, and the head adopts that password. If you pick *A different outdoor
+unit*, or no other heads are found, you create a new admin password instead.
+Once set, the web UI always requires a login (admin, or the optional per-head
 climate-only password). Heads upgraded from older firmware without a password
 stay open and show a banner asking you to set one.
 
@@ -346,6 +350,15 @@ set a new admin password without logging in; doing so also signs everyone out
 and rotates the API key. The old password keeps working meanwhile, and if no
 new one is set within the window nothing changes. Wi-Fi, MQTT and the
 climate-only password are never touched.
+
+**One password per outdoor unit.** All heads on an outdoor unit share the admin
+password. A head joins a group (setup, the setup wizard, or **Settings → Outdoor
+unit**) by proving it knows the group's admin password, which is never sent: the
+joining head sends an HMAC proof keyed by the password hash, and the group's
+secrets come back encrypted under a key derived from it. Changing the password on
+any head syncs it to the rest of the group (the newest change wins), carried
+encrypted in the signed peer polls. A head upgraded without a password adopts its
+group's password the same way.
 
 ## Web UI / REST API
 
@@ -421,9 +434,9 @@ access**). Optional per-endpoint API-key auth can be enabled there.
 | Method | Path | Purpose |
 |--------|------|---------|
 | `GET`  | `/api/group` · `/api/group/state` | group membership + coordination state |
-| `POST` | `/api/group/pair/start` · `/stop` | open / close the 6-digit pairing window |
-| `GET`  | `/api/group/pair/status` · `/discover` | pairing status · mDNS-browse for pairable groups |
-| `POST` | `/api/group/pair/claim` · `/join` | claim a code · join a group |
+| `POST` | `/api/group/join` | join another head's group with the admin password (`{host,password}`) |
+| `GET`  | `/api/group/discover` | heads to offer for joining (as `/api/house`; also open during setup with the claim token) |
+| `GET`/`POST` | `/api/group/join/params` · `/join/claim` | head-to-head join exchange (password proof, sealed reply) |
 | `POST` | `/api/group/leave` · `/label` · `/member/remove` | leave · relabel · remove a member |
 | `POST` | `/api/group/sync` · `/resolve` | signed peer sync · coordinator HEAT/COOL resolve (409 while time-slicing) |
 | `POST` | `/api/group/slice` | admin: time-slicing settings (`enabled`, `min_slice_s`, `max_slice_s`, `settle_s`) |

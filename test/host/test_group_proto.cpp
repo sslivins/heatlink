@@ -86,14 +86,6 @@ static void test_identity_validation() {
     CHECK_FALSE(is_valid_group_secret(std::string(63, 'a')));
     CHECK_FALSE(is_valid_group_secret(std::string(64, 'g')));
 
-    // pairing code: exactly 6 digits.
-    CHECK_TRUE(is_valid_pairing_code("000000"));
-    CHECK_TRUE(is_valid_pairing_code("482915"));
-    CHECK_FALSE(is_valid_pairing_code("12345"));   // too short
-    CHECK_FALSE(is_valid_pairing_code("1234567"));  // too long
-    CHECK_FALSE(is_valid_pairing_code("12a456"));   // non-digit
-    CHECK_FALSE(is_valid_pairing_code(" 12345"));
-
     // uid: 1..32 lowercase alnum (matches the MAC-derived device_uid).
     CHECK_TRUE(is_valid_uid("6dac"));
     CHECK_TRUE(is_valid_uid("e6c8"));
@@ -171,17 +163,19 @@ static void test_ct_equal() {
     CHECK_TRUE(ct_equal("", ""));
 }
 
-static void test_evaluate_claim() {
-    // Happy path.
-    CHECK_TRUE(evaluate_claim(true, false, true, 5) == ClaimDecision::Ok);
-    // Window state is reported before any code comparison.
-    CHECK_TRUE(evaluate_claim(false, false, true, 5) == ClaimDecision::NoActiveCode);
-    CHECK_TRUE(evaluate_claim(true, true, true, 5) == ClaimDecision::Expired);
-    // A burned code can never succeed, even with the right digits.
-    CHECK_TRUE(evaluate_claim(true, false, true, 0) == ClaimDecision::LockedOut);
-    CHECK_TRUE(evaluate_claim(true, false, false, 0) == ClaimDecision::LockedOut);
-    // Wrong code with attempts remaining.
-    CHECK_TRUE(evaluate_claim(true, false, false, 3) == ClaimDecision::BadCode);
+static void test_should_adopt_admin() {
+    // A newer epoch wins either way.
+    CHECK_TRUE(should_adopt_admin(1, "aa", 2, "bb"));
+    CHECK_TRUE(should_adopt_admin(1, "bb", 2, "aa"));
+    CHECK_FALSE(should_adopt_admin(3, "aa", 2, "bb"));
+    // Never adopt "no password", and an identical record is a no-op.
+    CHECK_FALSE(should_adopt_admin(0, "aa", 5, ""));
+    CHECK_FALSE(should_adopt_admin(1, "aa", 1, "aa"));
+    // Equal epochs: a head without a password adopts (legacy heads in a group).
+    CHECK_TRUE(should_adopt_admin(0, "", 0, "aa"));
+    // Equal epochs, different passwords: both sides converge on the larger one.
+    CHECK_TRUE(should_adopt_admin(0, "aa", 0, "bb"));
+    CHECK_FALSE(should_adopt_admin(0, "bb", 0, "aa"));
 }
 
 static MemberObs mk(const std::string& uid, MemberState st, bool on, Demand d,
@@ -530,7 +524,7 @@ int main() {
     test_peer_serialization();
     test_add_remove_peer();
     test_ct_equal();
-    test_evaluate_claim();
+    test_should_adopt_admin();
     test_classify_demand();
     test_observe();
     test_is_valid_nonce();

@@ -57,13 +57,6 @@ bool is_valid_group_secret(const std::string& secret) {
     return is_lower_hex(secret, kGroupSecretHexLen);
 }
 
-bool is_valid_pairing_code(const std::string& code) {
-    if (code.size() != kPairingCodeLen) return false;
-    for (char c : code)
-        if (c < '0' || c > '9') return false;
-    return true;
-}
-
 bool is_valid_uid(const std::string& uid) {
     if (uid.empty() || uid.size() > 32) return false;
     for (char c : uid) {
@@ -167,13 +160,11 @@ bool ct_equal(const std::string& a, const std::string& b) {
     return diff == 0 && a.size() == b.size();
 }
 
-ClaimDecision evaluate_claim(bool active, bool expired, bool code_matches,
-                             int attempts_left) {
-    if (!active)             return ClaimDecision::NoActiveCode;
-    if (expired)             return ClaimDecision::Expired;
-    if (attempts_left <= 0)  return ClaimDecision::LockedOut;
-    if (code_matches)        return ClaimDecision::Ok;
-    return ClaimDecision::BadCode;
+bool should_adopt_admin(uint32_t my_epoch, const std::string& my_rec,
+                        uint32_t peer_epoch, const std::string& peer_rec) {
+    if (peer_rec.empty() || peer_rec == my_rec) return false;
+    if (peer_epoch != my_epoch) return peer_epoch > my_epoch;
+    return my_rec.empty() || peer_rec > my_rec;
 }
 
 namespace {

@@ -106,8 +106,19 @@ std::string generate_group_id();
 /// 256-bit cryptographically-random group_secret as 64 lowercase hex chars.
 std::string generate_group_secret();
 
-/// A fresh kPairingCodeLen-digit pairing code (uniform, hardware RNG).
-std::string generate_pairing_code();
+/// HMAC-SHA256 of @p msg under a raw key.
+bool hmac_sha256(const uint8_t* key, size_t key_len, const std::string& msg,
+                 uint8_t out[32]);
+
+/// 32-byte subkey HMAC(group_secret, @p label). False when standalone.
+bool group_subkey(const std::string& label, uint8_t out[32]);
+
+/// AES-256-GCM: @p out_hex = hex(iv[12] || ciphertext || tag[16]).
+bool seal(const uint8_t key[32], const std::string& plain, std::string& out_hex);
+
+/// Inverse of seal(). False if the input is malformed or fails authentication.
+bool open_sealed(const uint8_t key[32], const std::string& sealed_hex,
+                 std::string& plain);
 
 /// HMAC-SHA256 of @p message under the current group_secret, lowercase hex.
 /// Returns "" if the head has no valid secret.
@@ -148,56 +159,29 @@ uint64_t issue_op_id();
 /// changes nothing.
 bool accept_op_id(uint64_t incoming);
 
-// ── Pairing (Phase 1b) ─────────────────────────────────────────────────────
+// ── Joining (password-authenticated) ───────────────────────────────────────
 
-/// Seconds a pairing code stays valid, and how many wrong attempts burn it.
-constexpr int kPairingTtlSeconds = 120;
-constexpr int kPairingMaxAttempts = 5;
-
-/// Owner side: ensure this head has a group (generating a random group_id +
-/// group_secret if it was standalone), then open a single-use pairing window
-/// with a fresh 6-digit code. @p label sets the group label only when a new
-/// group is formed. The code is returned to display to the user; it lives in
-/// RAM (never persisted) and expires after kPairingTtlSeconds.
-esp_err_t pairing_start(const std::string& label, std::string& out_code);
-
-/// Cancel any open pairing window.
-void pairing_stop();
-
-struct PairingStatus {
-    bool active = false;
-    int  seconds_left = 0;
-    int  attempts_left = 0;
-};
-
-/// Current pairing-window state (an expired window reports inactive).
-PairingStatus pairing_status();
-
-/// Result of an inbound claim; on decision==Ok the out-params carry exactly
-/// what the joining head needs to adopt the group.
-struct ClaimOutcome {
-    ClaimDecision decision = ClaimDecision::NoActiveCode;
+/// What a joining head needs to adopt the group.
+struct AdmitOutcome {
     std::string group_id;
     std::string group_label;
     std::string group_secret;
-    std::vector<std::string> members;  ///< owner uid + existing peers (not joiner)
-    std::string replica_json;          ///< owner's replicated state for the joiner to adopt
+    std::vector<std::string> members;  ///< this head + existing peers (not joiner)
+    std::string replica_json;          ///< replicated state, joiner already enrolled
+    bool formed = false;               ///< this head was standalone and formed the group
 };
 
-/// Owner side: validate an inbound pairing claim from @p joiner_uid. On success
-/// enrolls the joiner into the local peer table (persisted), burns the code,
-/// and fills the outcome with the group_id/label/secret/members. A wrong code
-/// decrements the attempt counter (and burns the code at zero). @p joiner_name
-/// (optional) is the joiner's self-reported display name; when non-empty it is
-/// seeded into the replica attributed to the joiner itself, so the owner can
-/// show a friendly name immediately instead of the bare hardware id.
-ClaimOutcome pairing_claim(const std::string& code, const std::string& joiner_uid,
-                           const std::string& joiner_name = "");
+/// Group side of a join, called once the joiner has proven it knows the admin
+/// password. Forms a group first if this head is standalone (labelled
+/// @p form_label), then enrolls @p joiner_uid (seeding @p joiner_name, attributed
+/// to the joiner) and persists. ESP_ERR_INVALID_ARG for a bad/self uid.
+esp_err_t admit_joiner(const std::string& joiner_uid, const std::string& joiner_name,
+                       const std::string& form_label, AdmitOutcome& out);
 
-/// Joiner side: adopt a group from a successful claim response. Validates all
+/// Joiner side: adopt a group from a successful join response. Validates all
 /// fields, stores group_id/label/secret, and sets the peer list to @p members
 /// minus this device's own uid. When @p replica_json is non-empty and parses,
-/// the joiner adopts the owner's exact replicated state (versions, names,
+/// the joiner adopts the group's exact replicated state (versions, names,
 /// tombstones) so membership/labels are immediately consistent; otherwise it
 /// synthesizes a fresh replica from @p members and @p label. Returns
 /// ESP_ERR_INVALID_ARG on malformed input.

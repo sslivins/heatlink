@@ -835,121 +835,112 @@ paths:
                       p: { type: string, enum: [idle, run, changeover] }
                       e: { type: integer, description: Seconds in the current phase }
                       c: { type: string, description: Coordinator uid }
+                  adm:
+                    type: object
+                    description: Admin password sync (present when a password is set); a newer epoch is adopted by the poller
+                    properties:
+                      e: { type: integer, description: Admin password epoch }
+                      s: { type: string, description: 'Password hash record, AES-256-GCM sealed under a key derived from the group secret' }
                 additionalProperties: true
         '401':
           description: Invalid sender, nonce, group id or signature
         '403':
           description: Not in a group
-  /api/group/pair/start:
-    post:
+  /api/group/join/params:
+    get:
       tags: [Groups]
-      summary: Begin a pairing window (owner side)
-      security:
-        - SessionCookie: []
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                label: { type: string, description: Optional new group label }
+      summary: Admin-password verifier parameters and a join nonce (head to head)
+      description: |
+        Step 1 of a join, called by the joining head on the head it is joining.
+        Unauthenticated: returns only the salt/iteration parameters of the admin
+        password hash and a one-time nonce (valid 60 s).
       responses:
         '200':
-          description: Pairing window opened
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/PairStartResult' }
-        '500':
-          description: Could not start pairing
-  /api/group/pair/stop:
-    post:
-      tags: [Groups]
-      summary: Close the pairing window
-      security:
-        - SessionCookie: []
-      responses:
-        '200':
-          description: Stopped
+          description: Parameters
           content:
             application/json:
               schema:
                 type: object
                 properties:
-                  status: { type: string, example: stopped }
-  /api/group/pair/status:
-    get:
-      tags: [Groups]
-      summary: Pairing-window status
-      security:
-        - SessionCookie: []
-      responses:
-        '200':
-          description: Pairing status
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/PairStatus' }
-  /api/group/pair/discover:
-    get:
-      tags: [Groups]
-      summary: Discover nearby pairable devices (mDNS)
-      security:
-        - SessionCookie: []
-      responses:
-        '200':
-          description: Candidate devices (may be empty)
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/PairDiscover' }
-  /api/group/pair/claim:
+                  ver: { type: integer, description: 'Hash version (1 = SHA-256, 2 = PBKDF2-SHA256)' }
+                  iters: { type: integer }
+                  salt: { type: string, description: 16-byte salt, hex }
+                  nonce: { type: string, description: 128-bit one-time nonce, hex }
+                  uid: { type: string }
+                  name: { type: string }
+                  glabel: { type: string, description: Group label (absent when standalone) }
+        '409':
+          description: This head has no admin password (`no_admin_password`)
+  /api/group/join/claim:
     post:
       tags: [Groups]
-      summary: Claim a pairing code (joiner to owner, unauthenticated)
+      summary: Prove the admin password and receive the sealed group (head to head)
       description: |
-        Called by a joining device against the owner during its pairing window.
-        Not gated by API key or session — the short-lived 6-digit code is the
-        credential. Rate-limited with lockout after repeated bad codes.
+        Step 2 of a join. With K = the admin password hash under the parameters
+        from `join/params`, `proof` = hex HMAC-SHA256(K, "hl-join1|nonce|cnonce|joiner_uid").
+        No session needed: the proof is the credential, and failures count
+        toward the login lockout. If this head is standalone it forms a group
+        first. The reply is AES-256-GCM sealed under
+        HMAC-SHA256(K, "hl-enc1|nonce|cnonce") and holds the group id, label,
+        secret, members, replica, broker (when configured) and the admin
+        password record (`adm`), which the joiner adopts.
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [joiner_uid, code]
+              required: [joiner_uid, nonce, cnonce, proof]
               properties:
                 joiner_uid: { type: string }
-                code: { type: string }
                 joiner_name: { type: string }
+                nonce: { type: string }
+                cnonce: { type: string, description: Joiner's 128-bit random nonce, hex }
+                proof: { type: string }
       responses:
         '200':
-          description: Claim accepted; group secret + replica returned
+          description: Admitted
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/PairClaimResult' }
+              schema:
+                type: object
+                properties:
+                  sealed: { type: string, description: 'hex(iv[12] || ciphertext || tag[16])' }
+        '400':
+          description: Malformed request
         '401':
-          description: Invalid code
+          description: Wrong admin password
         '409':
-          description: No active pairing window
+          description: This head has no admin password
         '410':
-          description: Code expired
+          description: Unknown or expired nonce
         '429':
-          description: Locked out after too many attempts
-  /api/group/pair/join:
+          description: Locked out after too many wrong passwords
+  /api/group/join:
     post:
       tags: [Groups]
-      summary: Join an existing group (joiner side, drives the claim)
+      summary: Join another head's outdoor-unit group with the admin password
+      description: |
+        Runs the join/params + join/claim exchange against `host`, adopts the
+        group, and replaces this head's admin password with the group's. The
+        response signs the browser in as admin (Set-Cookie). Allowed for an
+        admin, or without signing in while the head is unclaimed (`token` = the
+        setup claim token) or the admin-password reset window is open.
+        Reboots when it inherits the group's MQTT broker.
       security:
         - SessionCookie: []
+        - {}
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [owner_host, code]
+              required: [host, password]
               properties:
-                owner_host: { type: string, description: Owner IP or hostname }
-                code: { type: string }
+                host: { type: string, description: IP or hostname of a head on the target unit }
+                password: { type: string, description: The group's admin password }
+                token: { type: string, description: Setup claim token (when not signed in) }
       responses:
         '200':
           description: Joined
@@ -957,11 +948,31 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/GroupJoinResult' }
         '400':
-          description: Missing or invalid owner_host or code
-        '500':
-          description: HTTP init failed, bad owner response or adoption failed
+          description: 'Join refused; `error` is a user-facing message (wrong password, no password on the target, firmware too old, ...)'
+        '401':
+          description: Unauthorized
+        '409':
+          description: Already in a group
         '502':
-          description: Owner unreachable
+          description: Target unreachable or sent an invalid reply
+  /api/group/discover:
+    get:
+      tags: [Groups]
+      summary: Heads to offer for joining
+      description: |
+        Same response as `/api/house`. Also allowed without signing in while the
+        head is unclaimed (`t` = the setup claim token) or the reset window is
+        open, so a new head can list the outdoor units it could join.
+      security:
+        - SessionCookie: []
+        - {}
+      parameters:
+        - { name: t, in: query, required: false, schema: { type: string }, description: Setup claim token }
+      responses:
+        '200':
+          description: Same as `/api/house`
+        '401':
+          description: Unauthorized
   /api/group/leave:
     post:
       tags: [Groups]
@@ -1216,6 +1227,7 @@ components:
         roomTemp: { type: number }
         targetTemp: { type: number }
         rs: { type: string, enum: [ok, stale], description: 'Wall room sensors: ok = roomTemp is their average, stale = none heard (unit sensor). Absent with none paired.' }
+        freq: { type: integer, description: 'Compressor frequency in Hz (0 when idle); absent when no unit connected' }
     StatusOk:
       type: object
       properties:
@@ -1687,59 +1699,6 @@ components:
               capable: { type: boolean }
               wants: { type: string, enum: [none, heat, cool] }
               directive: { type: string, enum: [free, run, hold] }
-    PairStartResult:
-      type: object
-      properties:
-        code: { type: string, description: 6-digit pairing code }
-        seconds_left: { type: integer }
-        attempts_left: { type: integer }
-        group_id: { type: string }
-        group_label: { type: string }
-    PairStatus:
-      type: object
-      properties:
-        active: { type: boolean }
-        seconds_left: { type: integer }
-        attempts_left: { type: integer }
-    PairCandidate:
-      type: object
-      properties:
-        uid: { type: string }
-        name: { type: string }
-        glabel: { type: string, description: Advertised group label }
-        host: { type: string, description: IP or hostname }
-    PairDiscover:
-      type: object
-      properties:
-        candidates:
-          type: array
-          items: { $ref: '#/components/schemas/PairCandidate' }
-    PairClaimResult:
-      type: object
-      properties:
-        group_id: { type: string }
-        group_label: { type: string }
-        group_secret: { type: string }
-        members:
-          type: array
-          items: { type: string }
-        replica:
-          type: object
-          description: Compact CRDT replica snapshot (present when available)
-          additionalProperties: true
-        broker:
-          type: object
-          description: |
-            Owner's MQTT broker settings, present only when the owner is
-            configured. Lets a fresh joining head inherit Home Assistant / MQTT
-            config with no re-typing. friendly_name is intentionally omitted so
-            each head keeps its own MQTT node name.
-          properties:
-            host: { type: string }
-            port: { type: integer }
-            username: { type: string }
-            password: { type: string }
-            base_topic: { type: string }
     GroupJoinResult:
       type: object
       properties:

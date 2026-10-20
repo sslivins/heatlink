@@ -432,6 +432,8 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
 .gcand-t{font-size:1em;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .gcand-s{font-size:.8em;color:var(--fg-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .gcand-arrow{flex:0 0 auto;color:var(--fg-3);font-size:1.2em}
+.gcand-new{background:var(--chip)}
+.glikely{display:inline-block;margin-left:6px;padding:1px 7px;border-radius:9px;background:#2ea043;color:#fff;font-size:.72em;font-weight:600;vertical-align:middle}
 /* Reusable modal dialog (replaces native alert/confirm) */
 .dlg-back{position:fixed;inset:0;z-index:1000;display:flex;align-items:center;justify-content:center;
   padding:20px;background:rgba(0,0,0,.55);opacity:0;transition:opacity .15s ease}
@@ -478,7 +480,12 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
   <div class="card">
     <h1 id="cgName">HeatLink</h1>
     <p class="sub" id="cgHost" style="margin:-6px 0 12px"></p>
+    <div id="cgPick" class="hidden">
+      <p class="sub" style="margin:0 0 6px">Which outdoor unit is this head connected to?</p>
+      <div id="cgGroups"></div>
+    </div>
     <div id="cgForm">
+      <p class="sub hidden" id="cgNew" style="margin:0 0 10px"></p>
       <h2 id="cgTitle">Create an admin password</h2>
       <p class="sub hidden" id="cgSub" style="margin:0 0 10px;font-size:.82em">Used to manage this head and any heads you add to this outdoor unit later.</p>
       <div class="status hidden" id="cgRecovery" style="margin:6px 0 12px;background:var(--chip);color:var(--orange)"></div>
@@ -518,21 +525,8 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
     <!-- Step 2a: join an existing multizone group -->
     <div id="wzJoin" class="hidden">
       <h1>Join a group</h1>
-      <p class="sub" style="margin:-4px 0 14px">On a controller that's already on the outdoor unit, open
-        <b>Settings › Outdoor unit</b> and tap <b>Add a head</b>. Then scan below and pick it.</p>
-      <button class="btn btn-warn wz-full" onclick="wzScan()">Scan for outdoor units</button>
-      <div id="wzScanMsg" class="status hidden" style="margin-top:8px"></div>
-      <div id="wzCandidates"></div>
-      <div id="wzJoinCard" class="gjoincard hidden" style="margin-top:10px">
-        <div id="wzJoinTitle" class="gjoin-t"></div>
-        <div class="mqf"><label for="wzCode">6-digit code</label>
-          <input id="wzCode" type="text" inputmode="numeric" maxlength="6" placeholder="000000" autocomplete="off"></div>
-        <div class="gbtns">
-          <button class="btn btn-accent" onclick="wzJoinGo()">Join</button>
-          <button class="btn" onclick="wzJoinCardCancel()">Cancel</button>
-        </div>
-        <div id="wzJoinMsg" class="status hidden" style="margin-top:8px"></div>
-      </div>
+      <p class="sub" style="margin:-4px 0 14px">Which outdoor unit is this head connected to?</p>
+      <div id="wzGroups"></div>
       <button class="wz-skip" onclick="wzBack()">&larr; Back</button>
     </div>
 
@@ -998,41 +992,21 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
 
     <!-- Not linked yet -->
     <div id="ouNotIn" class="hidden">
-      <p class="role-desc">This head isn't linked to an outdoor unit yet. Join the heads already on
-        its outdoor unit, or set up a new one.</p>
-      <div class="wf-head"><span class="wf-head-t">Join heads on an existing unit</span></div>
-      <p class="role-desc">On any head already on the unit, open <b>Settings › Outdoor unit</b> and tap
-        <b>Add a head</b>. Then scan below and pick it.</p>
-      <button class="btn btn-warn gwide" onclick="groupDiscover()">Scan for outdoor units</button>
-      <div id="gDiscoverMsg" class="status hidden" style="margin-top:8px"></div>
-      <div id="gCandidates"></div>
-
-      <!-- Code entry for the tapped candidate -->
-      <div id="gJoinCard" class="gjoincard hidden">
-        <div id="gJoinTitle" class="gjoin-t"></div>
-        <div id="gJoinSub" class="role-desc" style="margin:2px 0 8px"></div>
-        <div class="mqf"><label for="gJoinCode">6-digit code</label>
-          <input id="gJoinCode" type="text" inputmode="numeric" maxlength="6" placeholder="000000" autocomplete="off"></div>
-        <div class="gbtns">
-          <button class="btn btn-accent" onclick="groupJoinSelected()">Add this head</button>
-          <button class="btn" onclick="groupJoinCancel()">Cancel</button>
-        </div>
-        <div id="gJoinMsg" class="status hidden" style="margin-top:8px"></div>
-      </div>
-
-      <div class="wf-head"><span class="wf-head-t">Or set up a new outdoor unit</span></div>
-      <div class="mqf"><label for="gNewLabel">Name</label>
-        <input id="gNewLabel" type="text" maxlength="32" placeholder="e.g. Upstairs" autocomplete="off"></div>
-      <button class="btn btn-accent" onclick="groupPairStart()">Set up outdoor unit</button>
+      <p class="role-desc">This head isn't linked to an outdoor unit yet. Scan to find the heads on its
+        outdoor unit and join them. If it's the first head on its unit, there's nothing to do here: the
+        other heads join it.</p>
+      <button class="btn btn-warn gwide" onclick="ouScan()">Scan for outdoor units</button>
+      <div id="gGroups"></div>
 
       <details class="sl-adv">
       <summary>Advanced</summary>
       <p class="role-desc">Can't find it? Enter the address of a head that's on the unit.</p>
       <div class="mqf"><label for="gJoinHost">Head address</label>
         <input id="gJoinHost" type="text" placeholder="heatlink-xxxx.local" autocomplete="off"></div>
-      <div class="mqf"><label for="gJoinCodeM">6-digit code</label>
-        <input id="gJoinCodeM" type="text" inputmode="numeric" maxlength="6" placeholder="000000" autocomplete="off"></div>
-      <button class="btn btn-warn" onclick="groupPairJoinManual()">Join by address</button>
+      <div class="mqf"><label for="gJoinPassM">Admin password</label>
+        <input id="gJoinPassM" type="password" autocomplete="current-password"></div>
+      <button class="btn btn-warn" id="gJoinBtnM" onclick="groupJoinManual()">Join by address</button>
+      <div id="gJoinMsgM" class="status hidden" style="margin-top:8px"></div>
       </details>
     </div>
 
@@ -1045,16 +1019,7 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
       <button class="btn btn-primary" id="ouSave" onclick="groupRename()" disabled>Save</button>
       <div class="wf-head" style="margin-top:18px"><span class="wf-head-t">Heads</span></div>
       <div id="ouMembers"></div>
-      <!-- Open a pairing window so a new head can join this outdoor unit -->
-      <button class="btn btn-accent gwide" onclick="groupAddZone()">+ Add a head</button>
-      <div id="gAddZoneCard" class="gjoincard hidden">
-        <div class="gjoin-t">Add a head to this outdoor unit</div>
-        <div class="role-desc" style="margin:2px 0 6px">On the new head, open <b>Settings › Outdoor unit</b>,
-          scan, pick this unit, then enter this code:</div>
-        <div id="gAddCode" class="gcode">------</div>
-        <div id="gAddCountdown" class="role-desc" style="text-align:center"></div>
-        <button class="btn gwide" onclick="groupAddZoneCancel()">Cancel</button>
-      </div>
+      <p class="role-desc" id="ouAddHelp" style="margin-top:12px"></p>
     </div>
 
     <div id="gPairMsg" class="status hidden" style="margin-top:10px"></div>
@@ -1274,7 +1239,7 @@ const I18N = { fr: {
   "Join an existing multizone group":"Rejoindre un groupe multizone existant",
   "Manual setup":"Configuration manuelle","Skip wizard":"Ignorer l’assistant",
   "Join a group":"Rejoindre un groupe","Scan for outdoor units":"Rechercher des unités extérieures",
-  "6-digit code":"Code à 6 chiffres","Join":"Rejoindre","Cancel":"Annuler",
+  "Join":"Rejoindre","Cancel":"Annuler",
   "← Back":"← Retour","Broker host":"Hôte du courtier","Port":"Port",
   "Username":"Nom d’utilisateur","Base topic":"Sujet de base",
   "Enter your MQTT broker. Other zones can copy these when they join.":"Saisissez votre courtier MQTT. Les autres zones pourront le copier en rejoignant.",
@@ -1510,14 +1475,43 @@ const I18N = { fr: {
   "Rooms on the {name} outdoor unit. Tap one to open it.":"Pièces de l’unité extérieure {name}. Touchez-en une pour l’ouvrir.",
   "Rooms on this outdoor unit. Tap one to open it.":"Pièces de cette unité extérieure. Touchez-en une pour l’ouvrir.",
   "Heads piped to the same outdoor unit share one compressor, so they must agree on heat or cool. Add every head on this unit.":"Les têtes raccordées à la même unité extérieure partagent un compresseur : elles doivent s’accorder sur chaud ou froid. Ajoutez toutes les têtes de cette unité.",
-  "This head isn't linked to an outdoor unit yet. Join the heads already on its outdoor unit, or set up a new one.":"Cette tête n’est pas encore reliée à une unité extérieure. Rejoignez les têtes déjà sur son unité extérieure, ou configurez-en une nouvelle.",
-  "Join heads on an existing unit":"Rejoindre les têtes d’une unité existante",
-  "Or set up a new outdoor unit":"Ou configurer une nouvelle unité extérieure",
-  "Set up outdoor unit":"Configurer l’unité extérieure",
   "Can't find it? Enter the address of a head that's on the unit.":"Introuvable ? Saisissez l’adresse d’une tête de cette unité.",
-  "Head address":"Adresse de la tête","Add this head":"Ajouter cette tête","Join by address":"Rejoindre par adresse",
-  "Heads":"Têtes","+ Add a head":"+ Ajouter une tête","Add a head to this outdoor unit":"Ajouter une tête à cette unité extérieure",
-  "1 head":"1 tête","{n} heads":"{n} têtes",
+  "Head address":"Adresse de la tête","Join by address":"Rejoindre par adresse",
+  "Heads":"Têtes",
+  "This head isn't linked to an outdoor unit yet. Scan to find the heads on its outdoor unit and join them. If it's the first head on its unit, there's nothing to do here: the other heads join it.":"Cette tête n’est pas encore reliée à une unité extérieure. Lancez une recherche pour trouver les têtes de son unité extérieure et les rejoindre. Si c’est la première tête de l’unité, il n’y a rien à faire ici : les autres têtes la rejoindront.",
+  "To add a head, open it and pick \u201c{name}\u201d under Settings \u203a Outdoor unit. You\u2019ll need the admin password.":"Pour ajouter une tête, ouvrez-la et choisissez « {name} » dans Réglages › Unité extérieure. Il vous faudra le mot de passe administrateur.",
+  "Which outdoor unit is this head connected to?":"À quelle unité extérieure cette tête est-elle reliée ?",
+  "Looking for other heads…":"Recherche d’autres têtes…",
+  "No other HeatLink heads found.":"Aucune autre tête HeatLink trouvée.",
+  "Unnamed outdoor unit":"Unité extérieure sans nom",
+  "Not linked to an outdoor unit yet":"Pas encore reliée à une unité extérieure",
+  "Likely":"Probable",
+  "A different outdoor unit":"Une autre unité extérieure",
+  "Start a new group with this head":"Créer un nouveau groupe avec cette tête",
+  "Join {name}":"Rejoindre {name}",
+  "Enter the admin password you use for the {name} heads. This head will use it too.":"Saisissez le mot de passe administrateur des têtes {name}. Cette tête l’utilisera aussi.",
+  "Admin password":"Mot de passe administrateur",
+  "Enter the admin password.":"Saisissez le mot de passe administrateur.",
+  "No head on that unit can be reached right now.":"Aucune tête de cette unité n’est joignable pour le moment.",
+  "Joining…":"Connexion au groupe…",
+  "Could not join. Please try again.":"Impossible de rejoindre. Veuillez réessayer.",
+  "Added to “{name}”.":"Ajoutée à « {name} ».",
+  "the outdoor unit":"l’unité extérieure",
+  "Enter the head's address and the admin password.":"Saisissez l’adresse de la tête et le mot de passe administrateur.",
+  "Joined — copying settings and restarting…":"Groupe rejoint — copie des réglages et redémarrage…",
+  "No other HeatLink heads found, so this head starts a new outdoor-unit group.":"Aucune autre tête HeatLink trouvée : cette tête crée un nouveau groupe d’unité extérieure.",
+  "This head starts a new outdoor-unit group.":"Cette tête crée un nouveau groupe d’unité extérieure.",
+  "This head is already in a group. Leave it first.":"Cette tête fait déjà partie d’un groupe. Quittez-le d’abord.",
+  "Pick a head and enter the admin password.":"Choisissez une tête et saisissez le mot de passe administrateur.",
+  "Couldn't reach that head. Check it's powered on and try again.":"Impossible de joindre cette tête. Vérifiez qu’elle est allumée et réessayez.",
+  "That head needs a firmware update before it can be joined.":"Cette tête doit être mise à jour avant de pouvoir être rejointe.",
+  "That head has no admin password yet. Set one on it first.":"Cette tête n’a pas encore de mot de passe administrateur. Définissez-en un d’abord.",
+  "That head sent a bad reply.":"Cette tête a renvoyé une réponse invalide.",
+  "Incorrect admin password.":"Mot de passe administrateur incorrect.",
+  "Too many wrong passwords. Wait a few minutes and try again.":"Trop de mots de passe erronés. Patientez quelques minutes et réessayez.",
+  "That took too long. Please try again.":"Délai dépassé. Veuillez réessayer.",
+  "That head didn't accept the request. Please try again.":"Cette tête a refusé la demande. Veuillez réessayer.",
+  "That head's reply couldn't be verified.":"La réponse de cette tête n’a pas pu être vérifiée.",  "1 head":"1 tête","{n} heads":"{n} têtes",
   "Save":"Enregistrer","Save failed":"Échec de l’enregistrement",
   // History
   "History":"Historique","7 d":"7 j","Room":"Pièce","Target":"Consigne","Outdoor":"Extérieur",
@@ -3072,6 +3066,14 @@ function showClaimGate(recoverySecs){
   $('cgSignIn').classList.toggle('hidden',!(recovery&&authState.pwSet));
   if(cgTimer){clearInterval(cgTimer);cgTimer=null;}
   if(!canClaim) return;
+  $('cgPick').classList.add('hidden');
+  if(!recovery && !cgPicked){
+    $('cgForm').classList.add('hidden');
+    $('cgPick').classList.remove('hidden');
+    gjLoad('cgGroups',{token:claimToken,onNew:()=>cgNewUnit(false),
+      onEmpty:()=>cgNewUnit(true),onJoined:cgJoined});
+    return;
+  }
   $('cgTitle').textContent=i18n(recovery?'Set a new admin password':'Create an admin password');
   $('cgSub').classList.toggle('hidden',recovery);
   $('cgPassLbl').textContent=i18n(recovery?'New password':'Password');
@@ -3095,6 +3097,22 @@ function showClaimGate(recoverySecs){
     tick(); cgTimer=setInterval(tick,15000);
   }
   $('cgPass').focus();
+}
+// Setup: this head starts a new outdoor-unit group, so create its password.
+let cgPicked=false;
+function cgNewUnit(none){
+  cgPicked=true;
+  try{sessionStorage.setItem('hlNewUnit','1');}catch(e){}
+  $('cgNew').textContent=i18n(none?'No other HeatLink heads found, so this head starts a new outdoor-unit group.'
+    :'This head starts a new outdoor-unit group.');
+  $('cgNew').classList.remove('hidden');
+  showClaimGate(0);
+}
+function cgJoined(j){
+  try{sessionStorage.removeItem('hlClaim');}catch(e){}
+  $('claimGate').classList.add('hidden');
+  if(j.rebooting){ wzWaitReboot(i18n('Joined — copying settings and restarting…')); return; }
+  location.reload();
 }
 function cgShowLogin(){
   if(cgTimer){clearInterval(cgTimer);cgTimer=null;}
@@ -3378,6 +3396,8 @@ function renderGroupPanel(g){
   $('ouIn').classList.toggle('hidden',!inG);
   $('gSub').classList.toggle('hidden',!inG);
   if(!inG) return;
+  $('ouAddHelp').textContent=i18n('To add a head, open it and pick \u201c{name}\u201d under Settings \u203a Outdoor unit. You\u2019ll need the admin password.',
+    {name:g.group_label||i18n('(unnamed group)')});
   $('gLabel').textContent=g.group_label||i18n('(unnamed group)');
   $('gSub').textContent=g.group_label?i18n('Rooms on the {name} outdoor unit. Tap one to open it.',{name:g.group_label})
     :i18n('Rooms on this outdoor unit. Tap one to open it.');
@@ -3618,21 +3638,6 @@ async function switchAllZones(m){
     setTimeout(()=>{ refresh(); if(authState.role==='admin') refreshGroup(); },700);
   }catch(e){ await uiAlert({title:'Network error',body:'Could not reach the device.'}); }
 }
-async function groupPairStart(){
-  const msg=$('gPairMsg'); msg.className='status info'; msg.classList.remove('hidden');
-  msg.textContent='Opening pairing\u2026';
-  try{
-    const r=await fetch('/api/group/pair/start',{method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({label:($('gNewLabel').value||'')})});
-    const j=await r.json().catch(()=>({}));
-    if(!r.ok){ msg.className='status err'; msg.textContent=(j&&j.error)||'Failed to start pairing'; return; }
-    msg.className='status ok';
-    msg.textContent='Pairing code: '+j.code+' \u2014 enter it on each other head within '+j.seconds_left+'s.';
-    setTimeout(refreshGroup,700);
-  }catch(e){ msg.className='status err'; msg.textContent='Network error'; }
-}
-let gSelHost='';  // host of the tapped discovery candidate (single selected target)
 // Set a status line by element id. hide=true clears it. cls is '', 'ok', 'err', 'info'.
 function setElMsg(id,text,cls,hide){
   const e=$(id); if(!e) return;
@@ -3649,134 +3654,149 @@ function pairMsg(text,cls,autoHideMs){
   try{ e.scrollIntoView({block:'nearest'}); }catch(_){}
   if(autoHideMs){ pairMsgTimer=setTimeout(()=>{ e.classList.add('hidden'); },autoHideMs); }
 }
-// Scan the LAN for heads currently offering to add a zone (advertising pair=1).
-async function groupDiscover(){
-  const msg=$('gDiscoverMsg'); msg.className='status info'; msg.classList.remove('hidden');
-  msg.textContent='Scanning\u2026';
-  $('gCandidates').innerHTML=''; groupJoinCancel();
+// ── Join an outdoor-unit group (setup, wizard, Settings) ───────────────
+// Lists the heads on the LAN grouped by outdoor unit. Picking one asks for the
+// admin password used on that unit; this head then joins and adopts it.
+const gjCtx={};
+const gjSleep=ms=>new Promise(r=>setTimeout(r,ms));
+async function gjFetch(token){
+  const url='/api/group/discover'+(token?'?t='+encodeURIComponent(token):'');
+  let d=null;
+  for(let i=0;i<20;i++){
+    const r=await fetch(url,{cache:'no-store'});
+    if(!r.ok) return null;
+    d=await r.json();
+    if(!d.scanning) return d;
+    await gjSleep(1500);
+  }
+  return d;
+}
+// One entry per outdoor unit (heads sharing a ghash); an ungrouped head is its
+// own entry, labelled by its name.
+function gjGroups(d){
+  const self=d.self||{}, by={}, out=[];
+  (d.heads||[]).forEach(h=>{
+    if(!h||h.uid===self.uid) return;
+    const key=h.ghash?('g:'+h.ghash):('h:'+h.uid);
+    let g=by[key];
+    if(!g){ g=by[key]={grouped:!!h.ghash,label:'',heads:[],freq:null}; out.push(g); }
+    if(!g.label) g.label=h.ghash?(h.glabel||''):(h.name||h.uid);
+    if(g.freq===null && typeof h.freq==='number') g.freq=h.freq;
+    g.heads.push(h);
+  });
+  return out;
+}
+// Index of the entry whose compressor frequency matches ours, or -1. Only when
+// exactly one matches, and a match means something: we're running, or another
+// unit's frequency is known and differs.
+function gjLikely(groups,selfFreq){
+  if(typeof selfFreq!=='number') return -1;
+  const near=[]; let other=false;
+  groups.forEach((g,i)=>{
+    if(typeof g.freq!=='number') return;
+    if(Math.abs(g.freq-selfFreq)<=2) near.push(i); else other=true;
+  });
+  return (near.length===1 && (selfFreq>0||other))?near[0]:-1;
+}
+function gjHost(g){
+  const ok=g.heads.filter(h=>h.ip&&h.reachable!==false);
+  const best=ok.find(h=>h.summary_supported)||ok[0];
+  return best?best.ip:'';
+}
+async function gjLoad(box,opts){
+  const c=gjCtx[box]={opts,groups:[],sel:-1,likely:-1,failed:false};
+  $(box).innerHTML='<div class="status info" style="margin-top:8px">'+gEsc(i18n('Looking for other heads\u2026'))+'</div>';
+  let d=null;
+  try{ d=await gjFetch(opts.token); }catch(e){}
+  if(d){ c.groups=gjGroups(d); c.likely=gjLikely(c.groups,d.self&&d.self.freq); }
+  else c.failed=true;
+  if(!c.groups.length && opts.onEmpty){ opts.onEmpty(); return; }
+  gjRender(box);
+}
+function gjEntry(title,sub,badge,cls,onclick){
+  const b=document.createElement('button'); b.className='gcand'+(cls?' '+cls:'');
+  const x=document.createElement('div'); x.className='gcand-x';
+  const t=document.createElement('div'); t.className='gcand-t'; t.textContent=title;
+  if(badge){ const k=document.createElement('span'); k.className='glikely'; k.textContent=badge; t.appendChild(k); }
+  const s2=document.createElement('div'); s2.className='gcand-s'; s2.textContent=sub;
+  x.appendChild(t); x.appendChild(s2);
+  const a=document.createElement('div'); a.className='gcand-arrow'; a.textContent='\u203a';
+  b.appendChild(x); b.appendChild(a);
+  b.addEventListener('click',onclick);
+  return b;
+}
+function gjRender(box){
+  const c=gjCtx[box], el=$(box); el.innerHTML='';
+  if(!c.groups.length){
+    const m=document.createElement('div'); m.className='status'+(c.failed?' err':''); m.style.marginTop='8px';
+    m.textContent=i18n(c.failed?'Scan failed \u2014 network error.':'No other HeatLink heads found.');
+    el.appendChild(m);
+  }
+  c.groups.forEach((g,i)=>{
+    const title=g.label||i18n('Unnamed outdoor unit');
+    if(c.sel===i){ el.appendChild(gjCard(box,title)); return; }
+    const sub=g.grouped?g.heads.map(h=>h.name||h.uid).join(' \u00b7 '):i18n('Not linked to an outdoor unit yet');
+    el.appendChild(gjEntry(title,sub,c.likely===i?i18n('Likely'):'','',()=>{ c.sel=i; gjRender(box); const pw=$(box+'Pw'); if(pw) pw.focus(); }));
+  });
+  if(c.opts.onNew)
+    el.appendChild(gjEntry(i18n('A different outdoor unit'),i18n('Start a new group with this head'),'','gcand-new',c.opts.onNew));
+}
+function gjCard(box,title){
+  const d=document.createElement('div'); d.className='gjoincard';
+  d.innerHTML='<div class="gjoin-t"></div><div class="role-desc" style="margin:2px 0 8px"></div>'+
+    '<div class="mqf"><label for="'+box+'Pw"></label><input id="'+box+'Pw" type="password" autocomplete="current-password"></div>'+
+    '<div class="gbtns"><button class="btn btn-accent" id="'+box+'Go"></button><button class="btn" id="'+box+'No"></button></div>'+
+    '<div id="'+box+'Msg" class="status hidden" style="margin-top:8px"></div>';
+  d.querySelector('.gjoin-t').textContent=i18n('Join {name}',{name:title});
+  d.querySelector('.role-desc').textContent=i18n('Enter the admin password you use for the {name} heads. This head will use it too.',{name:title});
+  d.querySelector('label').textContent=i18n('Admin password');
+  const go=d.querySelector('#'+box+'Go'), no=d.querySelector('#'+box+'No');
+  go.textContent=i18n('Join'); no.textContent=i18n('Cancel');
+  go.addEventListener('click',()=>gjJoin(box));
+  no.addEventListener('click',()=>{ gjCtx[box].sel=-1; gjRender(box); });
+  d.querySelector('input').addEventListener('keydown',e=>{ if(e.key==='Enter') gjJoin(box); });
+  return d;
+}
+async function gjJoin(box){
+  const c=gjCtx[box], g=c.groups[c.sel]; if(!g) return;
+  const pw=$(box+'Pw').value;
+  if(!pw){ setElMsg(box+'Msg',i18n('Enter the admin password.'),'err'); return; }
+  const host=gjHost(g);
+  if(!host){ setElMsg(box+'Msg',i18n('No head on that unit can be reached right now.'),'err'); return; }
+  await gjPost(host,pw,c.opts,box+'Msg',$(box+'Go'));
+}
+async function gjPost(host,pw,opts,msgId,btn){
+  if(btn) btn.disabled=true;
+  setElMsg(msgId,i18n('Joining\u2026'),'info');
   try{
-    const r=await jget('/api/group/pair/discover');
-    const j=await r.json().catch(()=>({candidates:[]}));
-    const list=(j&&j.candidates)||[];
-    if(!list.length){
-      msg.className='status'; msg.textContent='No head is inviting right now. On a head already on the outdoor unit, tap “Add a head” in Settings › Outdoor unit, then scan again.';
+    const r=await fetch('/api/group/join',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({host,password:pw,token:opts.token||''})});
+    const j=await r.json().catch(()=>({}));
+    if(!r.ok){
+      if(btn) btn.disabled=false;
+      setElMsg(msgId,i18n((j&&j.error)||'Could not join. Please try again.'),'err');
       return;
     }
-    msg.classList.add('hidden');
-    renderCandidates(list);
-  }catch(e){ msg.className='status err'; msg.textContent='Scan failed \u2014 network error.'; }
-}
-function renderCandidates(list){
-  const box=$('gCandidates'); box.innerHTML='';
-  list.forEach(c=>{
-    const group=c.glabel&&c.glabel.trim()?c.glabel:'Unnamed outdoor unit';
-    const via=c.name&&c.name.trim()?c.name:(c.uid||'a head');
-    const b=document.createElement('button'); b.className='gcand';
-    const x=document.createElement('div'); x.className='gcand-x';
-    const t=document.createElement('div'); t.className='gcand-t'; t.textContent=group;
-    const s=document.createElement('div'); s.className='gcand-s'; s.textContent='offered by '+via;
-    x.appendChild(t); x.appendChild(s);
-    const a=document.createElement('div'); a.className='gcand-arrow'; a.textContent='\u203a';
-    b.appendChild(x); b.appendChild(a);
-    b.addEventListener('click',()=>selectCandidate(c.host,group,via));
-    box.appendChild(b);
-  });
-}
-function selectCandidate(host,group,via){
-  gSelHost=host;
-  $('gJoinTitle').textContent='Add this head to “'+group+'”';
-  $('gJoinSub').textContent='“'+via+'” is relaying the invite. Enter the 6-digit code shown on it.';
-  $('gJoinCode').value='';
-  $('gJoinCard').classList.remove('hidden');
-  $('gJoinCode').focus();
-}
-function groupJoinCancel(){ gSelHost=''; $('gJoinCard').classList.add('hidden'); setElMsg('gJoinMsg','',null,true); }
-async function groupJoinSelected(){
-  const code=($('gJoinCode').value||'').trim();
-  if(!gSelHost){ setElMsg('gJoinMsg','Pick an outdoor unit to join first.','err'); return; }
-  if(!code){ setElMsg('gJoinMsg','Enter the 6-digit code shown on the other head.','err'); return; }
-  await joinViaHost(gSelHost,code,'gJoinMsg');
-}
-// Manual fallback: type the head's address + code directly.
-async function groupPairJoinManual(){
-  const host=$('gJoinHost').value.trim(), code=$('gJoinCodeM').value.trim();
-  if(!host||!code){ setElMsg('gPairMsg',"Enter the head's address and the 6-digit code.",'err'); return; }
-  await joinViaHost(host,code,'gPairMsg');
-}
-async function joinViaHost(host,code,targetId){
-  setElMsg(targetId,'Adding this head\u2026','info');
-  try{
-    const r=await fetch('/api/group/pair/join',{method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({owner_host:host,code:code})});
-    const j=await r.json().catch(()=>({}));
-    if(!r.ok){ setElMsg(targetId,(j&&j.error)||'Could not add this head. Please try again.','err'); return; }
-    setElMsg(targetId,'',null,true);
-    groupJoinCancel();
-    pairMsg('Added to \u201c'+(j.group_label||'the outdoor unit')+'\u201d.','ok',6000);
-    setTimeout(refreshGroup,700);
-  }catch(e){ setElMsg(targetId,'Network error \u2014 could not reach this device.','err'); }
-}
-// ── Owner: open a pairing window so a new head can join this group ──────
-let gAddTimer=null, gAddDeadline=0, gAddBaseCount=0, gAddBaseUids=[];
-async function groupAddZone(){
-  const msg=$('gPairMsg'); msg.className='status info'; msg.classList.remove('hidden');
-  msg.textContent='Opening\u2026';
-  try{
-    const r=await fetch('/api/group/pair/start',{method:'POST',
-      headers:{'Content-Type':'application/json'},body:JSON.stringify({})});
-    const j=await r.json().catch(()=>({}));
-    if(!r.ok){ msg.className='status err'; msg.textContent=(j&&j.error)||'Could not open pairing.'; return; }
-    msg.classList.add('hidden');
-    // Snapshot current members so we can name whoever joins (and tell a join
-    // from an expiry).
-    gAddBaseCount=0; gAddBaseUids=[];
-    try{
-      const gr=await jget('/api/group'); const g=await gr.json();
-      gAddBaseCount=g.member_count||1;
-      if(g.self&&g.self.uid) gAddBaseUids.push(g.self.uid);
-      (g.members||[]).forEach(m=>gAddBaseUids.push(m.uid));
-    }catch(e){}
-    $('gAddCode').textContent=j.code;
-    $('gAddZoneCard').classList.remove('hidden');
-    gAddDeadline=Date.now()+((j.seconds_left||120)*1000);
-    if(gAddTimer) clearInterval(gAddTimer);
-    gAddTimer=setInterval(pollAddZone,1500);
-    pollAddZone();
-  }catch(e){ msg.className='status err'; msg.textContent='Network error'; }
-}
-async function pollAddZone(){
-  const left=Math.max(0,Math.round((gAddDeadline-Date.now())/1000));
-  $('gAddCountdown').textContent='Expires in '+left+'s';
-  let st;
-  try{ const r=await jget('/api/group/pair/status'); st=await r.json(); }catch(e){ return; }
-  if(st.active){
-    if(typeof st.seconds_left==='number') gAddDeadline=Date.now()+st.seconds_left*1000;
-    return;
+    opts.onJoined(j);
+  }catch(e){
+    if(btn) btn.disabled=false;
+    setElMsg(msgId,i18n('Network error \u2014 could not reach this device.'),'err');
   }
-  // Window closed — a head joined or it expired/locked out.
-  closeAddZone();
-  let joinedName=null;
-  try{
-    const r=await jget('/api/group'); const g=await r.json();
-    if((g.member_count||0)>gAddBaseCount){
-      const nu=(g.members||[]).find(m=>gAddBaseUids.indexOf(m.uid)<0);
-      joinedName=nu?(nu.name||nu.uid):'A new head';
-    }
-  }catch(e){}
-  if(joinedName!==null){ pairMsg('\u201c'+joinedName+'\u201d joined the outdoor unit.','ok',6000); }
-  else{ pairMsg('Pairing window closed.','',6000); }
-  refreshGroup();
 }
-function closeAddZone(){
-  if(gAddTimer){ clearInterval(gAddTimer); gAddTimer=null; }
-  $('gAddZoneCard').classList.add('hidden');
+function ouScan(){ gjLoad('gGroups',{onJoined:ouJoined}); }
+function ouJoined(j){
+  if(j.rebooting){ wzWaitReboot(i18n('Joined \u2014 copying settings and restarting\u2026')); return; }
+  $('gGroups').innerHTML='';
+  pairMsg(i18n('Added to \u201c{name}\u201d.',{name:j.group_label||i18n('the outdoor unit')}),'ok',6000);
+  loadAuth();
+  setTimeout(refreshGroup,700);
 }
-async function groupAddZoneCancel(){
-  closeAddZone();
-  try{ await fetch('/api/group/pair/stop',{method:'POST'}); }catch(e){}
-  pairMsg('Pairing cancelled.','',5000);
-  refreshGroup();
+// Manual fallback: type a head's address and the admin password.
+async function groupJoinManual(){
+  const host=$('gJoinHost').value.trim(), pw=$('gJoinPassM').value;
+  if(!host||!pw){ setElMsg('gJoinMsgM',i18n("Enter the head's address and the admin password."),'err'); return; }
+  await gjPost(host,pw,{onJoined:ouJoined},'gJoinMsgM',$('gJoinBtnM'));
 }
 async function groupLeave(){
   if(!(await uiConfirm({title:'Leave this outdoor unit?',body:'This head will stop coordinating heat and cool with the others.',okText:'Leave',danger:true}))) return;
@@ -4348,7 +4368,9 @@ function maybeShowWizard(configured){
   if(groupInGroup) return;                // in a group → broker comes via join
   const nm=(curName||curHost||'').trim();
   $('wzName').textContent=nm||'New controller';
-  wzShow('wzChoose');
+  let nu=false;   // picked "a different outdoor unit" during setup
+  try{ nu=sessionStorage.getItem('hlNewUnit')==='1'; sessionStorage.removeItem('hlNewUnit'); }catch(e){}
+  wzShow(nu?'wzFirst':'wzChoose');
 }
 function wzShow(step){
   wizardOpen=true;
@@ -4365,68 +4387,16 @@ function wzJoinedDone(){
   refreshGroup();   // reflect the new membership in the Zones tab
 }
 function wzBack(){ wzShow('wzChoose'); }
-function wzGoJoin(){ wzShow('wzJoin'); $('wzCandidates').innerHTML=''; setElMsg('wzScanMsg','',null,true); $('wzJoinCard').classList.add('hidden'); }
+function wzGoJoin(){ wzShow('wzJoin'); gjLoad('wzGroups',{onNew:wzGoFirst,onJoined:wzJoinDone}); }
 function wzGoFirst(){ wzShow('wzFirst'); }
 
-// Join path — reuses /api/group/pair/discover + /api/group/pair/join.
-let wzSelHost='';
-async function wzScan(){
-  setElMsg('wzScanMsg','Scanning\u2026','info');
-  $('wzCandidates').innerHTML=''; $('wzJoinCard').classList.add('hidden');
-  try{
-    const r=await jget('/api/group/pair/discover');
-    const j=await r.json().catch(()=>({candidates:[]}));
-    const list=(j&&j.candidates)||[];
-    if(!list.length){
-      setElMsg('wzScanMsg','No head is inviting right now. On a controller already on the outdoor unit, tap \u201cAdd a head\u201d in Settings \u203a Outdoor unit, then scan again.','');
-      return;
-    }
-    setElMsg('wzScanMsg','',null,true);
-    const box=$('wzCandidates'); box.innerHTML='';
-    list.forEach(c=>{
-      const group=c.glabel&&c.glabel.trim()?c.glabel:'Unnamed outdoor unit';
-      const via=c.name&&c.name.trim()?c.name:(c.uid||'a controller');
-      const b=document.createElement('button'); b.className='gcand';
-      const x=document.createElement('div'); x.className='gcand-x';
-      const t=document.createElement('div'); t.className='gcand-t'; t.textContent=group;
-      const s=document.createElement('div'); s.className='gcand-s'; s.textContent='offered by '+via;
-      x.appendChild(t); x.appendChild(s);
-      const a=document.createElement('div'); a.className='gcand-arrow'; a.textContent='\u203a';
-      b.appendChild(x); b.appendChild(a);
-      b.addEventListener('click',()=>wzSelectCand(c.host,group));
-      box.appendChild(b);
-    });
-  }catch(e){ setElMsg('wzScanMsg','Scan failed \u2014 network error.','err'); }
-}
-function wzSelectCand(host,group){
-  wzSelHost=host;
-  $('wzJoinTitle').textContent='Join \u201c'+group+'\u201d';
-  $('wzCode').value='';
-  $('wzJoinCard').classList.remove('hidden');
-  $('wzCode').focus();
-}
-function wzJoinCardCancel(){ wzSelHost=''; $('wzJoinCard').classList.add('hidden'); setElMsg('wzJoinMsg','',null,true); }
-async function wzJoinGo(){
-  const code=($('wzCode').value||'').trim();
-  if(!wzSelHost){ setElMsg('wzJoinMsg','Pick a group first.','err'); return; }
-  if(!code){ setElMsg('wzJoinMsg','Enter the 6-digit code shown on the other controller.','err'); return; }
-  setElMsg('wzJoinMsg','Joining\u2026','info');
-  try{
-    const r=await fetch('/api/group/pair/join',{method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({owner_host:wzSelHost,code:code})});
-    const j=await r.json().catch(()=>({}));
-    if(!r.ok){ setElMsg('wzJoinMsg',(j&&j.error)||'Could not join. Please try again.','err'); return; }
-    if(j.rebooting){ wzWaitReboot('Joined \u2014 copying settings and restarting…'); }
-    else{
-      // Joined successfully, but the group had no broker to share. Membership is
-      // already applied live (group coordination is separate from MQTT), so just
-      // confirm success — don't force the manual broker form.
-      $('wzJoinedName').textContent=(j&&j.group_label&&j.group_label.trim())
-        ?('\u201c'+j.group_label+'\u201d'):'the group';
-      wzShow('wzJoined');
-    }
-  }catch(e){ setElMsg('wzJoinMsg','Network error \u2014 could not reach this device.','err'); }
+function wzJoinDone(j){
+  if(j.rebooting){ wzWaitReboot(i18n('Joined \u2014 copying settings and restarting\u2026')); return; }
+  // Joined, but the group had no broker to share. Membership is live already
+  // (group coordination is separate from MQTT), so just confirm.
+  $('wzJoinedName').textContent=(j&&j.group_label&&j.group_label.trim())
+    ?('\u201c'+j.group_label+'\u201d'):'the group';
+  wzShow('wzJoined');
 }
 
 // First-zone path — reuses POST /api/mqtt (saves + reboots).
