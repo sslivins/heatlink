@@ -336,8 +336,11 @@ units already on your network (the one whose compressor frequency matches this
 head's is marked *Likely*): pick yours and enter that unit's admin password to
 join it, and the head adopts that password. If you pick *A different outdoor
 unit*, or no other heads are found, you create a new admin password instead.
-Once set, the web UI always requires a login (admin, or the optional per-head
-climate-only password). Heads upgraded from older firmware without a password
+Once set, settings need the admin login. Climate control (temperature, mode, fan,
+vanes) is open to anyone on your network unless you set the optional per-head
+**climate-only password** (Settings → Web access); visitors use the corner
+*Sign in* icon for admin. With a climate-only password set, the sign-in screen
+takes either password and the one entered decides the access level. Heads upgraded from older firmware without a password
 stay open and show a banner asking you to set one.
 
 **Forgot the admin password?** Run the reset procedure: **cut power to the head
