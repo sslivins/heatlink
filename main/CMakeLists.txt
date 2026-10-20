@@ -21,6 +21,7 @@ idf_component_register(
          "diag.cpp"
          "events.cpp"
          "devlog.cpp"
+         "recovery.cpp"
          "capability.cpp"
          "status_led.cpp"
          "factory_reset.cpp"

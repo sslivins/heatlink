@@ -2,9 +2,21 @@
 /// @brief Implementation of web session auth + API-key auth.
 ///
 /// Ported from sslivins/arctic-controller (auth_manager.cpp), trimmed to the
-/// pieces this firmware needs. Web auth and API auth both default OFF.
+/// pieces this firmware needs.
+///
+/// Admin-claim model:
+///  - LEGACY: no admin password and no claim pending (a head upgraded from
+///    older firmware). The UI stays open, with a banner asking for a password.
+///  - UNCLAIMED: no admin password but a claim is pending (fresh
+///    provisioning). Everything except the public auth endpoints is locked
+///    until the password is created with the claim token from the portal, or
+///    within the recovery window.
+///  - CLAIMED: admin password set; web login is always enforced.
+/// The reset procedure opens a 15-minute recovery window in which anyone may
+/// set a new admin password; if nobody does, nothing changes.
 #include "auth_manager.h"
 
+#include <mutex>
 #include <string.h>
 #include <time.h>
 
@@ -27,12 +39,38 @@ static time_t monotonic_now(void) {
 
 // NVS namespace and keys
 static const char* NVS_NAMESPACE = "auth";
-static const char* NVS_KEY_WEB_ENABLED = "web_en";
+static const char* NVS_KEY_WEB_ENABLED = "web_en";   // derived; kept for old firmware
 static const char* NVS_KEY_API_ENABLED = "api_en";
 static const char* NVS_KEY_USERNAME = "username";
-static const char* NVS_KEY_PASS_HASH = "pass_hash";
-static const char* NVS_KEY_USER_HASH = "user_hash";
+static const char* NVS_KEY_PASS_HASH = "pass_hash";  // legacy unsalted SHA-256
+static const char* NVS_KEY_USER_HASH = "user_hash";  // legacy unsalted SHA-256
+static const char* NVS_KEY_PASS_V2 = "pass_v2";      // pw_rec_t (PBKDF2)
+static const char* NVS_KEY_USER_V2 = "user_v2";      // pw_rec_t (PBKDF2)
 static const char* NVS_KEY_API_KEY = "api_key";
+static const char* NVS_KEY_CLAIM_REQ = "claim_req";
+static const char* NVS_KEY_CLAIM_TOK = "claim_tok";
+
+// Password verifier record. ver 0 = unset, 1 = legacy unsalted SHA-256 (read
+// from old NVS keys, upgraded on the next successful login), 2 = salted
+// PBKDF2-HMAC-SHA256.
+#define PW_VER_NONE 0
+#define PW_VER_SHA256 1
+#define PW_VER_PBKDF2 2
+#define PBKDF2_ITERS 4096
+#define PW_SALT_LEN 16
+
+typedef struct {
+    uint8_t ver;
+    uint8_t rsv[3];
+    uint32_t iters;
+    uint8_t salt[PW_SALT_LEN];
+    uint8_t hash[32];
+} pw_rec_t;
+
+// Failed-login throttle: after this many consecutive failures, refuse logins
+// for AUTH_LOCKOUT_SEC.
+#define AUTH_MAX_FAILS 10
+#define AUTH_LOCKOUT_SEC 30
 
 typedef struct {
     bool active;
@@ -44,16 +82,23 @@ typedef struct {
 
 static struct {
     bool initialized;
-    bool web_auth_enabled;
     bool api_auth_enabled;
     char username[AUTH_MAX_USERNAME_LEN + 1];
-    uint8_t password_hash[32];  // SHA-256, admin
-    bool password_set;
-    uint8_t user_password_hash[32];  // SHA-256, shared climate-only user
-    bool user_password_set;
+    pw_rec_t admin;   // admin password verifier
+    pw_rec_t user;    // shared climate-only user password verifier
+    bool claim_required;
+    char claim_token[AUTH_CLAIM_TOKEN_LEN + 1];
+    time_t recovery_until;  // monotonic; 0 = no recovery window
+    int fail_count;
+    time_t lockout_until;   // monotonic
     char api_key[AUTH_API_KEY_LEN + 1];
     session_t sessions[AUTH_MAX_SESSIONS];
 } state = {};
+
+// Recovery can be triggered from the MQTT/PMIC tasks while the httpd task is
+// using the auth state, so every public entry point takes this lock.
+static std::recursive_mutex s_mtx;
+#define AUTH_LOCK() std::lock_guard<std::recursive_mutex> _auth_guard(s_mtx)
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -65,7 +110,19 @@ static void generate_random_hex(char* buffer, size_t len) {
     buffer[len] = '\0';
 }
 
-static void hash_password(const char* password, uint8_t* hash_out) {
+static bool ct_equal(const uint8_t* a, const uint8_t* b, size_t n) {
+    uint8_t d = 0;
+    for (size_t i = 0; i < n; i++) d |= a[i] ^ b[i];
+    return d == 0;
+}
+
+static bool ct_equal_str(const char* a, const char* b) {
+    size_t la = strlen(a), lb = strlen(b);
+    if (la != lb || la == 0) return false;
+    return ct_equal((const uint8_t*)a, (const uint8_t*)b, la);
+}
+
+static void sha256_password(const char* password, uint8_t* hash_out) {
     size_t hash_len = 0;
     if (psa_crypto_init() != PSA_SUCCESS ||
         psa_hash_compute(PSA_ALG_SHA_256, (const uint8_t*)password, strlen(password),
@@ -75,6 +132,94 @@ static void hash_password(const char* password, uint8_t* hash_out) {
     }
 }
 
+// PBKDF2-HMAC-SHA256, single 32-byte output block (RFC 8018), built on PSA HMAC.
+static bool pbkdf2_sha256(const char* password, const uint8_t* salt, size_t salt_len,
+                          uint32_t iters, uint8_t out[32]) {
+    size_t pw_len = strlen(password);
+    if (pw_len == 0 || iters == 0 || psa_crypto_init() != PSA_SUCCESS) return false;
+
+    psa_key_attributes_t attr = PSA_KEY_ATTRIBUTES_INIT;
+    psa_set_key_type(&attr, PSA_KEY_TYPE_HMAC);
+    psa_set_key_usage_flags(&attr, PSA_KEY_USAGE_SIGN_MESSAGE);
+    psa_set_key_algorithm(&attr, PSA_ALG_HMAC(PSA_ALG_SHA_256));
+    psa_key_id_t key = 0;
+    if (psa_import_key(&attr, (const uint8_t*)password, pw_len, &key) != PSA_SUCCESS) {
+        ESP_LOGE(TAG, "PBKDF2 key import failed");
+        return false;
+    }
+
+    uint8_t block[PW_SALT_LEN + 4];
+    if (salt_len > PW_SALT_LEN) salt_len = PW_SALT_LEN;
+    memcpy(block, salt, salt_len);
+    block[salt_len + 0] = 0;
+    block[salt_len + 1] = 0;
+    block[salt_len + 2] = 0;
+    block[salt_len + 3] = 1;  // INT(1): first (only) output block
+
+    uint8_t u[32];
+    size_t olen = 0;
+    bool ok = psa_mac_compute(key, PSA_ALG_HMAC(PSA_ALG_SHA_256), block, salt_len + 4,
+                              u, sizeof(u), &olen) == PSA_SUCCESS;
+    if (ok) memcpy(out, u, 32);
+    for (uint32_t i = 1; ok && i < iters; i++) {
+        ok = psa_mac_compute(key, PSA_ALG_HMAC(PSA_ALG_SHA_256), u, sizeof(u),
+                             u, sizeof(u), &olen) == PSA_SUCCESS;
+        for (int j = 0; j < 32; j++) out[j] ^= u[j];
+    }
+    psa_destroy_key(key);
+    memset(u, 0, sizeof(u));
+    if (!ok) {
+        ESP_LOGE(TAG, "PBKDF2 failed");
+        memset(out, 0, 32);
+    }
+    return ok;
+}
+
+static bool rec_make(const char* password, pw_rec_t* rec) {
+    pw_rec_t r = {};
+    r.ver = PW_VER_PBKDF2;
+    r.iters = PBKDF2_ITERS;
+    esp_fill_random(r.salt, sizeof(r.salt));
+    int64_t t0 = esp_timer_get_time();
+    if (!pbkdf2_sha256(password, r.salt, sizeof(r.salt), r.iters, r.hash)) return false;
+    ESP_LOGI(TAG, "password hashed (PBKDF2 x%u, %lld ms)", (unsigned)r.iters,
+             (long long)((esp_timer_get_time() - t0) / 1000));
+    *rec = r;
+    return true;
+}
+
+static bool rec_matches(const pw_rec_t* rec, const char* password) {
+    if (password == NULL || password[0] == '\0') return false;
+    uint8_t h[32];
+    bool ok = false;
+    if (rec->ver == PW_VER_SHA256) {
+        sha256_password(password, h);
+        ok = ct_equal(h, rec->hash, 32);
+    } else if (rec->ver == PW_VER_PBKDF2) {
+        ok = pbkdf2_sha256(password, rec->salt, sizeof(rec->salt), rec->iters, h) &&
+             ct_equal(h, rec->hash, 32);
+    }
+    memset(h, 0, sizeof(h));
+    return ok;
+}
+
+static bool load_rec(nvs_handle_t nvs, const char* v2_key, const char* legacy_key,
+                     pw_rec_t* rec) {
+    memset(rec, 0, sizeof(*rec));
+    size_t len = sizeof(*rec);
+    if (nvs_get_blob(nvs, v2_key, rec, &len) == ESP_OK && len == sizeof(*rec) &&
+        rec->ver == PW_VER_PBKDF2 && rec->iters > 0)
+        return true;
+    memset(rec, 0, sizeof(*rec));
+    len = sizeof(rec->hash);
+    if (nvs_get_blob(nvs, legacy_key, rec->hash, &len) == ESP_OK && len == sizeof(rec->hash)) {
+        rec->ver = PW_VER_SHA256;
+        return true;
+    }
+    memset(rec, 0, sizeof(*rec));
+    return false;
+}
+
 static bool load_from_nvs(void) {
     nvs_handle_t nvs;
     if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvs) != ESP_OK) {
@@ -82,23 +227,22 @@ static bool load_from_nvs(void) {
         return false;
     }
 
-    uint8_t enabled = 0;
-    if (nvs_get_u8(nvs, NVS_KEY_WEB_ENABLED, &enabled) == ESP_OK)
-        state.web_auth_enabled = enabled != 0;
-    if (nvs_get_u8(nvs, NVS_KEY_API_ENABLED, &enabled) == ESP_OK)
-        state.api_auth_enabled = enabled != 0;
+    uint8_t u8 = 0;
+    if (nvs_get_u8(nvs, NVS_KEY_API_ENABLED, &u8) == ESP_OK)
+        state.api_auth_enabled = u8 != 0;
+    if (nvs_get_u8(nvs, NVS_KEY_CLAIM_REQ, &u8) == ESP_OK)
+        state.claim_required = u8 != 0;
 
     size_t len = sizeof(state.username);
     if (nvs_get_str(nvs, NVS_KEY_USERNAME, state.username, &len) != ESP_OK)
         state.username[0] = '\0';
 
-    len = sizeof(state.password_hash);
-    if (nvs_get_blob(nvs, NVS_KEY_PASS_HASH, state.password_hash, &len) == ESP_OK)
-        state.password_set = true;
+    load_rec(nvs, NVS_KEY_PASS_V2, NVS_KEY_PASS_HASH, &state.admin);
+    load_rec(nvs, NVS_KEY_USER_V2, NVS_KEY_USER_HASH, &state.user);
 
-    len = sizeof(state.user_password_hash);
-    if (nvs_get_blob(nvs, NVS_KEY_USER_HASH, state.user_password_hash, &len) == ESP_OK)
-        state.user_password_set = true;
+    len = sizeof(state.claim_token);
+    if (nvs_get_str(nvs, NVS_KEY_CLAIM_TOK, state.claim_token, &len) != ESP_OK)
+        state.claim_token[0] = '\0';
 
     len = sizeof(state.api_key);
     if (nvs_get_str(nvs, NVS_KEY_API_KEY, state.api_key, &len) != ESP_OK)
@@ -108,11 +252,29 @@ static bool load_from_nvs(void) {
     return true;
 }
 
+// Persist a password record under its v2 key (PBKDF2) or legacy key (SHA-256),
+// erasing the other form so exactly one survives.
+static void save_rec(nvs_handle_t nvs, const pw_rec_t* rec, const char* v2_key,
+                     const char* legacy_key, esp_err_t& e) {
+    auto acc = [&](esp_err_t r) { if (r != ESP_OK && e == ESP_OK) e = r; };
+    auto erase = [&](const char* k) {
+        esp_err_t r = nvs_erase_key(nvs, k);
+        if (r != ESP_ERR_NVS_NOT_FOUND) acc(r);
+    };
+    if (rec->ver == PW_VER_PBKDF2) {
+        acc(nvs_set_blob(nvs, v2_key, rec, sizeof(*rec)));
+        erase(legacy_key);
+    } else if (rec->ver == PW_VER_SHA256) {
+        acc(nvs_set_blob(nvs, legacy_key, rec->hash, sizeof(rec->hash)));
+        erase(v2_key);
+    } else {
+        erase(v2_key);
+        erase(legacy_key);
+    }
+}
+
 // Persist the whole auth state. Returns ESP_OK only if the write AND commit
-// both succeed — callers MUST treat a non-OK result as "not persisted" so RAM
-// state is never reported as saved when NVS actually rejected it. A half-write
-// that survives a reboot is a lockout vector (e.g. web_auth on but no password
-// hash), so we surface failures rather than silently swallow them.
+// both succeed — callers MUST treat a non-OK result as "not persisted".
 static esp_err_t save_to_nvs(void) {
     nvs_handle_t nvs;
     esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs);
@@ -126,20 +288,17 @@ static esp_err_t save_to_nvs(void) {
     esp_err_t e = ESP_OK;
     auto acc = [&](esp_err_t r) { if (r != ESP_OK && e == ESP_OK) e = r; };
 
-    acc(nvs_set_u8(nvs, NVS_KEY_WEB_ENABLED, state.web_auth_enabled ? 1 : 0));
+    acc(nvs_set_u8(nvs, NVS_KEY_WEB_ENABLED, auth_mgr_web_auth_enabled() ? 1 : 0));
     acc(nvs_set_u8(nvs, NVS_KEY_API_ENABLED, state.api_auth_enabled ? 1 : 0));
+    acc(nvs_set_u8(nvs, NVS_KEY_CLAIM_REQ, state.claim_required ? 1 : 0));
     if (state.username[0] != '\0')
         acc(nvs_set_str(nvs, NVS_KEY_USERNAME, state.username));
-    if (state.password_set)
-        acc(nvs_set_blob(nvs, NVS_KEY_PASS_HASH, state.password_hash, sizeof(state.password_hash)));
-    else {
-        esp_err_t r = nvs_erase_key(nvs, NVS_KEY_PASS_HASH);
-        if (r != ESP_ERR_NVS_NOT_FOUND) acc(r);
-    }
-    if (state.user_password_set)
-        acc(nvs_set_blob(nvs, NVS_KEY_USER_HASH, state.user_password_hash, sizeof(state.user_password_hash)));
-    else {
-        esp_err_t r = nvs_erase_key(nvs, NVS_KEY_USER_HASH);
+    save_rec(nvs, &state.admin, NVS_KEY_PASS_V2, NVS_KEY_PASS_HASH, e);
+    save_rec(nvs, &state.user, NVS_KEY_USER_V2, NVS_KEY_USER_HASH, e);
+    if (state.claim_token[0] != '\0') {
+        acc(nvs_set_str(nvs, NVS_KEY_CLAIM_TOK, state.claim_token));
+    } else {
+        esp_err_t r = nvs_erase_key(nvs, NVS_KEY_CLAIM_TOK);
         if (r != ESP_ERR_NVS_NOT_FOUND) acc(r);
     }
     if (state.api_key[0] != '\0')
@@ -184,112 +343,120 @@ static session_t* find_free_session(auth_role_t new_role) {
     return NULL;
 }
 
+static bool create_session(auth_role_t role, char* session_token) {
+    session_t* session = find_free_session(role);
+    if (session == NULL) return false;
+    session->active = true;
+    session->role = role;
+    generate_random_hex(session->token, AUTH_SESSION_TOKEN_LEN);
+    session->created_at = monotonic_now();
+    session->last_used = session->created_at;
+    if (session_token != NULL) strcpy(session_token, session->token);
+    return true;
+}
+
 static bool is_session_expired(const session_t* session) {
     if (session == NULL || !session->active) return true;
     return (monotonic_now() - session->created_at) > AUTH_SESSION_LIFETIME_SEC;
 }
 
+static bool password_set(void) { return state.admin.ver != PW_VER_NONE; }
+
+static bool recovery_open(void) {
+    return state.recovery_until != 0 && monotonic_now() < state.recovery_until;
+}
+
 // ── Public API ───────────────────────────────────────────────────────────
 
 void auth_mgr_init(void) {
+    AUTH_LOCK();
     if (state.initialized) return;
 
     memset(&state, 0, sizeof(state));
     load_from_nvs();
+    bool dirty = false;
 
     // The admin username is fixed to "admin" and cannot be changed.
     if (strcmp(state.username, "admin") != 0) {
         strncpy(state.username, "admin", sizeof(state.username) - 1);
         state.username[sizeof(state.username) - 1] = '\0';
-        save_to_nvs();
+        dirty = true;
     }
 
     // Migration: older firmware auto-seeded admin/admin. If a device still
     // carries that exact default, clear it so there is no default password.
-    // A user-chosen password (anything but "admin") is left untouched.
-    if (state.password_set && strcmp(state.username, "admin") == 0) {
-        uint8_t admin_hash[32];
-        hash_password("admin", admin_hash);
-        if (memcmp(state.password_hash, admin_hash, sizeof(admin_hash)) == 0) {
-            state.password_set = false;
-            memset(state.password_hash, 0, sizeof(state.password_hash));
-            state.web_auth_enabled = false;  // can't require login with no password
-            save_to_nvs();
-            ESP_LOGI(TAG, "cleared legacy default admin password");
-        }
+    if (state.admin.ver == PW_VER_SHA256 && rec_matches(&state.admin, "admin")) {
+        memset(&state.admin, 0, sizeof(state.admin));
+        dirty = true;
+        ESP_LOGI(TAG, "cleared legacy default admin password");
     }
 
     if (state.api_key[0] == '\0') {
         generate_random_hex(state.api_key, AUTH_API_KEY_LEN);
-        save_to_nvs();
+        dirty = true;
     }
 
-    // Startup invariant repair (lockout guard of last resort): web auth must
-    // never be enabled without an admin password to log in with. A partial NVS
-    // write, corruption, or a future code path could persist that impossible
-    // state; self-heal it here so a device always boots into a reachable UI.
-    if (state.web_auth_enabled && !state.password_set) {
-        ESP_LOGW(TAG, "web auth enabled with no admin password — disabling to avoid lockout");
-        state.web_auth_enabled = false;
-        save_to_nvs();
+    // A pending claim is meaningless once a password exists.
+    if (password_set() && (state.claim_required || state.claim_token[0] != '\0')) {
+        state.claim_required = false;
+        state.claim_token[0] = '\0';
+        dirty = true;
     }
 
+    if (dirty) save_to_nvs();
     state.initialized = true;
-    ESP_LOGI(TAG, "auth ready — web_auth=%s api_auth=%s",
-             state.web_auth_enabled ? "on" : "off",
+    ESP_LOGI(TAG, "auth ready — state=%s api_auth=%s",
+             password_set() ? "claimed" : state.claim_required ? "unclaimed" : "legacy",
              state.api_auth_enabled ? "on" : "off");
+}
+
+auth_state_t auth_mgr_state(void) {
+    AUTH_LOCK();
+    if (password_set()) return AUTH_STATE_CLAIMED;
+    return state.claim_required ? AUTH_STATE_UNCLAIMED : AUTH_STATE_LEGACY;
 }
 
 // ── Web auth ─────────────────────────────────────────────────────────────
 
-bool auth_mgr_web_auth_enabled(void) { return state.web_auth_enabled; }
-
-bool auth_mgr_set_web_auth_enabled(bool enabled) {
-    // Enforce the core invariant at the manager layer, not just in the HTTP
-    // handler: never enable web auth without an admin password, or the UI locks
-    // out with no recovery. This makes the guard hold for every caller.
-    if (enabled && !state.password_set) {
-        ESP_LOGW(TAG, "refused to enable web auth: no admin password set");
-        return false;
-    }
-    if (state.web_auth_enabled == enabled) return true;
-    state.web_auth_enabled = enabled;
-    save_to_nvs();
-    if (!enabled) auth_mgr_logout_all();
-    ESP_LOGI(TAG, "web auth %s", enabled ? "enabled" : "disabled");
-    return true;
+// Login is enforced whenever an admin password exists, and while a claim is
+// pending (so an unclaimed head exposes nothing but the claim flow).
+bool auth_mgr_web_auth_enabled(void) {
+    AUTH_LOCK();
+    return password_set() || state.claim_required;
 }
 
 bool auth_mgr_set_admin_password(const char* password) {
-    if (password == NULL || password[0] == '\0') return false;
-    uint8_t h[32];
-    hash_password(password, h);
+    AUTH_LOCK();
+    if (password == NULL || password[0] == '\0' || strlen(password) > AUTH_MAX_PASSWORD_LEN)
+        return false;
     // The admin and user passwords must differ. Login is password-only and the
     // admin is matched first, so an identical user password would silently
     // resolve to admin (a privilege escalation). Reject the collision.
-    if (state.user_password_set && memcmp(h, state.user_password_hash, 32) == 0)
-        return false;
-    memcpy(state.password_hash, h, 32);
-    state.password_set = true;
-    save_to_nvs();
+    if (rec_matches(&state.user, password)) return false;
+    pw_rec_t r;
+    if (!rec_make(password, &r)) return false;
+    state.admin = r;
+    state.claim_required = false;
+    state.claim_token[0] = '\0';
+    state.recovery_until = 0;
+    if (save_to_nvs() != ESP_OK) return false;
     auth_mgr_logout_all();  // force re-login after a credential change
     return true;
 }
 
 bool auth_mgr_set_user_password(const char* password) {
+    AUTH_LOCK();
     if (password == NULL || password[0] == '\0') {
         // Remove (disable) the shared climate-only user account.
-        state.user_password_set = false;
-        memset(state.user_password_hash, 0, sizeof(state.user_password_hash));
+        memset(&state.user, 0, sizeof(state.user));
     } else {
-        uint8_t h[32];
-        hash_password(password, h);
+        if (strlen(password) > AUTH_MAX_PASSWORD_LEN) return false;
         // Must differ from the admin password (see auth_mgr_set_admin_password):
         // a user password equal to admin's would log the user in as admin.
-        if (state.password_set && memcmp(h, state.password_hash, 32) == 0)
-            return false;
-        memcpy(state.user_password_hash, h, 32);
-        state.user_password_set = true;
+        if (rec_matches(&state.admin, password)) return false;
+        pw_rec_t r;
+        if (!rec_make(password, &r)) return false;
+        state.user = r;
     }
     save_to_nvs();
     // Invalidate any active user-role sessions so a removed/changed password
@@ -300,43 +467,68 @@ bool auth_mgr_set_user_password(const char* password) {
     return true;
 }
 
-bool auth_mgr_user_password_set(void) { return state.user_password_set; }
+bool auth_mgr_user_password_set(void) {
+    AUTH_LOCK();
+    return state.user.ver != PW_VER_NONE;
+}
 
 const char* auth_mgr_get_username(void) { return state.username; }
 
-bool auth_mgr_web_password_set(void) { return state.password_set; }
+bool auth_mgr_web_password_set(void) {
+    AUTH_LOCK();
+    return password_set();
+}
+
+int auth_mgr_login_lockout_secs(void) {
+    AUTH_LOCK();
+    time_t now = monotonic_now();
+    return state.lockout_until > now ? (int)(state.lockout_until - now) : 0;
+}
 
 auth_role_t auth_mgr_login(const char* password, char* session_token) {
-    if (!state.web_auth_enabled) return AUTH_ROLE_ADMIN;  // auth disabled → full access
+    AUTH_LOCK();
+    if (!auth_mgr_web_auth_enabled()) return AUTH_ROLE_ADMIN;  // legacy open → full access
     if (password == NULL || password[0] == '\0') return AUTH_ROLE_NONE;
-
-    uint8_t input_hash[32];
-    hash_password(password, input_hash);
+    if (auth_mgr_login_lockout_secs() > 0) return AUTH_ROLE_NONE;
 
     auth_role_t role = AUTH_ROLE_NONE;
-    if (state.password_set && memcmp(input_hash, state.password_hash, 32) == 0)
+    pw_rec_t* matched = NULL;
+    if (rec_matches(&state.admin, password)) {
         role = AUTH_ROLE_ADMIN;  // admin checked first; "admin" is reserved
-    else if (state.user_password_set &&
-             memcmp(input_hash, state.user_password_hash, 32) == 0)
+        matched = &state.admin;
+    } else if (rec_matches(&state.user, password)) {
         role = AUTH_ROLE_USER;
-    if (role == AUTH_ROLE_NONE) return AUTH_ROLE_NONE;
+        matched = &state.user;
+    }
+    if (role == AUTH_ROLE_NONE) {
+        if (++state.fail_count >= AUTH_MAX_FAILS) {
+            state.fail_count = 0;
+            state.lockout_until = monotonic_now() + AUTH_LOCKOUT_SEC;
+            ESP_LOGW(TAG, "too many failed logins — locked for %d s", AUTH_LOCKOUT_SEC);
+        }
+        return AUTH_ROLE_NONE;
+    }
+    state.fail_count = 0;
 
-    session_t* session = find_free_session(role);
-    if (session == NULL) return AUTH_ROLE_NONE;
+    // Upgrade a legacy unsalted hash now that we know the plaintext.
+    if (matched->ver == PW_VER_SHA256) {
+        pw_rec_t r;
+        if (rec_make(password, &r)) {
+            *matched = r;
+            save_to_nvs();
+            ESP_LOGI(TAG, "upgraded %s password hash to PBKDF2",
+                     role == AUTH_ROLE_ADMIN ? "admin" : "user");
+        }
+    }
 
-    session->active = true;
-    session->role = role;
-    generate_random_hex(session->token, AUTH_SESSION_TOKEN_LEN);
-    session->created_at = monotonic_now();
-    session->last_used = session->created_at;
-    if (session_token != NULL) strcpy(session_token, session->token);
-
+    if (!create_session(role, session_token)) return AUTH_ROLE_NONE;
     ESP_LOGI(TAG, "login ok, role=%s", role == AUTH_ROLE_ADMIN ? "admin" : "user");
     return role;
 }
 
 auth_role_t auth_mgr_session_role(const char* token) {
-    if (!state.web_auth_enabled) return AUTH_ROLE_ADMIN;
+    AUTH_LOCK();
+    if (!auth_mgr_web_auth_enabled()) return AUTH_ROLE_ADMIN;
     session_t* session = find_session(token);
     if (session == NULL) return AUTH_ROLE_NONE;
     if (is_session_expired(session)) {
@@ -352,19 +544,80 @@ bool auth_mgr_validate_session(const char* token) {
 }
 
 void auth_mgr_logout(const char* token) {
+    AUTH_LOCK();
     session_t* session = find_session(token);
     if (session != NULL) session->active = false;
 }
 
 void auth_mgr_logout_all(void) {
+    AUTH_LOCK();
     for (int i = 0; i < AUTH_MAX_SESSIONS; i++) state.sessions[i].active = false;
+}
+
+// ── Claim / recovery ─────────────────────────────────────────────────────
+
+bool auth_mgr_begin_claim(char* token_out) {
+    AUTH_LOCK();
+    if (password_set()) return false;
+    state.claim_required = true;
+    generate_random_hex(state.claim_token, AUTH_CLAIM_TOKEN_LEN);
+    if (save_to_nvs() != ESP_OK) return false;
+    if (token_out != NULL) strcpy(token_out, state.claim_token);
+    ESP_LOGI(TAG, "claim token issued");
+    return true;
+}
+
+auth_claim_result_t auth_mgr_claim(const char* password, const char* token,
+                                   char* session_token) {
+    AUTH_LOCK();
+    // During a reset window the existing admin password may be replaced.
+    const bool replacing = password_set();
+    if (replacing && !recovery_open()) return AUTH_CLAIM_ALREADY;
+    if (!replacing && state.claim_required) {
+        bool token_ok = token != NULL && state.claim_token[0] != '\0' &&
+                        ct_equal_str(token, state.claim_token);
+        if (!token_ok && !recovery_open()) return AUTH_CLAIM_DENIED;
+    }
+    if (password == NULL || password[0] == '\0' || strlen(password) > AUTH_MAX_PASSWORD_LEN ||
+        rec_matches(&state.user, password))
+        return AUTH_CLAIM_INVALID;
+    if (!auth_mgr_set_admin_password(password)) return AUTH_CLAIM_FAILED;
+    if (replacing) {
+        // Whoever knew the old password loses access: drop sessions, new API key.
+        generate_random_hex(state.api_key, AUTH_API_KEY_LEN);
+        save_to_nvs();
+        auth_mgr_logout_all();
+    }
+    if (!create_session(AUTH_ROLE_ADMIN, session_token)) return AUTH_CLAIM_FAILED;
+    ESP_LOGI(TAG, "admin password %s", replacing ? "replaced (reset procedure)"
+                                                 : "created (claimed)");
+    return AUTH_CLAIM_OK;
+}
+
+void auth_mgr_recover(void) {
+    AUTH_LOCK();
+    // Nothing changes unless a new admin password is set within the window.
+    state.recovery_until = monotonic_now() + AUTH_RECOVERY_WINDOW_SEC;
+    state.fail_count = 0;
+    state.lockout_until = 0;
+    ESP_LOGW(TAG, "admin password reset — window open for %d s", AUTH_RECOVERY_WINDOW_SEC);
+}
+
+int auth_mgr_recovery_secs_left(void) {
+    AUTH_LOCK();
+    if (!recovery_open()) return 0;
+    return (int)(state.recovery_until - monotonic_now());
 }
 
 // ── API-key auth ─────────────────────────────────────────────────────────
 
-bool auth_mgr_api_auth_enabled(void) { return state.api_auth_enabled; }
+bool auth_mgr_api_auth_enabled(void) {
+    AUTH_LOCK();
+    return state.api_auth_enabled;
+}
 
 void auth_mgr_set_api_auth_enabled(bool enabled) {
+    AUTH_LOCK();
     if (state.api_auth_enabled == enabled) return;
     state.api_auth_enabled = enabled;
     save_to_nvs();
@@ -372,6 +625,7 @@ void auth_mgr_set_api_auth_enabled(bool enabled) {
 }
 
 bool auth_mgr_get_api_key(char* buffer) {
+    AUTH_LOCK();
     if (buffer == NULL) return false;
     if (state.api_key[0] == '\0') { buffer[0] = '\0'; return false; }
     strcpy(buffer, state.api_key);
@@ -379,6 +633,7 @@ bool auth_mgr_get_api_key(char* buffer) {
 }
 
 bool auth_mgr_regenerate_api_key(char* buffer) {
+    AUTH_LOCK();
     generate_random_hex(state.api_key, AUTH_API_KEY_LEN);
     save_to_nvs();
     if (buffer != NULL) strcpy(buffer, state.api_key);
@@ -387,7 +642,8 @@ bool auth_mgr_regenerate_api_key(char* buffer) {
 }
 
 bool auth_mgr_validate_api_key(const char* key) {
+    AUTH_LOCK();
     if (!state.api_auth_enabled) return true;
     if (key == NULL || key[0] == '\0') return false;
-    return strcmp(key, state.api_key) == 0;
+    return ct_equal_str(key, state.api_key);
 }

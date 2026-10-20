@@ -2,6 +2,7 @@
 /// @brief WiFi STA bring-up + SoftAP provisioning fallback.
 
 #include "wifi_manager.h"
+#include "auth_manager.h"
 #include "dns_server.h"
 #include "group_proto.h"
 
@@ -366,8 +367,15 @@ esp_err_t portal_connect(httpd_req_t* req) {
     // Hand the portal page the exact mDNS hostname the device will come up on
     // after it reboots, so the success screen can show/copy/open that URL — no
     // IP lookup needed. The hostname is [a-z0-9-] only, so it needs no escaping.
-    std::string resp = "{\"status\":\"saved\",\"host\":\"" + mdns_hostname() +
-                       "\",\"message\":\"Ready to finish\"}";
+    //
+    // A head without an admin password is locked until one is created. The
+    // claim token goes into the link the portal shows, so only whoever set up
+    // Wi-Fi can create it. Hex only, so no escaping needed either.
+    std::string resp = "{\"status\":\"saved\",\"host\":\"" + mdns_hostname() + "\"";
+    auth_mgr_init();
+    char claim[AUTH_CLAIM_TOKEN_LEN + 1] = {0};
+    if (auth_mgr_begin_claim(claim)) resp += std::string(",\"claim\":\"") + claim + "\"";
+    resp += ",\"message\":\"Ready to finish\"}";
     httpd_resp_set_type(req, "application/json");
     httpd_resp_sendstr(req, resp.c_str());
 

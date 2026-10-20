@@ -473,6 +473,31 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
     <button class="btn btn-warn" id="lgBtn" onclick="doLogin()">Sign in</button>
   </div>
 </div>
+<!-- No admin password yet: create it (claim link / reset window), or locked. -->
+<div class="overlay hidden" id="claimGate">
+  <div class="card">
+    <h1 id="cgName">HeatLink</h1>
+    <p class="sub" id="cgHost" style="margin:-6px 0 12px"></p>
+    <div id="cgForm">
+      <h2 id="cgTitle">Create an admin password</h2>
+      <p class="sub hidden" id="cgSub" style="margin:0 0 10px;font-size:.82em">Used to manage this head and any heads you add to this outdoor unit later.</p>
+      <div class="status hidden" id="cgRecovery" style="margin:6px 0 12px;background:var(--chip);color:var(--orange)"></div>
+      <div class="mqf"><label id="cgPassLbl">Password</label>
+        <input type="password" id="cgPass" autocomplete="new-password"></div>
+      <div class="mqf"><label id="cgPass2Lbl">Confirm</label>
+        <input type="password" id="cgPass2" autocomplete="new-password"
+          onkeydown="if(event.key==='Enter')doClaim()"></div>
+      <div id="cgMsg" class="status hidden" style="margin:10px 0"></div>
+      <button class="btn btn-accent wz-full" id="cgBtn" onclick="doClaim()">Continue</button>
+      <button class="btn wz-full hidden" id="cgSignIn" style="margin-top:8px" onclick="cgShowLogin()">Sign in with the current password</button>
+    </div>
+    <div id="cgLocked" class="hidden">
+      <h2>Admin password required</h2>
+      <p class="sub" style="margin:0 0 10px;font-size:.82em">This head has no admin password yet. Open the link shown at the end of Wi-Fi setup to create one, or run the admin password reset procedure.</p>
+      <button class="btn hidden" id="cgUserBtn" onclick="cgShowLogin()">Sign in with the climate-only password</button>
+    </div>
+  </div>
+</div>
 <div class="overlay hidden" id="setupWizard">
   <div class="card wz-card">
     <!-- Step 1: choose a path -->
@@ -572,6 +597,8 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
   <p class="sub" id="subtitle">connecting…</p>
   <div id="offline" class="hidden" style="margin:8px auto;max-width:420px;padding:8px 12px;border-radius:8px;background:var(--err-bg);color:var(--red);font-size:.8em">Connection lost — reconnecting…</div>
 
+  <div class="gbanner warn" id="pwBanner">This head has no admin password, so anyone on your network can change its settings.
+    <button class="btn btn-warn" style="margin:8px 0 0" onclick="showTab('settings');openSec('sec-webaccess')">Set an admin password</button></div>
   <div class="gbanner" id="groupBanner"></div>
 
   <div class="tabs">
@@ -827,7 +854,7 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
     </div>
     <div class="sl-gh">Security</div>
     <div class="sl-grp">
-      <button type="button" class="sl-row" onclick="openSec('sec-webaccess')"><span class="sl-ic" style="background:#64748b"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg></span><span class="sl-t">Web access</span><span class="sl-v" id="svWeb"></span><span class="sl-ch">&#x203A;</span></button>
+      <button type="button" class="sl-row" onclick="showTab('settings');openSec('sec-webaccess')"><span class="sl-ic" style="background:#64748b"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg></span><span class="sl-t">Web access</span><span class="sl-v" id="svWeb"></span><span class="sl-ch">&#x203A;</span></button>
       <button type="button" class="sl-row" onclick="openSec('sec-api')"><span class="sl-ic" style="background:#64748b"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M16 7l3 3"/></svg></span><span class="sl-t">API access</span><span class="sl-v" id="svApi"></span><span class="sl-ch">&#x203A;</span></button>
     </div>
     <div class="sl-gh">System</div>
@@ -1157,10 +1184,6 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
   <div class="card" data-grp="settings" id="sec-webaccess">
     <button type="button" class="sl-back" onclick="closeSec()"><span aria-hidden="true">&#x2039;</span><span>Settings</span></button>
     <h2>Web Access</h2>
-    <div class="row">
-      <label>Require login to open the web UI</label>
-      <div class="toggle"><input type="checkbox" id="secWeb" onchange="updateWebAccessState()"><span class="slider" onclick="document.getElementById('secWeb').click()"></span></div>
-    </div>
     <div id="secWebBody">
     <div class="sub" style="margin:-4px 0 16px">Set a password for each access level below. Anyone with that password gets that level — there is no separate username.</div>
 
@@ -1437,7 +1460,24 @@ const I18N = { fr: {
   "Upload & flash":"Téléverser et flasher","From URL":"Depuis une URL",
   "Pull & flash":"Récupérer et flasher",
   // Web access
-  "Web Access":"Accès web","Require login to open the web UI":"Exiger une connexion pour ouvrir l’interface web",
+  "Web Access":"Accès web",
+  // Admin password: claim / reset / banner
+  "Create an admin password":"Créer un mot de passe administrateur",
+  "Used to manage this head and any heads you add to this outdoor unit later.":"Sert à gérer cette tête et toutes celles que vous ajouterez plus tard à cette unité extérieure.",
+  "Set a new admin password":"Définir un nouveau mot de passe administrateur",
+  "New password":"Nouveau mot de passe","Confirm":"Confirmer","Continue":"Continuer",
+  "Save & sign in":"Enregistrer et se connecter",
+  "Admin password required":"Mot de passe administrateur requis",
+  "This head has no admin password yet. Open the link shown at the end of Wi-Fi setup to create one, or run the admin password reset procedure.":"Cette tête n’a pas encore de mot de passe administrateur. Ouvrez le lien affiché à la fin de la configuration Wi-Fi pour en créer un, ou lancez la procédure de réinitialisation du mot de passe administrateur.",
+  "Sign in with the climate-only password":"Se connecter avec le mot de passe climat uniquement",
+  "Sign in with the current password":"Se connecter avec le mot de passe actuel",
+  "The admin password reset procedure was run at {t}. Set a new admin password within {n} min.":"La procédure de réinitialisation du mot de passe administrateur a été lancée à {t}. Définissez un nouveau mot de passe administrateur d’ici {n} min.",
+  "This head has no admin password, so anyone on your network can change its settings.":"Cette tête n’a pas de mot de passe administrateur : n’importe qui sur votre réseau peut modifier ses réglages.",
+  "Set an admin password":"Définir un mot de passe administrateur",
+  "Set an administrator password first.":"Définissez d’abord un mot de passe administrateur.",
+  "Enter a password.":"Saisissez un mot de passe.",
+  "Too many attempts — try again in {n} s":"Trop de tentatives — réessayez dans {n} s",
+  "Saving…":"Enregistrement…","Passwords do not match.":"Les mots de passe ne correspondent pas.",
   "Set a password for each access level below. Anyone with that password gets that level — there is no separate username.":"Définissez un mot de passe pour chaque niveau d’accès ci-dessous. Quiconque possède ce mot de passe obtient ce niveau — il n’y a pas de nom d’utilisateur distinct.",
   "Administrator":"Administrateur","Full access":"Accès complet",
   "Full control of all settings and updates.":"Contrôle total de tous les réglages et mises à jour.",
@@ -1515,7 +1555,7 @@ function _collectI18n(){
   // so i18n can never break the page (e.g. a headless/test environment).
   if(typeof NodeFilter === 'undefined' ||
      typeof document.createTreeWalker !== 'function') return;
-  const roots = ['loginGate','setupWizard','appWrap'].map($).filter(Boolean);
+  const roots = ['loginGate','claimGate','setupWizard','appWrap'].map($).filter(Boolean);
   for(const root of roots){
     const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
       acceptNode(n){
@@ -2902,7 +2942,7 @@ async function saveWifi(){
 }
 
 // ── Security / auth ────────────────────────────────────────────────────
-let authState={web:false,api:false,authed:false,pwSet:false,apiKey:'',role:'admin',userSet:false};
+let authState={state:'legacy',web:false,api:false,authed:false,pwSet:false,apiKey:'',role:'admin',userSet:false};
 function lgMsg(m,cls){const el=$('lgMsg');el.className='status '+cls;el.textContent=m;el.classList.remove('hidden')}
 function secWebMsg(m,cls){const el=$('secWebMsg');if(cls==='ok'){el.classList.add('hidden');toast(i18n(m));return}el.className='status '+cls;el.textContent=m;el.classList.remove('hidden')}
 function secApiMsg(m,cls){const el=$('secApiMsg');if(cls==='ok'){el.classList.add('hidden');toast(i18n(m));return}el.className='status '+cls;el.textContent=m;el.classList.remove('hidden')}
@@ -2910,58 +2950,45 @@ function secApiMsg(m,cls){const el=$('secApiMsg');if(cls==='ok'){el.classList.ad
 // Web Access form state: admin + climate-only passwords in one card.
 // Existing secrets follow the "leave blank to keep" pattern (masked dots).
 function updateWebAccessState(){
-  const enabling=$('secWeb').checked;
   const adminTyped=$('secPass').value.length>0;
   const confirmTyped=$('secPass2').value.length>0;
   const pwMismatch=adminTyped&&$('secPass').value!==$('secPass2').value;
   const userTyped=$('secUserPass').value.length>0;
-  // Turning login on from off requires a freshly typed admin password (mirrors
-  // the backend) — a previously stored one the user may have forgotten no longer
-  // counts. Changing settings while login is already on does not require it.
-  const freshPwNeeded=enabling&&!authState.web;
   // Administrator
   const aHint=$('secWebHint');
   if(pwMismatch){
-    aHint.textContent='Passwords do not match.';
+    aHint.textContent=i18n('Passwords do not match.');
   }else if(authState.pwSet){
-    aHint.textContent=adminTyped?'Password will be updated on save.':'';
+    aHint.textContent=adminTyped?i18n('Password will be updated on save.'):'';
     $('secPass').placeholder='••••••••';
   }else{
-    aHint.textContent=enabling?'Required to enable login.':'No password set yet.';
-    $('secPass').placeholder='Set a password';
+    aHint.textContent=i18n('No password set yet.');
+    $('secPass').placeholder=i18n('Set a password');
   }
   // Climate-only
   const uHint=$('secUserHint');
   if(authState.userSet){
-    uHint.textContent=userTyped?'Password will be updated on save.':'';
+    uHint.textContent=userTyped?i18n('Password will be updated on save.'):'';
     $('secUserPass').placeholder='••••••••';
   }else{
-    uHint.textContent='No climate-only password set.';
-    $('secUserPass').placeholder='Optional';
+    uHint.textContent=i18n('No climate-only password set.');
+    $('secUserPass').placeholder=i18n('Optional');
   }
   $('secUserRemoveBtn').classList.toggle('hidden',!authState.userSet);
-  // Grey out the password setup blocks when web login is disabled — they don't apply.
-  $('secWebBody').classList.toggle('dimmed',!enabling);
-  // Lockout-adjacent guards apply ONLY while enabling. Disabling web login must
-  // never be blocked by password-field state — it's the recovery path.
-  const freshMissing=freshPwNeeded&&!adminTyped;
+  // A climate-only password means nothing until an admin password turns login on.
+  const needAdminFirst=!authState.pwSet&&userTyped&&!adminTyped;
   const unconfirmed=adminTyped&&!confirmTyped;
-  const passwordGuards=enabling&&(freshMissing||pwMismatch||unconfirmed);
-  // Only enable Save when there's actually something to apply: the toggle differs
-  // from the stored state, or (while enabling) a password was typed. Typed
-  // passwords don't count while disabling — they're dropped from the POST then.
-  const toggled=enabling!==authState.web;
-  const credentialChange=enabling&&(adminTyped||userTyped);
-  const hasPendingChange=toggled||credentialChange;
-  $('secWebSaveBtn').disabled=passwordGuards||!hasPendingChange;
+  const guards=pwMismatch||unconfirmed||needAdminFirst;
+  const hasPendingChange=adminTyped||userTyped;
+  $('secWebSaveBtn').disabled=guards||!hasPendingChange;
   // Explain a disabled Save so it isn't mysterious on a security panel.
   const note=$('secSaveNote');
-  if(passwordGuards){
-    note.textContent = pwMismatch ? 'Passwords do not match.'
-      : freshMissing ? 'Enter and confirm an administrator password to enable login.'
-      : 'Confirm the administrator password.';
+  if(guards){
+    note.textContent=i18n(pwMismatch?'Passwords do not match.'
+      :needAdminFirst?'Set an administrator password first.'
+      :'Confirm the administrator password.');
   }else if(!hasPendingChange){
-    note.textContent='No web access changes to save.';
+    note.textContent=i18n('No web access changes to save.');
   }else{
     note.textContent='';
   }
@@ -2976,9 +3003,24 @@ function applyRole(){
   if(user) showTab('climate');
 }
 
+// One-time claim token from the setup portal's link (?claim=…). Kept for this
+// tab only and stripped from the address bar so it isn't bookmarked/shared.
+let claimToken='';
+try{
+  const q=new URLSearchParams(location.search);
+  if(q.has('claim')){
+    sessionStorage.setItem('hlClaim',q.get('claim')||'');
+    q.delete('claim');
+    const qs=q.toString();
+    history.replaceState(null,'',location.pathname+(qs?'?'+qs:'')+location.hash);
+  }
+  claimToken=sessionStorage.getItem('hlClaim')||'';
+}catch(e){}
+
 async function loadAuth(deferReveal){
   try{
     const a=await (await fetch('/api/auth')).json();
+    authState.state=a.state||'legacy';
     authState.web=!!a.web_auth_enabled;
     authState.api=!!a.api_auth_enabled;
     authState.authed=!!a.authenticated;
@@ -2988,8 +3030,15 @@ async function loadAuth(deferReveal){
     if(a.name!=null) curName=a.name;
     curHost=a.hostname||curHost;
     $('lgHost').textContent=a.hostname||'';
+    $('cgHost').textContent=a.hostname?a.hostname+'.local':'';
     if(!nameEditing) applyHeaderName();
     updateNameEditVisibility();
+    if(authState.state!=='unclaimed') try{sessionStorage.removeItem('hlClaim');}catch(e){}
+    if(!a.authenticated && (authState.state==='unclaimed' || (a.recovery_secs_left|0)>0)){
+      showClaimGate(a.recovery_secs_left|0);
+      return false;
+    }
+    $('claimGate').classList.add('hidden');
     if(a.web_auth_enabled && !a.authenticated){
       $('loginGate').classList.remove('hidden');
       $('lgPass').focus();
@@ -2998,7 +3047,7 @@ async function loadAuth(deferReveal){
     $('loginGate').classList.add('hidden');
     if(!deferReveal) $('appWrap').classList.remove('hidden');
     applyRole();
-    $('secWeb').checked=a.web_auth_enabled;
+    $('pwBanner').classList.toggle('show',authState.state==='legacy');
     $('secApi').checked=a.api_auth_enabled;
     authState.apiKey=a.api_key||'';
     updateApiKeyState();
@@ -3009,6 +3058,80 @@ async function loadAuth(deferReveal){
   }catch(e){ if(!deferReveal) $('appWrap').classList.remove('hidden'); return true }
 }
 
+// ── Admin password: claim link / reset window / locked ─────────────────
+let cgTimer=null, cgDeadline=0, cgRanAt=0;
+function cgMsg(m,cls){const el=$('cgMsg');el.className='status '+cls;el.textContent=m;el.classList.remove('hidden')}
+function showClaimGate(recoverySecs){
+  $('loginGate').classList.add('hidden');
+  $('claimGate').classList.remove('hidden');
+  const recovery=recoverySecs>0;
+  const canClaim=recovery||!!claimToken;
+  $('cgForm').classList.toggle('hidden',!canClaim);
+  $('cgLocked').classList.toggle('hidden',canClaim);
+  $('cgUserBtn').classList.toggle('hidden',!authState.userSet);
+  $('cgSignIn').classList.toggle('hidden',!(recovery&&authState.pwSet));
+  if(cgTimer){clearInterval(cgTimer);cgTimer=null;}
+  if(!canClaim) return;
+  $('cgTitle').textContent=i18n(recovery?'Set a new admin password':'Create an admin password');
+  $('cgSub').classList.toggle('hidden',recovery);
+  $('cgPassLbl').textContent=i18n(recovery?'New password':'Password');
+  $('cgPass2Lbl').textContent=i18n(recovery?'Confirm password':'Confirm');
+  $('cgBtn').textContent=i18n(recovery?'Save & sign in':'Continue');
+  $('cgRecovery').classList.toggle('hidden',!recovery);
+  if(recovery){
+    const now=Date.now();
+    cgDeadline=now+recoverySecs*1000;
+    cgRanAt=cgDeadline-15*60*1000;   // the window is 15 min from the reset
+    const tick=()=>{
+      const left=cgDeadline-Date.now();
+      if(left<=0){
+        clearInterval(cgTimer);cgTimer=null;
+        cgClosed();
+        return;
+      }
+      const t=new Date(cgRanAt).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'});
+      $('cgRecovery').textContent=i18n('The admin password reset procedure was run at {t}. Set a new admin password within {n} min.',{t,n:Math.ceil(left/60000)});
+    };
+    tick(); cgTimer=setInterval(tick,15000);
+  }
+  $('cgPass').focus();
+}
+function cgShowLogin(){
+  if(cgTimer){clearInterval(cgTimer);cgTimer=null;}
+  $('claimGate').classList.add('hidden');
+  $('loginGate').classList.remove('hidden');
+  $('lgPass').focus();
+}
+// Reset window closed / claim refused: sign in if a password exists, else locked.
+function cgClosed(){
+  if(authState.pwSet){cgShowLogin();return}
+  $('cgForm').classList.add('hidden');$('cgLocked').classList.remove('hidden');
+}
+async function doClaim(){
+  const p=$('cgPass').value, p2=$('cgPass2').value;
+  if(!p){cgMsg(i18n('Enter a password.'),'err');return}
+  if(p!==p2){cgMsg(i18n('Passwords do not match.'),'err');return}
+  $('cgBtn').disabled=true;cgMsg(i18n('Saving…'),'info');
+  try{
+    const r=await fetch('/api/auth',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({claim:true,password:p,token:claimToken})});
+    if(r.ok){
+      try{sessionStorage.removeItem('hlClaim');}catch(e){}
+      location.reload();return;
+    }
+    if(r.status===403){
+      cgClosed();
+      $('cgBtn').disabled=false;return;
+    }
+    if(r.status===409){location.reload();return}   // someone else already set it
+    let m='Save failed: '+r.status;
+    try{const j=await r.json();if(j.error)m=j.error;}catch(_){}
+    cgMsg(m,'err');
+  }catch(e){cgMsg(i18n('Save failed'),'err')}
+  $('cgBtn').disabled=false;
+}
+
 async function doLogin(){
   const p=$('lgPass').value;
   $('lgBtn').disabled=true;lgMsg('Signing in…','info');
@@ -3017,7 +3140,10 @@ async function doLogin(){
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({password:p})});
     if(r.ok){location.reload();return}
-    lgMsg('Invalid password','err');
+    if(r.status===429){
+      let n=30;try{n=(await r.json()).retry_after||n;}catch(_){}
+      lgMsg(i18n('Too many attempts — try again in {n} s',{n}),'err');
+    }else lgMsg('Invalid password','err');
   }catch(e){lgMsg('Login failed','err')}
   $('lgBtn').disabled=false;
 }
@@ -3038,6 +3164,7 @@ function applyHeaderName(){
   const n=headerName();
   $('hdrName').textContent=n;
   $('lgName').textContent=n;
+  $('cgName').textContent=n;
   document.title=n;
 }
 // Cosmetic gate only — POST /api/device is REQUIRE_ADMIN server-side. When web
@@ -3088,17 +3215,9 @@ async function commitNameEdit(){
 }
 
 async function saveWebAccess(){
-  const enabling=$('secWeb').checked;
-  const body={web_auth_enabled:enabling};
-  // Password fields only apply when ENABLING login. When disabling, read them as
-  // empty so validation is skipped and they're dropped from the POST below —
-  // nothing about the password state can block the OFF (recovery) path.
-  const adminPass=enabling?$('secPass').value:'';
-  const adminPass2=enabling?$('secPass2').value:'';
-  const userPass=enabling?$('secUserPass').value:'';
-  if(enabling && !authState.web && !adminPass){
-    secWebMsg('Enter an administrator password to enable login.','err');return;
-  }
+  const body={};
+  const adminPass=$('secPass').value, adminPass2=$('secPass2').value;
+  const userPass=$('secUserPass').value;
   if(adminPass && adminPass!==adminPass2){
     secWebMsg('Passwords do not match.','err');return;
   }
@@ -3106,6 +3225,8 @@ async function saveWebAccess(){
   if(userPass)body.user_password=userPass;
   $('secWebSaveBtn').disabled=true;secWebMsg('Saving…','info');
   try{
+    // The server keeps this browser signed in (new session cookie) when the
+    // admin password is created or changed.
     const r=await fetch('/api/auth',{method:'POST',
       headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
     if(r.ok){secWebMsg('Saved — applying…','ok');setTimeout(()=>location.reload(),700);return}

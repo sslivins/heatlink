@@ -178,13 +178,13 @@ Base: `<base_topic>/<friendly_name>`
 
 | Direction | Topic suffix |
 |-----------|--------------|
-| subscribe | `/mode/set` `/temp/set` `/remote_temp/set` `/fan/set` `/vane/set` `/wideVane/set` `/system/set` `/ota/set` `/update/install` `/diag/reset_brownout` `/diag/reset_wifi_drops` |
+| subscribe | `/mode/set` `/temp/set` `/remote_temp/set` `/fan/set` `/vane/set` `/wideVane/set` `/system/set` `/ota/set` `/update/install` `/diag/reset_brownout` `/diag/reset_wifi_drops` `/auth/reset_admin` |
 | publish | `/state` (retained) `/settings` `/availability` (LWT) `/update/state` (retained) `/diag/state` (retained) `/group/state` (retained) `/debug/packets` `/debug/logs` |
-| discovery | `homeassistant/climate/<friendly_name>/config` · `homeassistant/update/<friendly_name>/config` · diagnostic `sensor`/`button`/`binary_sensor` entities (brownout & WiFi-drop counts + reset buttons, group/conflict state) — all retained |
+| discovery | `homeassistant/climate/<friendly_name>/config` · `homeassistant/update/<friendly_name>/config` · diagnostic `sensor`/`button`/`binary_sensor` entities (brownout & WiFi-drop counts + reset buttons, admin password reset button, group/conflict state) — all retained |
 
 Beyond the climate entity, Home Assistant auto-discovers **diagnostic sensors**
 (brownout count, WiFi-drop count, group/compressor-conflict state) and **reset
-buttons** (reset brownout count, reset WiFi drops), so the same diagnostics the
+buttons** (reset brownout count, reset WiFi drops, reset admin password), so the same diagnostics the
 web UI shows are available as native HA entities you can chart, alert, or
 automate on.
 
@@ -327,6 +327,26 @@ each advertises an `_http._tcp` service with TXT records (`id`, `fw`, `model`,
 `path`), so `avahi-browse -rt _http._tcp` / Bonjour / a controller can list every
 unit without knowing the hostname.
 
+### Admin password
+
+A freshly provisioned head is **locked until you create an admin password**.
+The portal's success screen shows the head's address with a one-time claim
+link (`http://heatlink-<id>.local/?claim=…`); open it to set the password. Once
+set, the web UI always requires a login (admin, or the optional per-head
+climate-only password). Heads upgraded from older firmware without a password
+stay open and show a banner asking you to set one.
+
+**Forgot the admin password?** Run the reset procedure: **cut power to the head
+5 times, with less than 30 s between cuts** (each time, power it back on and
+cut it again within 30 s). On a head without a battery a power-on reset counts
+as a cut; with a battery, the input dropping out for 2 s or more and coming
+back counts. The Home Assistant **Reset admin password** button does the same
+thing. Either way, for the next **15 minutes** anyone who opens the web UI can
+set a new admin password without logging in; doing so also signs everyone out
+and rotates the API key. The old password keeps working meanwhile, and if no
+new one is set within the window nothing changes. Wi-Fi, MQTT and the
+climate-only password are never touched.
+
 ## Web UI / REST API
 
 Once connected to WiFi the device serves a responsive touch dashboard at
@@ -393,8 +413,8 @@ access**). Optional per-endpoint API-key auth can be enabled there.
 | `GET`/`POST` | `/api/wifi` | network settings `{ssid,mode,connected,ip,…}` (POST saves to NVS + reboots) |
 | `GET`  | `/api/scan` | scan for nearby WiFi networks |
 | `POST` | `/api/device` | set the unit's friendly name / device identity |
-| `GET`/`POST` | `/api/auth` | web/API access-control settings (login & API-key gating) |
-| `POST` | `/api/login` · `/api/logout` | web-UI session auth (when enabled) |
+| `GET`/`POST` | `/api/auth` | admin/climate-only passwords, API-key gating, and the first-password claim (see [Admin password](#admin-password)) |
+| `POST` | `/api/login` · `/api/logout` | web-UI session auth (10 failed logins lock it for 30 s) |
 
 ### Zone coordination (multi-head)
 

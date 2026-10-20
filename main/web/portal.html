@@ -148,16 +148,16 @@ async function doConnect(){
   }
   $('connBtn').disabled=true;
   showStatus('<span class="spin"></span> Saving credentials…','info');
-  let host='';
+  let host='',claim='';
   try{
     const r=await fetch('/api/connect',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({ssid:selSSID,pass:pass,name:$('devname').value.trim()})
     });
-    try{const j=await r.json();host=j.host||'';}catch(_){/* body may be cut by reboot */}
+    try{const j=await r.json();host=j.host||'';claim=j.claim||'';}catch(_){/* body may be cut by reboot */}
   }catch(e){/* device may reboot before the response is delivered */}
-  landing(host);
+  landing(host,claim);
 }
 
 // After creds are saved the device does NOT reboot immediately — the SoftAP
@@ -166,16 +166,19 @@ async function doConnect(){
 // successful Copy, when the 15s countdown expires, or via the manual link if
 // copy fails. A device-side safety timer reboots anyway if this page vanishes
 // (e.g. the iOS captive sheet closes and its JS stops running).
-let _devUrl='';
+let _devUrl='';    // address to copy/open (carries the one-time claim token)
+let _devBase='';   // bare device address, for the reachability probe
 let _finishing=false;
 let _cdTimer=null;
 const FINISH_SECS=15;
 
-function landing(host){
+function landing(host,claim){
   ['scanBtn','netList','passGroup','connBtn','nameGroup'].forEach(id=>$(id).classList.add('hidden'));
   if(document.activeElement&&document.activeElement.blur)document.activeElement.blur();
   const label=$('devname').value.trim()||'your heat pump';
-  _devUrl=host?('http://'+host+'.local/'):'';
+  _devBase=host?('http://'+host+'.local/'):'';
+  // The claim token lets whoever set up Wi-Fi create the admin password.
+  _devUrl=_devBase&&claim?(_devBase+'?claim='+encodeURIComponent(claim)):_devBase;
   const el=$('status');
   el.className='status ok';
   if(!_devUrl){
@@ -231,7 +234,7 @@ function finishSetup(silent){
     if(done)return;
     const img=new Image();
     img.onload=jump;                // 2xx image = device is reachable
-    img.src=_devUrl+'icon-192.png?_='+Date.now();
+    img.src=_devBase+'icon-192.png?_='+Date.now();
   };
   const iv=setInterval(()=>{if(done)clearInterval(iv);else probe();},2000);
   setTimeout(probe,2000);           // let the device start rebooting first
