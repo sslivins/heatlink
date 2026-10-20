@@ -150,6 +150,24 @@ bool admin_authorized(httpd_req_t* req) {
            auth_mgr_session_role(tok) == AUTH_ROLE_ADMIN;
 }
 
+// Dotted IPv4 of the requesting client (IPv4-mapped IPv6 unwrapped), or "".
+std::string peer_ipv4(httpd_req_t* req) {
+    int fd = httpd_req_to_sockfd(req);
+    if (fd < 0) return "";
+    struct sockaddr_storage ss;
+    socklen_t l = sizeof(ss);
+    if (getpeername(fd, (struct sockaddr*)&ss, &l) != 0) return "";
+    char ip[16] = "";
+    if (ss.ss_family == AF_INET) {
+        inet_ntop(AF_INET, &((struct sockaddr_in*)&ss)->sin_addr, ip, sizeof(ip));
+    } else if (ss.ss_family == AF_INET6) {
+        const uint8_t* b = ((struct sockaddr_in6*)&ss)->sin6_addr.s6_addr;
+        static const uint8_t kMapped[12] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff};
+        if (memcmp(b, kMapped, 12) == 0) inet_ntop(AF_INET, b + 12, ip, sizeof(ip));
+    }
+    return ip;
+}
+
 // Human-readable label for whoever made a web-UI request, for the activity
 // log. Empty when web auth is disabled (the UI is anonymous). Admin resolves to
 // the configured username; the shared climate-only role logs as "climate user".
@@ -493,6 +511,7 @@ esp_err_t handle_post_settings(httpd_req_t* req) {
     }
     std::string who = web_actor_name(req);
     const char* wname = who.empty() ? "" : who.c_str();
+    const std::string wip = peer_ipv4(req);
     // A mode command also powers the head on (HA expresses on/off as a mode),
     // so apply power after it: {"power":"OFF","mode":"COOL"} stores COOL and
     // leaves the head off.
@@ -501,7 +520,7 @@ esp_err_t handle_post_settings(httpd_req_t* req) {
     if (has_mode) {
         apply(K::Mode, jmode->valuestring);
         events::log(events::Cat::Mode, events::Actor::WebUI,
-                    ("Set to " + pretty_token(jmode->valuestring)).c_str(), wname);
+                    ("Set to " + pretty_token(jmode->valuestring)).c_str(), wname, wip);
     }
     if ((v = cJSON_GetObjectItem(json, "power")) && cJSON_IsString(v)) {
         apply(K::Power, v->valuestring);
@@ -509,12 +528,12 @@ esp_err_t handle_post_settings(httpd_req_t* req) {
         bool off = strcasecmp(v->valuestring, "off") == 0;
         if (!has_mode || off)
             events::log(events::Cat::Power, events::Actor::WebUI,
-                        off ? "Turned off" : "Turned on", wname);
+                        off ? "Turned off" : "Turned on", wname, wip);
     }
     if ((v = cJSON_GetObjectItem(json, "fan")) && cJSON_IsString(v)) {
         apply(K::Fan, v->valuestring);
         events::log(events::Cat::Fan, events::Actor::WebUI,
-                    ("Fan set to " + pretty_token(v->valuestring)).c_str(), wname);
+                    ("Fan set to " + pretty_token(v->valuestring)).c_str(), wname, wip);
     }
     if ((v = cJSON_GetObjectItem(json, "vane")) && cJSON_IsString(v))
         apply(K::Vane, v->valuestring);
@@ -526,7 +545,7 @@ esp_err_t handle_post_settings(httpd_req_t* req) {
         apply(K::Temperature, buf);
         char msg[48];
         snprintf(msg, sizeof(msg), "Target set to %.1f\xC2\xB0""C", v->valuedouble);
-        events::log(events::Cat::Setpoint, events::Actor::WebUI, msg, wname);
+        events::log(events::Cat::Setpoint, events::Actor::WebUI, msg, wname, wip);
     }
     if ((v = cJSON_GetObjectItem(json, "remoteTemp")) && cJSON_IsNumber(v)) {
         char buf[16];
@@ -611,7 +630,7 @@ esp_err_t handle_park_post(httpd_req_t* req) {
         std::string who = web_actor_name(req);
         events::log(events::Cat::Power, events::Actor::WebUI,
                     applied.enabled ? "Off at setpoint enabled" : "Off at setpoint disabled",
-                    who.empty() ? "" : who.c_str());
+                    who.empty() ? "" : who.c_str(), peer_ipv4(req));
     }
     return send_park(req, applied);
 }
@@ -776,22 +795,6 @@ esp_err_t handle_sensors_post(httpd_req_t* req) {
 // ── GET /api/sensors/report ────────────────────────────────────────────
 // Webhook from a paired Shelly Wi-Fi sensor. No login: the per-sensor token
 // in the query (k=) is the credential.
-static std::string peer_ipv4(httpd_req_t* req) {
-    int fd = httpd_req_to_sockfd(req);
-    if (fd < 0) return "";
-    struct sockaddr_storage ss;
-    socklen_t l = sizeof(ss);
-    if (getpeername(fd, (struct sockaddr*)&ss, &l) != 0) return "";
-    char ip[16] = "";
-    if (ss.ss_family == AF_INET) {
-        inet_ntop(AF_INET, &((struct sockaddr_in*)&ss)->sin_addr, ip, sizeof(ip));
-    } else if (ss.ss_family == AF_INET6) {
-        const uint8_t* b = ((struct sockaddr_in6*)&ss)->sin6_addr.s6_addr;
-        static const uint8_t kMapped[12] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff};
-        if (memcmp(b, kMapped, 12) == 0) inet_ntop(AF_INET, b + 12, ip, sizeof(ip));
-    }
-    return ip;
-}
 
 esp_err_t handle_sensors_report(httpd_req_t* req) {
     size_t qlen = httpd_req_get_url_query_len(req);
@@ -865,14 +868,14 @@ esp_err_t handle_capabilities_post(httpd_req_t* req) {
             events::log(events::Cat::System, events::Actor::WebUI,
                         (std::string("Wide-vane control set to ") +
                          capability::override_to_str(o)).c_str(),
-                        who.empty() ? "" : who.c_str());
+                        who.empty() ? "" : who.c_str(), peer_ipv4(req));
         }
         const cJSON* det = cJSON_GetObjectItem(wv, "detect");
         if (cJSON_IsTrue(det)) {
             capability::request_wide_vane_detect();
             events::log(events::Cat::System, events::Actor::WebUI,
                         "Wide-vane detection requested",
-                        who.empty() ? "" : who.c_str());
+                        who.empty() ? "" : who.c_str(), peer_ipv4(req));
         }
     }
     cJSON_Delete(json);
@@ -1253,13 +1256,13 @@ esp_err_t handle_device_post(httpd_req_t* req) {
         std::string who = web_actor_name(req);
         std::string m = std::string("Display set to ") +
                         (wifi::temp_unit_fahrenheit() ? "\xC2\xB0""F" : "\xC2\xB0""C");
-        events::log(events::Cat::System, events::Actor::WebUI, m.c_str(), who.c_str());
+        events::log(events::Cat::System, events::Actor::WebUI, m.c_str(), who.c_str(), peer_ipv4(req));
     }
     if (tx_changed) {
         std::string who = web_actor_name(req);
         std::string m = std::string("WiFi TX power set to ") +
                         std::to_string(wifi::get_tx_power_dbm()) + " dBm";
-        events::log(events::Cat::System, events::Actor::WebUI, m.c_str(), who.c_str());
+        events::log(events::Cat::System, events::Actor::WebUI, m.c_str(), who.c_str(), peer_ipv4(req));
     }
     // Echo the canonical (sanitised) values so the UI can update in place.
     cJSON* root = cJSON_CreateObject();
@@ -2399,7 +2402,7 @@ esp_err_t handle_group_pair_join(httpd_req_t* req) {
                               ? std::string("Joined the group")
                               : std::string("Joined group \"") + g.group_label + "\"";
         events::log(events::Cat::Membership, events::Actor::WebUI, msg.c_str(),
-                    who.c_str());
+                    who.c_str(), peer_ipv4(req));
     }
     char* str = cJSON_PrintUnformatted(root);
     httpd_resp_set_type(req, "application/json");
@@ -2424,7 +2427,7 @@ esp_err_t handle_group_leave(httpd_req_t* req) {
         return ESP_FAIL;
     }
     events::log(events::Cat::Membership, events::Actor::WebUI, "Left the group",
-                who.c_str());
+                who.c_str(), peer_ipv4(req));
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_sendstr(req, "{\"status\":\"left\"}");
 }
@@ -2636,7 +2639,7 @@ esp_err_t handle_group_resolve(httpd_req_t* req) {
         if (!all_ok) verb += " (some zones unreachable)";
         std::string who = web_actor_name(req);
         events::log(events::Cat::Group, events::Actor::WebUI, verb.c_str(),
-                    who.c_str());
+                    who.c_str(), peer_ipv4(req));
     }
 
     cJSON* root = cJSON_CreateObject();
@@ -2737,7 +2740,7 @@ esp_err_t handle_group_slice(httpd_req_t* req) {
         std::string who = web_actor_name(req);
         events::log(events::Cat::Group, events::Actor::WebUI,
                     c.enabled ? "Tandem enabled" : "Tandem disabled",
-                    who.empty() ? "" : who.c_str());
+                    who.empty() ? "" : who.c_str(), peer_ipv4(req));
     }
     slice_ctl::tick();  // apply now rather than on the next 1 Hz tick
     cJSON* root = slice_status_json();
@@ -2788,7 +2791,7 @@ esp_err_t handle_group_member_remove(httpd_req_t* req) {
         std::string who = web_actor_name(req);
         events::log(events::Cat::Membership, events::Actor::WebUI,
                     (std::string("Removed ") + rn + " from the group").c_str(),
-                    who.c_str());
+                    who.c_str(), peer_ipv4(req));
     }
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_sendstr(req, "{\"status\":\"ok\"}");
@@ -3087,7 +3090,8 @@ esp_err_t handle_events_clear(httpd_req_t* req) {
     set_cors(req);
     REQUIRE_ADMIN(req);
     events::clear();
-    events::log(events::Cat::System, events::Actor::WebUI, "Activity log cleared");
+    events::log(events::Cat::System, events::Actor::WebUI, "Activity log cleared",
+                web_actor_name(req), peer_ipv4(req));
     httpd_resp_set_type(req, "application/json");
     httpd_resp_sendstr(req, "{\"ok\":true}");
     return ESP_OK;

@@ -175,7 +175,7 @@ function loadScript({ poison } = {}) {
 
   const harness = script + `
 ;globalThis.__probe = {
-  refresh, saveTxPow, syncTxSetting, statusIssues, actMerge,
+  refresh, saveTxPow, syncTxSetting, statusIssues, actMerge, actWho,
   setClimate: (o) => Object.assign(climate, o),
   getTxSynced: () => txSynced,
 };`;
@@ -397,6 +397,16 @@ await testCase('actMerge collapses updates', async () => {
      'Updated to v1.4.0 | Target set to 21.0°C | Firmware updated | Restarted after a power dip',
      'updates merged, boots made friendly');
   eq(m[0].ts, 300, 'merged update takes the boot time');
+});
+
+// 13) Activity: web UI changes show who made them and from which IP.
+await testCase('actWho shows web UI user and IP', async () => {
+  const t = loadScript(); await flush();
+  const w = t.probe.actWho;
+  eq(w({ act: 1, name: 'stephen', ip: '192.168.1.42' }), 'stephen · 192.168.1.42', 'user + IP');
+  eq(w({ act: 1, ip: '192.168.1.42' }), 'Web UI · 192.168.1.42', 'anonymous + IP');
+  eq(w({ act: 1, name: 'stephen' }), 'stephen', 'older events without IP');
+  eq(w({ act: 2 }), 'Home Assistant', 'other actors unchanged');
 });
 
 if (failures > 0) {
