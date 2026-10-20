@@ -1515,7 +1515,13 @@ components:
         api_auth_enabled: { type: boolean }
         username: { type: string }
         web_password_set: { type: boolean }
-        authenticated: { type: boolean }
+        user_password_set: { type: boolean }
+        role: { type: string, enum: [admin, user, none] }
+        authenticated: { type: boolean, description: True for any role other than `none`, including a guest. }
+        open_climate:
+          type: boolean
+          description: Claimed with no climate-only password set; clients without a session get the climate-only `user` role.
+        guest: { type: boolean, description: This client has the `user` role through open climate control (no session). }
         api_key:
           type: string
           description: Only present when the client is authenticated.

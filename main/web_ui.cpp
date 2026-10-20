@@ -125,8 +125,15 @@ bool get_api_key(httpd_req_t* req, char* out, size_t out_len) {
 // which can't distinguish a browser from a script on these shared routes.
 // (Mirrors admin_authorized's "no web login → full access".) When web login is
 // on, accept a valid session cookie OR, if API auth is on, a valid X-API-Key.
+// Climate control is open to anyone on the LAN when the head is claimed but no
+// climate-only password is set: visitors without a session get the "user" role.
+static bool open_climate() {
+    return auth_mgr_state() == AUTH_STATE_CLAIMED && !auth_mgr_user_password_set();
+}
+
 bool api_authorized(httpd_req_t* req) {
     if (!auth_mgr_web_auth_enabled()) return true;
+    if (open_climate()) return true;
     char tok[AUTH_SESSION_TOKEN_LEN + 1];
     if (get_cookie_token(req, tok, sizeof(tok)) && auth_mgr_validate_session(tok))
         return true;
@@ -184,6 +191,7 @@ std::string web_actor_name(httpd_req_t* req) {
         }
         if (auth_mgr_session_role(tok) == AUTH_ROLE_USER) return "climate user";
     }
+    if (open_climate()) return "guest";
     return "";  // API key / script
 }
 
@@ -3133,6 +3141,8 @@ esp_err_t handle_auth_get(httpd_req_t* req) {
         role = get_cookie_token(req, tok, sizeof(tok)) ? auth_mgr_session_role(tok)
                                                        : AUTH_ROLE_NONE;
     }
+    bool guest = role == AUTH_ROLE_NONE && open_climate();
+    if (guest) role = AUTH_ROLE_USER;
     bool authed = role != AUTH_ROLE_NONE;
     const char* rname = role == AUTH_ROLE_ADMIN ? "admin"
                         : role == AUTH_ROLE_USER ? "user" : "none";
@@ -3151,6 +3161,8 @@ esp_err_t handle_auth_get(httpd_req_t* req) {
     cJSON_AddBoolToObject(root, "web_password_set", auth_mgr_web_password_set());
     cJSON_AddBoolToObject(root, "user_password_set", auth_mgr_user_password_set());
     cJSON_AddBoolToObject(root, "authenticated", authed);
+    cJSON_AddBoolToObject(root, "open_climate", open_climate());
+    cJSON_AddBoolToObject(root, "guest", guest);
     // Only reveal the API key to an admin client.
     if (role == AUTH_ROLE_ADMIN) {
         char key[AUTH_API_KEY_LEN + 1] = {0};
