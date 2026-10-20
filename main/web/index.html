@@ -118,7 +118,7 @@ background:#fff;border-radius:50%;transition:.2s}
   font-size:1.15em;line-height:1;cursor:pointer;align-items:center;justify-content:center;
   padding:0;-webkit-tap-highlight-color:transparent}
 .icon-btn:active{background:var(--hover)}
-.btn{cursor:pointer;border:none;border-radius:8px;padding:9px 14px;font-size:.88em;width:100%}
+.btn{cursor:pointer;border:none;border-radius:8px;padding:9px 14px;font-family:inherit;font-size:.88em;width:100%}
 .btn.sm{width:auto;flex:none;padding:5px 12px}
 .btn-warn{background:var(--chip);color:var(--orange);border:1px solid var(--border-strong);margin-top:8px}
 .btn-warn:hover{background:var(--hover)}
@@ -128,6 +128,36 @@ background:#fff;border-radius:50%;transition:.2s}
 .adv>summary::-webkit-details-marker{display:none}
 .adv>summary::before{content:"\25B8";color:var(--fg-3);font-size:1.15em;line-height:1;display:inline-block;width:1em;text-align:center;transition:transform .15s}
 .adv[open]>summary::before{transform:rotate(90deg)}
+.btn-primary{background:var(--accent);color:#fff;font-weight:600;margin-top:8px}
+.btn:disabled{opacity:.45;cursor:default}
+.btn-primary:disabled{background:var(--chip);color:var(--fg-3);opacity:1}
+/* Settings: grouped list of sections; tapping a row opens that one section. */
+.sl-wrap{margin:4px 0 24px}
+.sl-gh{font-size:13px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--fg-3);margin:22px 4px 8px}
+.sl-gh:first-child{margin-top:4px}
+.sl-grp{background:var(--surface);border:1px solid var(--border-strong);border-radius:14px;overflow:hidden}
+.sl-row{display:flex;align-items:center;gap:12px;width:100%;padding:14px;border:none;border-top:1px solid var(--border);
+  background:none;color:inherit;font:inherit;text-align:left;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.sl-row:first-child{border-top:none}
+.sl-row:hover,.sl-row:active{background:var(--hover)}
+.sl-ic{width:30px;height:30px;border-radius:8px;display:flex;align-items:center;justify-content:center;color:#fff;flex:none}
+.sl-ic svg{width:18px;height:18px}
+.sl-t{flex:1;min-width:0;font-size:17px;color:var(--fg)}
+.sl-v{color:var(--fg-3);font-size:15px;text-align:right;max-width:50%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sl-v.hl{color:var(--blue)}
+.sl-ch{color:var(--fg-3);font-size:20px;line-height:1;margin-left:2px}
+.sl-back{display:flex;align-items:center;gap:6px;background:none;border:none;padding:0;color:var(--blue);font:inherit;font-size:17px;margin:2px 0 14px;cursor:pointer}
+.sl-adv{margin:10px 0 12px;border-top:1px solid var(--border)}
+.sl-adv>summary{list-style:none;cursor:pointer;padding:14px 0 10px;font-size:15px;color:var(--fg-3);display:flex;justify-content:space-between;align-items:center;user-select:none}
+.sl-adv>summary::-webkit-details-marker{display:none}
+.sl-adv>summary::after{content:"\203A";font-size:20px;line-height:1;transition:transform .15s}
+.sl-adv[open]>summary::after{transform:rotate(90deg)}
+.toast{position:fixed;left:50%;bottom:calc(24px + env(safe-area-inset-bottom,0px));z-index:200;
+  transform:translate(-50%,16px);opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;
+  display:flex;align-items:center;gap:8px;max-width:calc(100% - 32px);padding:10px 18px;border-radius:999px;
+  background:var(--fg);color:var(--bg);font-size:.9em;font-weight:500;box-shadow:0 6px 24px rgba(0,0,0,.3)}
+.toast.show{opacity:1;transform:translate(-50%,0)}
+.toast svg{width:16px;height:16px;flex:none;color:#3fb950}
 .info-btn{flex:0 0 auto;width:28px;height:28px;margin-left:4px;padding:4px;border:none;border-radius:50%;
   background:none;color:var(--fg-3);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;
   -webkit-tap-highlight-color:transparent}
@@ -738,18 +768,35 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
     <button onclick="jumpTo('sec-heatpump')">Heat pump</button>
     <button onclick="jumpTo('sec-activity')">Activity</button>
   </div>
-  <div class="secnav" data-grp="settings">
-    <button onclick="jumpTo('sec-display')">Display</button>
-    <button onclick="jumpTo('sec-widevane')">Wide vane</button>
-    <button onclick="jumpTo('sec-sensor')">Room sensors</button>
-    <button onclick="jumpTo('sec-park')">Off at setpoint</button>
-    <button onclick="jumpTo('sec-tandem')">Tandem</button>
-    <button onclick="jumpTo('sec-wifi')">WiFi</button>
-    <button onclick="jumpTo('sec-mqtt')">MQTT</button>
-    <button onclick="jumpTo('sec-firmware')">Firmware</button>
-    <button onclick="jumpTo('sec-webaccess')">Web access</button>
-    <button onclick="jumpTo('sec-api')">API</button>
-    <button onclick="jumpTo('sec-device')">Device</button>
+  <!-- Settings home: one row per section with its current value; tapping a row
+       shows just that section's card (openSec). Values are filled by renderSetList. -->
+  <div class="sl-wrap" id="setList" data-grp="settings">
+    <div class="sl-gh">Comfort</div>
+    <div class="sl-grp">
+      <button type="button" class="sl-row" onclick="openSec('sec-sensor')"><span class="sl-ic" style="background:#0ea5e9"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 14V5a2 2 0 1 1 4 0v9a4 4 0 1 1-4 0z"/></svg></span><span class="sl-t">Room sensors</span><span class="sl-v" id="svSensor"></span><span class="sl-ch">&#x203A;</span></button>
+      <button type="button" class="sl-row" onclick="openSec('sec-park')"><span class="sl-ic" style="background:#22c55e"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span><span class="sl-t">Off at setpoint</span><span class="sl-v" id="svPark"></span><span class="sl-ch">&#x203A;</span></button>
+      <button type="button" class="sl-row" onclick="openSec('sec-widevane')"><span class="sl-ic" style="background:#14b8a6"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8h12a3 3 0 1 0-3-3M3 16h15a3 3 0 1 1-3 3M3 12h8"/></svg></span><span class="sl-t">Wide vane</span><span class="sl-v" id="svVane"></span><span class="sl-ch">&#x203A;</span></button>
+    </div>
+    <div class="sl-gh">Zone</div>
+    <div class="sl-grp">
+      <button type="button" class="sl-row" onclick="openSec('sec-tandem')"><span class="sl-ic" style="background:#f97316"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 7h11l-3-3M17 17H6l3 3"/></svg></span><span class="sl-t">Tandem™</span><span class="sl-v" id="svTandem"></span><span class="sl-ch">&#x203A;</span></button>
+    </div>
+    <div class="sl-gh">Connection</div>
+    <div class="sl-grp">
+      <button type="button" class="sl-row" onclick="openSec('sec-wifi')"><span class="sl-ic" style="background:#3b82f6"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 9a15 15 0 0 1 20 0M5 12.5a10 10 0 0 1 14 0M8.5 16a5 5 0 0 1 7 0"/><circle cx="12" cy="19.5" r=".8" fill="currentColor"/></svg></span><span class="sl-t">Wi-Fi</span><span class="sl-v" id="svWifi"></span><span class="sl-ch">&#x203A;</span></button>
+      <button type="button" class="sl-row" onclick="openSec('sec-mqtt')"><span class="sl-ic" style="background:#06b6d4"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11l9-7 9 7v9H3z"/><path d="M9 20v-6h6v6"/></svg></span><span class="sl-t">Home Assistant</span><span class="sl-v" id="svMqtt"></span><span class="sl-ch">&#x203A;</span></button>
+    </div>
+    <div class="sl-gh">Security</div>
+    <div class="sl-grp">
+      <button type="button" class="sl-row" onclick="openSec('sec-webaccess')"><span class="sl-ic" style="background:#64748b"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg></span><span class="sl-t">Web access</span><span class="sl-v" id="svWeb"></span><span class="sl-ch">&#x203A;</span></button>
+      <button type="button" class="sl-row" onclick="openSec('sec-api')"><span class="sl-ic" style="background:#64748b"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M16 7l3 3"/></svg></span><span class="sl-t">API access</span><span class="sl-v" id="svApi"></span><span class="sl-ch">&#x203A;</span></button>
+    </div>
+    <div class="sl-gh">System</div>
+    <div class="sl-grp">
+      <button type="button" class="sl-row" onclick="openSec('sec-display')"><span class="sl-ic" style="background:#8b5cf6"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8"/></svg></span><span class="sl-t">Display</span><span class="sl-v" id="svDisp"></span><span class="sl-ch">&#x203A;</span></button>
+      <button type="button" class="sl-row" onclick="openSec('sec-firmware')"><span class="sl-ic" style="background:#ef4444"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg></span><span class="sl-t">Firmware</span><span class="sl-v" id="svFw"></span><span class="sl-ch">&#x203A;</span></button>
+      <button type="button" class="sl-row" onclick="openSec('sec-device')"><span class="sl-ic" style="background:#6b7280"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="7" y="3" width="10" height="18" rx="2"/><path d="M11 18h2"/></svg></span><span class="sl-t">Device</span><span class="sl-v" id="svDev"></span><span class="sl-ch">&#x203A;</span></button>
+    </div>
   </div>
   <div class="card" data-grp="status" id="sec-controller">
     <h2>Controller</h2>
@@ -788,6 +835,7 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
   </div>
 
   <div class="card" data-grp="settings" id="sec-display">
+    <button type="button" class="sl-back" onclick="closeSec()"><span aria-hidden="true">&#x2039;</span><span>Settings</span></button>
     <h2>Display</h2>
     <div class="row">
       <label>Show temperatures in &deg;F</label>
@@ -805,6 +853,7 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
   </div>
 
   <div class="card" data-grp="settings" id="sec-widevane">
+    <button type="button" class="sl-back" onclick="closeSec()"><span aria-hidden="true">&#x2039;</span><span>Settings</span></button>
     <h2>Wide vane</h2>
     <div class="sub" style="margin:-4px 0 8px">Some units have a manual
       wide-vane louver with no motor. The control is hidden automatically when
@@ -826,6 +875,7 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
 
   <!-- Wireless room sensors (#142): BTHome over Bluetooth, Shelly over Wi-Fi. -->
   <div class="card" data-grp="settings" id="sec-sensor">
+    <button type="button" class="sl-back" onclick="closeSec()"><span aria-hidden="true">&#x2039;</span><span>Settings</span></button>
     <h2 style="display:flex;align-items:center">Room sensors<button type="button" class="info-btn" aria-label="What is a room sensor?" aria-expanded="false" aria-controls="rsInfo" onclick="toggleInfo(this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="11" x2="12" y2="17"/><circle cx="12" cy="7.5" r=".6" fill="currentColor"/></svg></button></h2>
     <div class="sub" style="margin:-4px 0 8px">Use wireless sensors on the wall as this room's temperature.</div>
     <div id="rsInfo" class="info-pop hidden">Battery-powered sensors on the wall report the real room temperature, over Bluetooth (BTHome, e.g. Shelly BLU H&amp;T) or Wi-Fi (Shelly H&amp;T Gen3). With up to 4 sensors the head uses their average. The unit heats or cools to that reading instead of the air at the head, and Off at setpoint no longer needs fan air checks. If every sensor goes quiet the head goes back to its own sensor.</div>
@@ -862,49 +912,54 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
   </div>
 
   <div class="card" data-grp="settings" id="sec-park">
+    <button type="button" class="sl-back" onclick="closeSec()"><span aria-hidden="true">&#x2039;</span><span>Settings</span></button>
     <h2>Off at setpoint</h2>
     <div class="sub" style="margin:-4px 0 8px">Turns the head off once the room
       reaches its target so the fan stops, and back on when the room drifts
       past it. Heat, cool and dry only. The unit beeps each time it switches.</div>
     <div class="row">
       <label>Enabled</label>
-      <div class="toggle"><input type="checkbox" id="pkEn" onchange="pkDirty=true"><span class="slider" onclick="document.getElementById('pkEn').click()"></span></div>
+      <div class="toggle"><input type="checkbox" id="pkEn" onchange="pkChanged()"><span class="slider" onclick="document.getElementById('pkEn').click()"></span></div>
     </div>
     <div class="row">
       <label for="pkDelta">Turn back on when off by</label>
-      <select id="pkDelta" onchange="pkDirty=true"></select>
+      <select id="pkDelta" onchange="pkChanged()"></select>
     </div>
+    <details class="sl-adv">
+    <summary>Advanced</summary>
     <div class="row">
       <label for="pkMinOff">Minimum off time</label>
-      <select id="pkMinOff" onchange="pkDirty=true"></select>
+      <select id="pkMinOff" onchange="pkChanged()"></select>
     </div>
     <div class="row">
       <label>Periodic air check</label>
-      <div class="toggle"><input type="checkbox" id="pkProbe" onchange="pkDirty=true"><span class="slider" onclick="document.getElementById('pkProbe').click()"></span></div>
+      <div class="toggle"><input type="checkbox" id="pkProbe" onchange="pkChanged()"><span class="slider" onclick="document.getElementById('pkProbe').click()"></span></div>
     </div>
     <div class="sub" style="margin:0 0 8px">With the fan stopped the head only
       senses the air around itself. A short, quiet fan run moves room air past the
       sensor for a true reading.</div>
     <div class="row">
       <label for="pkInt">Check every</label>
-      <select id="pkInt" onchange="pkDirty=true"></select>
+      <select id="pkInt" onchange="pkChanged()"></select>
     </div>
     <div class="row">
       <label for="pkDur">Run the fan for</label>
-      <select id="pkDur" onchange="pkDirty=true"></select>
+      <select id="pkDur" onchange="pkChanged()"></select>
     </div>
+    </details>
     <div id="pkShared" class="sub hidden" style="margin:0 0 8px">Shared by every head on this
       outdoor unit (except the turn-back-on threshold).</div>
     <div class="row"><label>Status</label><span class="v" id="pkStatus">--</span></div>
     <div id="pkForced" class="sub hidden" style="margin:0 0 8px">Kept on while the zone
       group runs in Tandem.</div>
     <div id="pkMsg" class="status hidden" style="margin:10px 0"></div>
-    <button class="btn" onclick="savePark()">Save</button>
+    <button class="btn btn-primary" id="pkSave" onclick="savePark()" disabled>Save</button>
   </div>
 
   <!-- Tandem (#133): heads on one outdoor unit take turns heating and cooling.
        Shared per outdoor unit (zone group); editable from any of its heads. -->
   <div class="card" data-grp="settings" id="sec-tandem">
+    <button type="button" class="sl-back" onclick="closeSec()"><span aria-hidden="true">&#x2039;</span><span>Settings</span></button>
     <h2>Tandem™</h2>
     <div class="sub" style="margin:-4px 0 8px;text-align:left">An outdoor unit can heat or cool, but not both,
       so a warm room and a cold room can't both get comfortable. Tandem™ fixes that by taking turns
@@ -915,27 +970,31 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
       heads on its outdoor unit in the Zones tab to use Tandem.</div>
     <div class="row">
       <label>Enabled</label>
-      <div class="toggle"><input type="checkbox" id="slEn" onchange="slDirty=true"><span class="slider" onclick="document.getElementById('slEn').click()"></span></div>
+      <div class="toggle"><input type="checkbox" id="slEn" onchange="slChanged()"><span class="slider" onclick="document.getElementById('slEn').click()"></span></div>
     </div>
+    <details class="sl-adv">
+    <summary>Advanced</summary>
     <div class="row">
       <label for="slMin">Minimum turn</label>
-      <select id="slMin" onchange="slDirty=true"></select>
+      <select id="slMin" onchange="slChanged()"></select>
     </div>
     <div class="row">
       <label for="slMax">Maximum turn</label>
-      <select id="slMax" onchange="slDirty=true"></select>
+      <select id="slMax" onchange="slChanged()"></select>
     </div>
     <div class="row">
       <label for="slSettle">Pause between modes</label>
-      <select id="slSettle" onchange="slDirty=true"></select>
+      <select id="slSettle" onchange="slChanged()"></select>
     </div>
+    </details>
     <div id="slShared" class="sub hidden" style="margin:0 0 8px">Shared by every head on this outdoor unit.</div>
     <div class="row"><label>Now</label><span class="v" id="slNow">--</span></div>
     <div id="slMsg" class="status hidden" style="margin:10px 0"></div>
-    <button class="btn" id="slSave" onclick="saveSlice()">Save</button>
+    <button class="btn btn-primary" id="slSave" onclick="saveSlice()" disabled>Save</button>
   </div>
 
   <div class="card" data-grp="settings" id="sec-wifi">
+    <button type="button" class="sl-back" onclick="closeSec()"><span aria-hidden="true">&#x2039;</span><span>Settings</span></button>
     <h2>WiFi</h2>
     <div id="wfCurrent"></div>
     <div class="wf-head">
@@ -967,6 +1026,7 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
   </div>
 
   <div class="card" data-grp="settings" id="sec-mqtt">
+    <button type="button" class="sl-back" onclick="closeSec()"><span aria-hidden="true">&#x2039;</span><span>Settings</span></button>
     <h2>MQTT / Home Assistant</h2>
     <div class="grid">
       <div class="stat"><div class="k">Status</div><div class="v" id="mqttStat">--</div></div>
@@ -985,10 +1045,11 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
     <div class="mqf"><label>Friendly name</label>
       <input type="text" id="mqFriendly" placeholder="(blank → heatlink-&lt;id&gt;)"></div>
     <div id="mqMsg" class="status hidden" style="margin:10px 0"></div>
-    <button class="btn btn-warn" id="mqSaveBtn" onclick="saveMqtt()">Save &amp; reboot</button>
+    <button class="btn btn-warn" id="mqSaveBtn" onclick="saveMqtt()" disabled>Save &amp; reboot</button>
   </div>
 
   <div class="card" data-grp="settings" id="sec-firmware">
+    <button type="button" class="sl-back" onclick="closeSec()"><span aria-hidden="true">&#x2039;</span><span>Settings</span></button>
     <h2>Firmware</h2>
     <div class="grid">
       <div class="stat"><div class="k">Installed</div><div class="v" id="updCur">--</div></div>
@@ -998,7 +1059,7 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
     <div class="pbar" id="updBar"><i></i></div>
     <button class="btn" id="updCheckBtn" onclick="checkUpdate()">Check for updates</button>
     <button class="btn btn-warn hidden" id="updInstallBtn" onclick="installUpdate()">Install update</button>
-    <details class="adv">
+    <details class="sl-adv">
       <summary>Advanced — manual flash</summary>
       <div class="row" style="margin-top:12px">
         <label>Upload .bin</label>
@@ -1017,6 +1078,7 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
   </div>
 
   <div class="card" data-grp="settings" id="sec-webaccess">
+    <button type="button" class="sl-back" onclick="closeSec()"><span aria-hidden="true">&#x2039;</span><span>Settings</span></button>
     <h2>Web Access</h2>
     <div class="row">
       <label>Require login to open the web UI</label>
@@ -1051,6 +1113,7 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
   </div>
 
   <div class="card" data-grp="settings" id="sec-api">
+    <button type="button" class="sl-back" onclick="closeSec()"><span aria-hidden="true">&#x2039;</span><span>Settings</span></button>
     <h2>API Access</h2>
     <div class="row">
       <label>Require API key for /api</label>
@@ -1101,6 +1164,7 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
   </div>
 
   <div class="card" data-grp="settings" id="sec-device">
+    <button type="button" class="sl-back" onclick="closeSec()"><span aria-hidden="true">&#x2039;</span><span>Settings</span></button>
     <h2>Device</h2>
     <div class="sub" style="margin:-4px 0 14px">Restart the controller. Settings and WiFi are preserved.</div>
     <button class="btn btn-warn" onclick="sysPost('/api/system/restart','Restart device?')">Restart</button>
@@ -1110,6 +1174,7 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
   </div>
   </div><!-- /panel-system -->
 </div>
+<div id="toast" class="toast" role="status" aria-live="polite"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg><span id="toastT"></span></div>
 
 <script>
 function $(id){return document.getElementById(id)}
@@ -1156,6 +1221,12 @@ const I18N = { fr: {
   "Controller":"Contrôleur","Power":"Alimentation","Heat pump":"Pompe à chaleur",
   "Activity":"Activité","Display":"Affichage","Wide vane":"Volet large",
   "Firmware":"Micrologiciel","Web access":"Accès web","Device":"Appareil",
+  // Settings list
+  "Comfort":"Confort","Zone":"Zone","Connection":"Connexion","Security":"Sécurité","System":"Système",
+  "Home Assistant":"Home Assistant","API access":"Accès API","Advanced":"Avancé",
+  "On":"Activé","{n} sensors":"{n} capteurs","Powered":"Motorisé","Manual louver":"Volet manuel",
+  "Not set up":"Non configuré","Login required":"Connexion requise","Key required":"Clé requise",
+  "Update available":"Mise à jour disponible",
   // Controller / WiFi / Power stats
   "IP":"IP","Uptime":"Disponibilité","Free heap":"Mémoire libre",
   "Last reset":"Dernier redémarrage","Brownouts":"Sous-tensions",
@@ -1505,9 +1576,70 @@ async function jget(url,opts){
 function jumpTo(id){
   const el=document.getElementById(id);
   if(!el) return;
+  if(el.dataset.grp==='settings'){ openSec(id); return; }
   const nav=[...document.querySelectorAll('.secnav')].find(n=>n.offsetParent!==null);
   const off=(nav?nav.getBoundingClientRect().height:0)+16;
   window.scrollTo({top:el.getBoundingClientRect().top+window.scrollY-off,behavior:'smooth'});
+}
+// Settings is a list of sections (#setList); one section card shows at a time.
+// Opening one pushes a history entry so the browser/phone Back returns to the list.
+let setSec=null, setListY=0;
+function renderSettingsView(){
+  if(!netTabActive) return;
+  document.querySelectorAll('#panel-system [data-grp="settings"]').forEach(c=>{
+    c.style.display=(setSec?c.id===setSec:c.id==='setList')?'':'none';
+  });
+  if(!setSec) renderSetList();
+}
+function openSec(id){
+  if(!setSec) setListY=window.scrollY;
+  setSec=id;
+  history.pushState({sec:id},'');
+  renderSettingsView();
+  window.scrollTo(0,0);
+}
+function closeSec(){
+  if(history.state&&history.state.sec){ history.back(); return; }
+  setSec=null; renderSettingsView(); window.scrollTo(0,setListY);
+}
+window.addEventListener('popstate',e=>{
+  const s=(e.state&&e.state.sec)||null;
+  if(s===setSec) return;
+  setSec=s;
+  renderSettingsView();
+  window.scrollTo(0,s?0:setListY);
+});
+// Current value of each section on the Settings list, from the last poll of each API.
+let pkSrv=null, slLastG=null, mqLast=null, updLast=null, wvLast=null;
+function setSv(id,txt,hl){ const e=$(id); if(!e) return; e.textContent=txt||''; e.classList.toggle('hl',!!hl); }
+function renderSetList(){
+  if(!netTabActive||setSec) return;
+  const L=rsLast&&rsLast.sensors;
+  setSv('svSensor',!L?'':!L.length?i18n('None'):L.length===1?(L[0].name||L[0].id):i18n('{n} sensors',{n:L.length}));
+  setSv('svPark',pkSrv?i18n(pkSrv.enabled?'On':'Off'):'');
+  const wv=wvLast;
+  setSv('svVane',!wv?'':i18n(wv.override==='show'?'Always show':wv.override==='hide'?'Always hide':
+    wv.detected==='supported'?'Powered':wv.detected==='unsupported'?'Manual louver':'Not detected yet'));
+  const g=slLastG;
+  setSv('svTandem',!g?'':!g.in_group?i18n('Not paired'):
+    (g.slice&&g.slice.enabled)?i18n('On')+(g.group_label?' \u00b7 '+g.group_label:''):i18n('Off'));
+  setSv('svWifi',!wifiInfoKnown?'':(wifiConnected&&wfCurSsid)?wfCurSsid:i18n('Not connected'));
+  setSv('svMqtt',!mqLast?'':!mqLast.host?i18n('Not set up'):i18n(mqLast.connected?'Connected':'Disconnected'));
+  setSv('svWeb',i18n(authState.web?'Login required':'Off'));
+  setSv('svApi',i18n(authState.api?'Key required':'Off'));
+  const lang=devLang==='fr'?'Français':devLang==='en'?'English':i18n('Automatic');
+  setSv('svDisp',(TUNIT==='F'?'\u00b0F':'\u00b0C')+' \u00b7 '+lang);
+  const u=updLast;
+  setSv('svFw',!u?'':u.update_available?i18n('Update available'):(u.current?'v'+u.current:''),u&&u.update_available);
+}
+// Brief confirmation that floats above the page (successes only; errors stay
+// inline next to the control so they can't be missed).
+let toastTimer=null;
+function toast(text){
+  $('toastT').textContent=text;
+  const t=$('toast'); t.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer=setTimeout(()=>t.classList.remove('show'),2200);
 }
 function showTab(name){
   // Climate and Zones are their own panels. Status (read-only telemetry) and
@@ -1530,6 +1662,7 @@ function showTab(name){
   // current spike and these units have no LiPo buffer, so we never auto-scan.
   netTabActive=(name==='settings');
   statusTabActive=(name==='status');
+  if(netTabActive){ setSec=null; renderSettingsView(); }
   if(statusTabActive && authState.role==='admin'){ refreshActivity(true); }
   if(netTabActive && authState.role==='admin'){ loadPark(); loadSensor(); }
   mqEditing=false;   // switching tabs commits/abandons any in-progress MQTT edit
@@ -1709,7 +1842,7 @@ async function saveDisplayUnit(){
     if(!r.ok){ fail('Save failed'); return; }
     const d=await r.json();
     TUNIT=d.temp_unit||want;
-    syncUnitToggle(); renderClimate();
+    syncUnitToggle(); renderClimate(); renderSetList();
     if(actData)renderActivity();
     msg.classList.add('hidden');
   }catch(e){ fail('Save failed'); }
@@ -1730,6 +1863,7 @@ async function saveLang(v){
     const d=await r.json();
     devLang = d.lang || '';
     setLang(devLang);
+    renderSetList();
     if(actData)renderActivity();
     msg.classList.add('hidden');
   }catch(e){ msg.textContent=i18n('Save failed');msg.className='status err';msg.classList.remove('hidden'); }
@@ -1757,9 +1891,8 @@ async function saveTxPow(){
     if(!r.ok){ fail(i18n('Save failed')); return; }
     const d=await r.json();
     if(d.tx_power_dbm!=null){ sl.value=d.tx_power_dbm; $('txPowVal').textContent=d.tx_power_dbm+' dBm'; }
-    msg.textContent=(d.tx_power_dbm!=null)?i18n('Applied {n} dBm',{n:d.tx_power_dbm}):'';
-    msg.className='status ok'; msg.classList.remove('hidden');
-    setTimeout(()=>msg.classList.add('hidden'),2500);
+    msg.classList.add('hidden');
+    if(d.tx_power_dbm!=null) toast(i18n('Applied {n} dBm',{n:d.tx_power_dbm}));
   }catch(e){ fail(i18n('Save failed')); }
 }
 // --- Wide-vane capability -------------------------------------------------
@@ -1796,6 +1929,7 @@ async function loadPark(force){
     const r=await fetch('/api/park');
     if(!r.ok) return;
     const c=await r.json();
+    pkSrv=c; renderSetList();
     $('pkStatus').textContent=pkStatusText(c.status);
     $('pkForced').classList.toggle('hidden',!(c.status&&c.status.forced));
     $('pkShared').classList.toggle('hidden',!c.shared);
@@ -1807,23 +1941,34 @@ async function loadPark(force){
     pkFill('pkMinOff',[300,600,900,1200,1800,2700,3600],pkMin,c.min_off_s);
     pkFill('pkInt',[600,900,1200,1800,2700,3600,5400,7200],pkMin,c.probe_interval_s);
     pkFill('pkDur',[60,120,180,300,600],pkMin,c.probe_duration_s);
+    pkSaved=JSON.stringify(pkForm()); pkChanged();
   }catch(e){}
+}
+// Save is only enabled while the form differs from what the device has.
+let pkSaved='';
+function pkForm(){
+  return {enabled:$('pkEn').checked,probe_enabled:$('pkProbe').checked,
+    delta_c:parseFloat($('pkDelta').value),min_off_s:parseInt($('pkMinOff').value,10),
+    probe_interval_s:parseInt($('pkInt').value,10),probe_duration_s:parseInt($('pkDur').value,10)};
+}
+function pkChanged(){
+  pkDirty=JSON.stringify(pkForm())!==pkSaved;
+  $('pkSave').disabled=!pkDirty;
 }
 async function savePark(){
   const msg=$('pkMsg');
-  const body={enabled:$('pkEn').checked,probe_enabled:$('pkProbe').checked,
-    delta_c:parseFloat($('pkDelta').value),min_off_s:parseInt($('pkMinOff').value,10),
-    probe_interval_s:parseInt($('pkInt').value,10),probe_duration_s:parseInt($('pkDur').value,10)};
+  const body=pkForm();
+  $('pkSave').disabled=true;
   try{
     const r=await fetch('/api/park',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-    if(r.status===401||r.status===403){ loadAuth(); return; }
+    if(r.status===401||r.status===403){ pkChanged(); loadAuth(); return; }
     if(!r.ok) throw 0;
     pkDirty=false;
-    msg.textContent=i18n('Saved');msg.className='status ok';msg.classList.remove('hidden');
-    setTimeout(()=>msg.classList.add('hidden'),2500);
+    msg.classList.add('hidden');
+    toast(i18n('Saved'));
     await loadPark(true);
     refresh();
-  }catch(e){ msg.textContent=i18n('Save failed');msg.className='status err';msg.classList.remove('hidden'); }
+  }catch(e){ msg.textContent=i18n('Save failed');msg.className='status err';msg.classList.remove('hidden'); pkChanged(); }
 }
 
 // ── Room sensors (Settings, #142) ──────────────────────────────────────
@@ -1865,9 +2010,9 @@ function rsSensorHtml(x){
   }
   return h+'</div>';
 }
-function rsShowMsg(el,text,cls){ el.textContent=text; el.className='status '+cls; el.classList.remove('hidden'); }
+function rsShowMsg(el,text,cls){ if(cls==='ok'){ el.classList.add('hidden'); toast(text); return; } el.textContent=text; el.className='status '+cls; el.classList.remove('hidden'); }
 function renderSensor(d){
-  rsLast=d;
+  rsLast=d; renderSetList();
   const list=d.sensors||[], ble=d.pairing.ble, wifi=d.pairing.wifi;
   const full=list.length>=d.max, open=ble.open||wifi.open||wifi.state==='working';
   if(open||full) rsChoosing=false;
@@ -1968,6 +2113,7 @@ function applyCaps(caps){
   const row=$('wideVaneRow');
   if(row) row.style.display=(wv&&wv.show)?'':'none';
   if(!wv) return;
+  wvLast=wv; renderSetList();
   // Settings card.
   const st=$('wvStatus');
   if(st) st.textContent=wv.detecting?i18n('Detecting…'):i18n(WV_STATUS[wv.detected]||wv.detected);
@@ -2296,6 +2442,7 @@ function updMsg(m,cls){const el=$('updMsg');el.className='status '+cls;el.textCo
 async function refreshUpdate(){
   try{
     const u=await (await jget('/api/update')).json();
+    if(!u.checking){ updLast=u; renderSetList(); }
     $('updCur').textContent=u.current||'--';
     $('updLatest').textContent=u.checked?(u.latest||'--'):(u.checking?i18n('Checking…'):'—');
     $('updCheckBtn').disabled=u.checking;
@@ -2336,11 +2483,17 @@ async function installUpdate(){
 }
 
 // ── MQTT / Home Assistant settings ─────────────────────────────────────
-function mqMsg(m,cls){const el=$('mqMsg');el.className='status '+cls;el.textContent=m;el.classList.remove('hidden')}
+function mqMsg(m,cls){const el=$('mqMsg');if(cls==='ok'){el.classList.add('hidden');toast(i18n(m));return}el.className='status '+cls;el.textContent=m;el.classList.remove('hidden')}
+// Save is enabled only when a field differs from what the device has (or a new
+// password was typed).
+let mqSaved='';
+function mqForm(){ return ['mqHost','mqPort','mqUser','mqBase','mqFriendly'].map(id=>$(id).value.trim()).join('\n'); }
+function mqChanged(){ $('mqSaveBtn').disabled=mqForm()===mqSaved&&!$('mqPass').value; }
 
 async function loadMqtt(){
   try{
     const m=await (await jget('/api/mqtt')).json();
+    mqLast=m; renderSetList();
     // Don't clobber half-entered input while the user is editing the form; the
     // 30s poll would otherwise wipe values before they hit "Save".
     if(!mqEditing){
@@ -2349,7 +2502,9 @@ async function loadMqtt(){
       $('mqUser').value=m.username||'';
       $('mqBase').value=m.base_topic||'';
       $('mqFriendly').value=m.friendly_name||'';
+      $('mqPass').value='';
       $('mqPass').placeholder=m.password_set?'••••••••':'None set';
+      mqSaved=mqForm(); mqChanged();
     }
     $('mqttStat').textContent=m.connected?i18n('Connected'):i18n('Disconnected');
     $('mqttNode').textContent=m.friendly_name||'heatlink-<id>';
@@ -2361,7 +2516,7 @@ async function loadMqtt(){
 ['mqHost','mqPort','mqUser','mqPass','mqBase','mqFriendly'].forEach(id=>{
   const el=$(id); if(!el) return;
   el.addEventListener('focus',()=>{mqEditing=true;});
-  el.addEventListener('input',()=>{mqEditing=true;});
+  el.addEventListener('input',()=>{mqEditing=true;mqChanged();});
 });
 
 async function saveMqtt(){
@@ -2529,8 +2684,8 @@ async function saveWifi(){
 // ── Security / auth ────────────────────────────────────────────────────
 let authState={web:false,api:false,authed:false,pwSet:false,apiKey:'',role:'admin',userSet:false};
 function lgMsg(m,cls){const el=$('lgMsg');el.className='status '+cls;el.textContent=m;el.classList.remove('hidden')}
-function secWebMsg(m,cls){const el=$('secWebMsg');el.className='status '+cls;el.textContent=m;el.classList.remove('hidden')}
-function secApiMsg(m,cls){const el=$('secApiMsg');el.className='status '+cls;el.textContent=m;el.classList.remove('hidden')}
+function secWebMsg(m,cls){const el=$('secWebMsg');if(cls==='ok'){el.classList.add('hidden');toast(i18n(m));return}el.className='status '+cls;el.textContent=m;el.classList.remove('hidden')}
+function secApiMsg(m,cls){const el=$('secApiMsg');if(cls==='ok'){el.classList.add('hidden');toast(i18n(m));return}el.className='status '+cls;el.textContent=m;el.classList.remove('hidden')}
 
 // Web Access form state: admin + climate-only passwords in one card.
 // Existing secrets follow the "leave blank to keep" pattern (masked dots).
@@ -2629,6 +2784,7 @@ async function loadAuth(deferReveal){
     updateApiKeyState();
     $('logoutIcon').classList.toggle('hidden',!a.web_auth_enabled);
     updateWebAccessState();
+    renderSetList();
     return true;
   }catch(e){ if(!deferReveal) $('appWrap').classList.remove('hidden'); return true }
 }
@@ -2939,35 +3095,46 @@ function sliceNowText(sl){
 // group's name, and as a read-only status line in Zones.
 function renderSlice(g){
   const inG=!!(g&&g.in_group), sl=(inG&&g.slice)||{};
+  slLastG=g||null; slInG=inG; renderSetList();
   const now=inG?sliceNowText(sl):i18n('Off');
   $('slNow').textContent=now;
   $('gSliceNow').textContent=now;
   $('slUnit').textContent=inG?(g.group_label||i18n('(unnamed group)')):i18n('Not paired');
   $('slNoGroup').classList.toggle('hidden',inG);
   $('slShared').classList.toggle('hidden',!inG);
-  ['slEn','slMin','slMax','slSettle','slSave'].forEach(id=>{ $(id).disabled=!inG; });
-  if(slDirty) return;
+  ['slEn','slMin','slMax','slSettle'].forEach(id=>{ $(id).disabled=!inG; });
+  if(slDirty){ slChanged(); return; }
   $('slEn').checked=!!sl.enabled;
   pkFill('slMin',[300,600,900,1200,1800,2700,3600],pkMin,sl.min_slice_s||600);
   pkFill('slMax',[900,1200,1800,2700,3600,5400,7200],pkMin,sl.max_slice_s||1800);
   pkFill('slSettle',[180,240,300,600],pkMin,sl.settle_s||180);
+  slSaved=JSON.stringify(slForm()); slChanged();
+}
+let slSaved='', slInG=false;
+function slForm(){
+  return {enabled:$('slEn').checked,min_slice_s:parseInt($('slMin').value,10),
+    max_slice_s:parseInt($('slMax').value,10),settle_s:parseInt($('slSettle').value,10)};
+}
+function slChanged(){
+  slDirty=JSON.stringify(slForm())!==slSaved;
+  $('slSave').disabled=!slInG||!slDirty;
 }
 async function saveSlice(){
   const msg=$('slMsg');
-  const body={enabled:$('slEn').checked,min_slice_s:parseInt($('slMin').value,10),
-    max_slice_s:parseInt($('slMax').value,10),settle_s:parseInt($('slSettle').value,10)};
+  const body=slForm();
+  $('slSave').disabled=true;
   try{
     const r=await fetch('/api/group/slice',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-    if(r.status===401||r.status===403){ loadAuth(); return; }
+    if(r.status===401||r.status===403){ slChanged(); loadAuth(); return; }
     const j=await r.json().catch(()=>({}));
-    if(r.status===409&&body.enabled){ msg.textContent=i18n('Every room must be online and up to date first.'); msg.className='status err'; msg.classList.remove('hidden'); return; }
+    if(r.status===409&&body.enabled){ msg.textContent=i18n('Every room must be online and up to date first.'); msg.className='status err'; msg.classList.remove('hidden'); slChanged(); return; }
     if(!r.ok) throw 0;
     slDirty=false;
-    msg.textContent=i18n('Saved');msg.className='status ok';msg.classList.remove('hidden');
-    setTimeout(()=>msg.classList.add('hidden'),2500);
+    msg.classList.add('hidden');
+    toast(i18n('Saved'));
     refreshGroup();
     refresh();
-  }catch(e){ msg.textContent=i18n('Save failed');msg.className='status err';msg.classList.remove('hidden'); }
+  }catch(e){ msg.textContent=i18n('Save failed');msg.className='status err';msg.classList.remove('hidden'); slChanged(); }
 }
 async function refreshGroup(){
   if(authState.role!=='admin') return;
@@ -3745,6 +3912,7 @@ async function pollOnce(){
   if(tickN%2===0) await refreshGroup();
   if(statusTabActive && tickN%2===0) await refreshActivity(false);
   if(netTabActive && tickN%2===0){ await loadPark(); await loadSensor(); }
+  renderSetList();
   tickN++;
 }
 function schedule(ms){ clearTimeout(pollTimer); pollTimer=setTimeout(tick,ms); }
