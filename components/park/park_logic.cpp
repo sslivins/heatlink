@@ -95,11 +95,13 @@ const char* need_str(Need n) {
 }
 
 Need Machine::need(uint32_t now_s) const {
-    if (!cfg_.enabled || !hold_) return Need::Yes;
-    if (state_ == State::Probing) return Need::Checking;
+    if (!cfg_.enabled) return Need::Yes;
+    if (hold_ && state_ == State::Probing) return Need::Checking;
     if (external_) return sensor_need_ ? Need::Yes : Need::No;
     if (have_verdict_ && now_s - verdict_at_ < kNeedValidS)
         return verdict_need_ ? Need::Yes : Need::No;
+    // Unknown, but an air check can tell: don't claim the turn before it runs.
+    if (cfg_.probe_enabled && !mismatch_) return Need::Checking;
     return Need::Yes;
 }
 

@@ -171,6 +171,7 @@ void Node::enter(Phase p, Mode m) {
     state_.elapsed_s = 0;
     state_.decide_s = 0;
     state_.check = false;
+    opp_seen_ = false;
     ++state_.seq;
     if (p == Phase::Run) {
         push(m == Mode::Heat ? "Tandem: switched to heating"
@@ -330,9 +331,16 @@ void Node::schedule(const std::vector<Member>& members, uint32_t dt) {
             if (!demand(opp)) {
                 state_.check = false;
                 state_.decide_s = 0;
+                opp_seen_ = false;
                 return;
             }
             const uint32_t el = state_.elapsed_s;
+            // A room that starts waiting late in a turn still gets time for its check.
+            if (!opp_seen_) {
+                opp_seen_ = true;
+                if (!state_.decide_s && el + check_lead_ > cfg_.max_slice_s)
+                    state_.decide_s = el + check_lead_;
+            }
             const uint32_t decide = state_.decide_s ? state_.decide_s : cfg_.max_slice_s;
             const bool due = el >= decide;
             const bool early = el >= cfg_.min_slice_s && all_satisfied(cur);

@@ -34,6 +34,9 @@ constexpr const char* kQuietFan = "QUIET";
 bool          s_fanmode = false;
 std::string   s_saved_mode;
 uint32_t      s_fanmode_at = 0;
+// After a check the unit reports FAN until it acks the restored mode; keep
+// reporting the user's mode meanwhile so Tandem doesn't see the room drop out.
+uint32_t      s_restore_until = 0;
 constexpr const char* kFanMode = "FAN";
 
 // The head's settings with the outdoor unit's shared fields applied.
@@ -50,6 +53,10 @@ park::Config effective_locked() {
 }
 
 uint32_t now_s() { return static_cast<uint32_t>(esp_timer_get_time() / 1000000); }
+
+bool show_saved_mode_locked(const std::string& unit_mode) {
+    return s_fanmode || (unit_mode == kFanMode && now_s() < s_restore_until);
+}
 
 void load(park::Config& c, bool& managed) {
     nvs_handle_t h;
@@ -133,6 +140,7 @@ void sync_mode() {
             republish = true;
         } else if (!want && s_fanmode) {
             s_fanmode = false;
+            s_restore_until = now_s() + park::kCmdSettleS;
             persist_mode_locked();
             send = s_saved_mode;
             republish = true;
@@ -295,7 +303,7 @@ void tick() {
     {
         std::lock_guard<std::mutex> lk(s_mtx);
         s_unit_on = in.phys_on;
-        if (s_fanmode) in.mode = s_saved_mode;  // judge the room by the user's mode
+        if (show_saved_mode_locked(in.mode)) in.mode = s_saved_mode;  // judge the room by the user's mode
     }
     step([&](park::Machine& m) { return m.tick(in, t); });
 }
@@ -312,9 +320,10 @@ void notify_intent_change() {
 
 cn105::Settings overlay(cn105::Settings s) {
     std::lock_guard<std::mutex> lk(s_mtx);
-    if (s_m.parked()) s.power = "ON";
+    // Probing included: the unit reads OFF until CN105 acks the power-on.
+    if (s_m.managed()) s.power = "ON";
     if (s_quiet) s.fan = s_saved_fan;
-    if (s_fanmode) s.mode = s_saved_mode;
+    if (show_saved_mode_locked(s.mode)) s.mode = s_saved_mode;
     return s;
 }
 

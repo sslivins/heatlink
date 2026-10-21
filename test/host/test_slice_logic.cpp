@@ -465,6 +465,29 @@ static void test_satisfied_needs_waiting_demand() {
     CHECK(n.state().phase == Phase::Changeover);
 }
 
+// A room that starts waiting after the max turn still gets its check: the
+// decision is pushed out by the lead instead of handing over at once.
+static void test_late_waiting_room_gets_check() {
+    uint32_t now;
+    Node n = coordinator(Mode::Heat, Mode::None, now);
+    drain(n);
+    n.set_check_lead(180);
+    std::vector<Member> ms = {mem("a", Mode::Heat), mem("b", Mode::None)};
+    run(n, ms, now, now + 2500);
+    CHECK(n.state().phase == Phase::Run);
+    CHECK(n.state().decide_s == 0);
+    ms[1] = needing(mem("b", Mode::Cool), Need::Checking);
+    run(n, ms, now + 2500, now + 2510);
+    CHECK(n.state().phase == Phase::Run);
+    CHECK(n.state().check);
+    const uint32_t d = n.state().decide_s;
+    CHECK(d > n.state().elapsed_s && d <= n.state().elapsed_s + 180);
+    ms[1].need = Need::No;
+    run(n, ms, now + 2510, now + 2700);
+    CHECK(n.state().phase == Phase::Run);
+    CHECK(n.state().decide_s > d);             // extended, not handed over
+}
+
 static void test_follower_gets_check() {
     Node f;
     f.set_self("b");
@@ -503,6 +526,7 @@ int main() {
     test_max_extends_when_not_needed();
     test_waits_for_running_check();
     test_satisfied_needs_waiting_demand();
+    test_late_waiting_room_gets_check();
     test_follower_gets_check();
     if (g_failures) {
         std::printf("%d slice_logic test(s) FAILED\n", g_failures);

@@ -177,6 +177,7 @@ private:
     std::string self_;
     Config   cfg_{};
     uint32_t check_lead_ = kCheckLeadS;
+    bool     opp_seen_ = false;  // opposite demand seen this Run (local)
     State    state_{};
     bool     coord_ = false;
     std::string coord_uid_;

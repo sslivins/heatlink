@@ -1349,7 +1349,7 @@ components:
         satisfied: { type: boolean, description: Parked because the room reached its setpoint }
         held: { type: boolean, description: 'Held off waiting for its time slice (reason "waiting_for_slice")' }
         tandem: { type: string, enum: [heat, cool, switch], description: 'Only when held: what the other rooms are doing (switch = changing modes)' }
-        need: { type: string, enum: ['yes', 'no', checking], description: 'Only when held: does this room need its Tandem turn (yes when unknown)' }
+        need: { type: string, enum: ['yes', 'no', checking], description: 'Only when held: does this room need its Tandem turn (checking until its air check reports; yes when checks are off)' }
         checking: { type: boolean, description: 'Only when held: an air check is running in FAN mode (settings report the user''s mode)' }
         forced: { type: boolean, description: Off-at-setpoint is forced on by group time-slicing }
         slicing: { type: boolean, description: Group time-slicing (Tandem) is enabled (AUTO is unavailable) }
@@ -1734,7 +1734,7 @@ components:
               fresh: { type: boolean }
               capable: { type: boolean }
               wants: { type: string, enum: [none, heat, cool] }
-              need: { type: string, enum: ['yes', 'no', checking], description: 'While waiting: does its room need a turn (yes when unknown or older firmware)' }
+              need: { type: string, enum: ['yes', 'no', checking], description: 'While waiting: does its room need a turn (checking until its air check reports; yes when checks are off or older firmware)' }
               directive: { type: string, enum: [free, run, hold] }
     GroupJoinResult:
       type: object
