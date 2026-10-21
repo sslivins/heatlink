@@ -573,7 +573,7 @@ static Machine held_heat(uint32_t& now) {
 static void test_held_check_verdict() {
     uint32_t now;
     Machine m = held_heat(now);
-    CHECK(m.need(now) == Need::Yes);          // never checked: unknown counts as yes
+    CHECK(m.need(now) == Need::Checking);     // unknown until the air check runs
     CHECK(m.start_check(now) == Action::PowerOn);
     CHECK(m.checking());
     CHECK(m.need(now) == Need::Checking);
@@ -589,7 +589,7 @@ static void test_held_check_verdict() {
     CHECK(m.need(done + 1) == Need::No);
     CHECK(m.take_event() != nullptr);
     CHECK(m.start_check(done + 10) == Action::None);  // verdict still valid
-    CHECK(m.need(done + kNeedValidS) == Need::Yes);   // expired
+    CHECK(m.need(done + kNeedValidS) == Need::Checking);  // expired
     CHECK(m.start_check(done + kNeedValidS) == Action::PowerOn);
     // Cold room: verdict "yes".
     h = run(m, heat(19.0f), done + kNeedValidS + 1, done + kNeedValidS + 300);
@@ -605,7 +605,7 @@ static void test_release_mid_check_runs() {
     CHECK(m.set_hold(false, now + 30) == Action::None);  // already on
     CHECK(m.state() == State::Running);
     CHECK(!m.checking());
-    CHECK(m.need(now + 31) == Need::Yes);  // not held
+    CHECK(m.need(now + 31) == Need::Checking);  // verdict dropped on release
 }
 
 static void test_check_not_started_when_unneeded() {
@@ -639,7 +639,7 @@ static void test_target_change_invalidates_verdict() {
     const uint32_t done = static_cast<uint32_t>(h.at);
     CHECK(m.need(done + 1) == Need::No);
     CHECK(m.notify_intent_change(done + 2) == Action::None);
-    CHECK(m.need(done + 3) == Need::Yes);
+    CHECK(m.need(done + 3) == Need::Checking);
     CHECK(m.start_check(done + 3) == Action::PowerOn);
 }
 

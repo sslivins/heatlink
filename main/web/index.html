@@ -3578,7 +3578,7 @@ function tandemNow(sl){
   if(sl.phase==='run'){
     const r={s:sl.mode==='heat'?'heating':'cooling'};
     if((sl.members||[]).some(m=>m.directive==='hold')){
-      const n=Math.max(1,Math.ceil(((sl.max_slice_s||0)-(sl.elapsed_s||0))/60));
+      const n=Math.max(1,Math.ceil(((sl.decide_s||sl.max_slice_s||0)-(sl.elapsed_s||0))/60));
       r.next=i18n(sl.mode==='heat'?'cooling within {n} min':'heating within {n} min',{n:n});
     }
     return r;
@@ -4476,13 +4476,26 @@ async function pollOnce(){
   tickN++;
 }
 function schedule(ms){ clearTimeout(pollTimer); pollTimer=setTimeout(tick,ms); }
+// A poll suspended with the app (e.g. an iOS PWA closed mid-request) can hang
+// forever reading its body, which would stop all updates until a tab switch.
+// Each loop has a generation: a stuck or superseded loop never reschedules,
+// and the watchdog starts a fresh one.
+let pollGen=0, pollStartedAt=0;
 async function tick(){
+  const gen=++pollGen;
   if(document.hidden){ schedule(2000); return; }   // paused: just re-check visibility
+  pollStartedAt=Date.now();
   try{ await pollOnce(); }catch(e){ console.error('poll failed',e); }
+  if(gen!==pollGen) return;                         // a newer loop took over
+  pollStartedAt=0;
   schedule(offline?8000:5000);                      // back off while disconnected
 }
 document.addEventListener('visibilitychange',()=>{ if(!document.hidden) schedule(150); });
 window.addEventListener('focus',()=>schedule(150));
+window.addEventListener('pageshow',()=>schedule(150));
+setInterval(()=>{
+  if(!document.hidden && pollStartedAt && Date.now()-pollStartedAt>20000){ pollStartedAt=0; schedule(0); }
+},5000);
 
 // ── First-run setup wizard ─────────────────────────────────────────────
 // Shown once, full-screen, when this zone has no broker configured yet and

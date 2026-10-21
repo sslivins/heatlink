@@ -120,7 +120,8 @@ public:
 
     /// While held: whether this room needs its slice. With a room sensor this
     /// is live; otherwise it is the verdict of the last held air check (valid
-    /// kNeedValidS), else Yes (unknown).
+    /// kNeedValidS), else Checking while an air check can still tell (so the
+    /// coordinator doesn't hand over before it runs), else Yes.
     Need need(uint32_t now_s) const;
     /// Start a held air check unless a valid verdict exists (or a room sensor
     /// makes it unnecessary, or air checks are disabled). The glue runs the

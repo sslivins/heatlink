@@ -260,7 +260,9 @@ on firmware that supports it), the group instead takes turns heating and cooling
   way — then powers off and restores its mode. The verdict is good for 10 min;
   while the current turn's rooms are all satisfied the waiting rooms are
   re-checked every 10 min. The coordinator waits up to 5 min past the decision
-  for a check still running, then hands over. If air checks are disabled, or a
+  for a check still running, then hands over. A room that starts waiting late
+  in a turn (or after the max) still gets time for its check. If air checks
+  are disabled, or a
   head runs older firmware, a waiting room counts as needing its turn.
   Between modes every head is parked for the **pause between modes** (3–10 min,
   default 3; a safety margin in case the outdoor unit has no restart delay of
