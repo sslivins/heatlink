@@ -46,6 +46,16 @@ constexpr uint32_t kProbeExtraMaxS = 600;  ///< cap on no-airflow time (preheat/
 
 /// Reason reported while a head is held off for the other mode's slice.
 constexpr const char* kWaitingForSlice = "waiting_for_slice";
+/// How long a held air check's verdict stays valid.
+constexpr uint32_t kNeedValidS = 600;
+
+/// Does a head held for the other slice need its turn? (#133 need check)
+enum class Need : uint8_t {
+    Yes,       ///< room past its restart threshold, or not known
+    No,        ///< room within its restart threshold
+    Checking,  ///< held air check in progress
+};
+const char* need_str(Need n);  ///< "yes" | "no" | "checking"
 
 /// Clamp a config into the supported ranges (delta to 0.5 °C steps; probe
 /// interval is never shorter than the minimum off time).
@@ -101,11 +111,25 @@ public:
 
     /// Time-sliced heat/cool (#133): while held, a head whose desired power is
     /// ON is kept parked (reason "waiting_for_slice") with no drift wakes or
-    /// probes, and a remote turn-on is re-parked. Releasing a held head powers it
+    /// scheduled probes (only start_check() air checks), and a remote turn-on is
+    /// re-parked. Releasing a held head powers it
     /// back on (normal parking then applies). Held/released transitions log no
     /// activity event (the slice coordinator logs slice changes).
     Action set_hold(bool hold, uint32_t now_s);
     bool   hold() const { return hold_; }
+
+    /// While held: whether this room needs its slice. With a room sensor this
+    /// is live; otherwise it is the verdict of the last held air check (valid
+    /// kNeedValidS), else Yes (unknown).
+    Need need(uint32_t now_s) const;
+    /// Start a held air check unless a valid verdict exists (or a room sensor
+    /// makes it unnecessary, or air checks are disabled). The glue runs the
+    /// unit in FAN mode during it (checking()), so the compressor never runs
+    /// the wrong way; the machine's Inputs::mode stays the desired mode. When
+    /// done the head re-parks; a release mid-check runs at once.
+    Action start_check(uint32_t now_s);
+    /// A held air check is running (unit powered on in FAN mode).
+    bool   checking() const { return cfg_.enabled && hold_ && state_ == State::Probing; }
 
     /// Advance with a fresh unit snapshot (call ~1 Hz).
     Action tick(const Inputs& in, uint32_t now_s);
@@ -156,6 +180,10 @@ private:
     bool     hold_ = false;
     bool     external_ = false;      ///< last tick's room came from a room sensor
     bool     reeval_ = false;        ///< target changed while parked with a sensor
+    bool     sensor_need_ = true;    ///< held with a room sensor: room needs its slice
+    bool     have_verdict_ = false;  ///< a held air check finished
+    bool     verdict_need_ = true;
+    uint32_t verdict_at_ = 0;
     bool     have_tick_ = false;
     uint32_t last_tick_ = 0;
     const char* reason_ = "";

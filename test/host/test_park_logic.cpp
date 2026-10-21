@@ -560,6 +560,89 @@ static void test_room_sensor_setpoint_change() {
     CHECK(m3.state() == State::Probing);
 }
 
+// #133 need check: a held head air-checks its room in FAN (glue) and reports
+// whether it needs its turn.
+static Machine held_heat(uint32_t& now) {
+    Machine m = running_heat(now);
+    m.set_hold(true, now);
+    m.tick(heat(20.8f, 21.0f, false), now + 1);
+    now += 2;
+    return m;
+}
+
+static void test_held_check_verdict() {
+    uint32_t now;
+    Machine m = held_heat(now);
+    CHECK(m.need(now) == Need::Yes);          // never checked: unknown counts as yes
+    CHECK(m.start_check(now) == Action::PowerOn);
+    CHECK(m.checking());
+    CHECK(m.need(now) == Need::Checking);
+    CHECK(m.start_check(now + 1) == Action::None);
+    // Room within the restart threshold: verdict "no", re-parked for the slice.
+    Hit h = run(m, heat(20.8f), now + 1, now + 300);
+    CHECK(h.a == Action::PowerOff);
+    CHECK(h.at >= static_cast<long>(now + 118) && h.at <= static_cast<long>(now + 121));
+    CHECK(m.state() == State::Parked);
+    CHECK(!m.checking());
+    CHECK(std::string(m.reason()) == kWaitingForSlice);
+    const uint32_t done = static_cast<uint32_t>(h.at);
+    CHECK(m.need(done + 1) == Need::No);
+    CHECK(m.take_event() != nullptr);
+    CHECK(m.start_check(done + 10) == Action::None);  // verdict still valid
+    CHECK(m.need(done + kNeedValidS) == Need::Yes);   // expired
+    CHECK(m.start_check(done + kNeedValidS) == Action::PowerOn);
+    // Cold room: verdict "yes".
+    h = run(m, heat(19.0f), done + kNeedValidS + 1, done + kNeedValidS + 300);
+    CHECK(h.a == Action::PowerOff);
+    CHECK(m.need(static_cast<uint32_t>(h.at) + 1) == Need::Yes);
+}
+
+static void test_release_mid_check_runs() {
+    uint32_t now;
+    Machine m = held_heat(now);
+    CHECK(m.start_check(now) == Action::PowerOn);
+    run(m, heat(20.8f), now + 1, now + 30);
+    CHECK(m.set_hold(false, now + 30) == Action::None);  // already on
+    CHECK(m.state() == State::Running);
+    CHECK(!m.checking());
+    CHECK(m.need(now + 31) == Need::Yes);  // not held
+}
+
+static void test_check_not_started_when_unneeded() {
+    uint32_t now;
+    Machine m = running_heat(now);
+    CHECK(m.start_check(now) == Action::None);  // not held
+    m.set_hold(true, now);
+    // Room sensor: live verdict, no air check.
+    m.tick(ext(heat(20.8f, 21.0f, false)), now + 1);
+    CHECK(m.need(now + 1) == Need::No);
+    CHECK(m.start_check(now + 1) == Action::None);
+    m.tick(ext(heat(20.4f, 21.0f, false)), now + 2);
+    CHECK(m.need(now + 2) == Need::Yes);
+    // Air checks disabled: none, and the room is unknown.
+    Machine d;
+    Config c = enabled_cfg();
+    c.probe_enabled = false;
+    d.configure(c, 0);
+    d.tick(heat(19.0f), 0);
+    d.set_hold(true, 1);
+    d.tick(heat(20.8f, 21.0f, false), 2);
+    CHECK(d.start_check(3) == Action::None);
+    CHECK(d.need(3) == Need::Yes);
+}
+
+static void test_target_change_invalidates_verdict() {
+    uint32_t now;
+    Machine m = held_heat(now);
+    m.start_check(now);
+    Hit h = run(m, heat(20.8f), now + 1, now + 300);
+    const uint32_t done = static_cast<uint32_t>(h.at);
+    CHECK(m.need(done + 1) == Need::No);
+    CHECK(m.notify_intent_change(done + 2) == Action::None);
+    CHECK(m.need(done + 3) == Need::Yes);
+    CHECK(m.start_check(done + 3) == Action::PowerOn);
+}
+
 int main() {
     test_sanitize();
     test_disabled_is_passthrough();
@@ -593,6 +676,10 @@ int main() {
     test_room_sensor_skips_probes();
     test_room_sensor_lost_probes_at_once();
     test_room_sensor_setpoint_change();
+    test_held_check_verdict();
+    test_release_mid_check_runs();
+    test_check_not_started_when_unneeded();
+    test_target_change_invalidates_verdict();
     if (g_failures) {
         std::printf("%d park_logic test(s) FAILED\n", g_failures);
         return 1;

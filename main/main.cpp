@@ -241,7 +241,7 @@ void on_mqtt_command(const hvac_mqtt::Command& cmd) {
         // physical power while a head is parked (desired ON, unit held off).
         case K::Power: {
             const bool on = strcasecmp(cmd.value.c_str(), "off") != 0;
-            slice_ctl::Command sc(on, g_hp.getSettings().mode);
+            slice_ctl::Command sc(on, park_ctl::overlay(g_hp.getSettings()).mode);
             park_ctl::set_desired_power(on);
             break;
         }
@@ -255,7 +255,7 @@ void on_mqtt_command(const hvac_mqtt::Command& cmd) {
             // "off" powers the unit down; any real mode powers it on (mapping
             // HA's "fan_only" to the native "FAN").
             if (strcasecmp(cmd.value.c_str(), "off") == 0) {
-                slice_ctl::Command sc(false, g_hp.getSettings().mode);
+                slice_ctl::Command sc(false, park_ctl::overlay(g_hp.getSettings()).mode);
                 park_ctl::set_desired_power(false);
             } else {
                 const char* mode = cmd.value.c_str();
@@ -271,8 +271,10 @@ void on_mqtt_command(const hvac_mqtt::Command& cmd) {
                 }
                 // Time-slicing: hold before / release after the new mode is recorded.
                 slice_ctl::Command sc(true, mode);
-                bool changed = strcasecmp(g_hp.getSettings().mode.c_str(), mode) != 0;
-                g_hp.setModeSetting(mode);
+                bool changed =
+                    strcasecmp(park_ctl::overlay(g_hp.getSettings()).mode.c_str(), mode) != 0;
+                // During a held Tandem air check (FAN mode) it becomes the mode to restore.
+                if (!park_ctl::request_mode(mode)) g_hp.setModeSetting(mode);
                 park_ctl::set_desired_power(true);
                 if (changed) park_ctl::notify_intent_change();
             }
@@ -666,6 +668,10 @@ extern "C" void app_main() {
             return g_hp.isConnected() ? g_hp.getSettings().fan : std::string();
         };
         ph.set_fan   = [](const std::string& f) { g_hp.setFanSpeed(f); };
+        ph.get_mode  = []() -> std::string {
+            return g_hp.isConnected() ? g_hp.getSettings().mode : std::string();
+        };
+        ph.set_mode  = [](const std::string& m) { g_hp.setModeSetting(m); };
         ph.on_change = [] {
             cn105::Settings e = park_ctl::overlay(g_hp.getSettings());
             hvac_mqtt::publish_settings(e);
@@ -680,7 +686,9 @@ extern "C" void app_main() {
         slice_ctl::Hooks sh;
         sh.settings = [] { return park_ctl::overlay(g_hp.getSettings()); };
         sh.status   = [] { return g_hp.getStatus(); };
-        sh.set_mode = [](const std::string& m) { g_hp.setModeSetting(m.c_str()); };
+        sh.set_mode = [](const std::string& m) {
+            if (!park_ctl::request_mode(m)) g_hp.setModeSetting(m.c_str());
+        };
         slice_ctl::init(sh);
         hvac_mqtt::set_park_provider([] {
             park_ctl::Snapshot ps = park_ctl::snapshot();

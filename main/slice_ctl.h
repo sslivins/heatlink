@@ -53,6 +53,7 @@ struct PeerObs {
     bool         has_state = false;
     slice::State state;
     bool         satisfied = false;
+    slice::Need  need = slice::Need::Yes;  ///< absent (older firmware): Yes
     std::string  power, mode, sub_mode;
 };
 void observe_peer(const std::string& uid, const PeerObs& obs);
@@ -62,6 +63,7 @@ struct Publish {
     bool         has_state = false;
     slice::State state;
     bool         satisfied = false;
+    slice::Need  need = slice::Need::Yes;
 };
 Publish publish();
 
@@ -70,6 +72,7 @@ struct MemberStatus {
     bool        fresh = false;
     bool        capable = false;
     slice::Mode wants = slice::Mode::None;
+    slice::Need need = slice::Need::Yes;
     slice::Directive directive = slice::Directive::Free;
 };
 

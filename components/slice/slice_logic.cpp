@@ -56,6 +56,20 @@ const char* directive_str(Directive d) {
     }
 }
 
+const char* need_str(Need n) {
+    switch (n) {
+        case Need::No:       return "no";
+        case Need::Checking: return "checking";
+        default:             return "yes";
+    }
+}
+
+Need parse_need(const std::string& s) {
+    if (s == "no") return Need::No;
+    if (s == "checking") return Need::Checking;
+    return Need::Yes;
+}
+
 static uint32_t clampu(uint32_t v, uint32_t lo, uint32_t hi) {
     return v < lo ? lo : (v > hi ? hi : v);
 }
@@ -155,6 +169,8 @@ void Node::enter(Phase p, Mode m) {
     state_.phase = p;
     state_.mode = m;
     state_.elapsed_s = 0;
+    state_.decide_s = 0;
+    state_.check = false;
     ++state_.seq;
     if (p == Phase::Run) {
         push(m == Mode::Heat ? "Tandem: switched to heating"
@@ -180,6 +196,8 @@ void Node::take_over(const std::vector<Member>& members) {
         state_.mode = best->mode;
         state_.phase = best->phase;
         state_.elapsed_s = best->elapsed_s;
+        state_.decide_s = best->decide_s;
+        state_.check = best->check;
     } else if (!have_state_) {
         state_ = State{};
     }
@@ -217,6 +235,8 @@ void Node::tick(const std::vector<Member>& members, uint32_t now_s) {
                 state_.mode = m.state.mode;
                 state_.phase = m.state.phase;
                 state_.elapsed_s = m.state.elapsed_s;
+                state_.decide_s = m.state.decide_s;
+                state_.check = m.state.check;
                 state_.term = max_term_ + 1;
                 state_.seq = 0;
                 max_term_ = state_.term;
@@ -255,7 +275,8 @@ void Node::tick(const std::vector<Member>& members, uint32_t now_s) {
         const bool stale = !have_state_ || now_s - last_seen_ > kStaleS;
         if (stale || not_older(*cand, state_)) {
             if (stale || cand->term != state_.term || cand->seq != state_.seq ||
-                cand->elapsed_s != state_.elapsed_s) {
+                cand->elapsed_s != state_.elapsed_s || cand->decide_s != state_.decide_s ||
+                cand->check != state_.check) {
                 state_ = *cand;
                 updated_at_ = now_s;
             }
@@ -306,15 +327,36 @@ void Node::schedule(const std::vector<Member>& members, uint32_t dt) {
                 enter(Phase::Idle, cur);
                 return;
             }
+            if (!demand(opp)) {
+                state_.check = false;
+                state_.decide_s = 0;
+                return;
+            }
+            const uint32_t el = state_.elapsed_s;
+            const uint32_t decide = state_.decide_s ? state_.decide_s : cfg_.max_slice_s;
+            const bool due = el >= decide;
+            const bool early = el >= cfg_.min_slice_s && all_satisfied(cur);
+            state_.check = demand(cur) && (early || el + check_lead_ >= decide);
             if (defrost) return;  // never switch mid-defrost
             if (!demand(cur)) {
                 enter(Phase::Changeover, opp);
                 return;
             }
-            if (demand(opp) &&
-                (state_.elapsed_s >= cfg_.max_slice_s ||
-                 (state_.elapsed_s >= cfg_.min_slice_s && all_satisfied(cur)))) {
+            if (!due && !early) return;
+            // Hand over only if a waiting room needs its turn.
+            bool yes = false, checking = false;
+            for (const auto& m : members) {
+                if (!m.fresh || m.wants != opp) continue;
+                if (m.need == Need::Yes) yes = true;
+                if (m.need == Need::Checking) checking = true;
+            }
+            if (yes || (checking && due && el >= decide + kCheckWaitS)) {
                 enter(Phase::Changeover, opp);
+            } else if (due && !checking) {
+                state_.decide_s = el + cfg_.max_slice_s;
+                push(cur == Mode::Heat
+                         ? "Tandem: kept heating \xE2\x80\x94 rooms waiting to cool don't need it yet"
+                         : "Tandem: kept cooling \xE2\x80\x94 rooms waiting to heat don't need it yet");
             }
             return;
         }

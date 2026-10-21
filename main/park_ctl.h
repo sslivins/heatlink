@@ -23,12 +23,19 @@ struct Hooks {
     std::function<void()>         on_change;       ///< republish state (MQTT)
     std::function<std::string()>  get_fan;         ///< unit's reported fan speed
     std::function<void(const std::string&)> set_fan;  ///< physical fan command
+    std::function<std::string()>  get_mode;        ///< unit's reported mode ("" if not connected)
+    std::function<void(const std::string&)> set_mode; ///< physical mode command
 };
 
 /// Air checks run the fan at its lowest speed (QUIET) and restore the user's
 /// setting afterwards. A user fan command during a check becomes the setting
 /// to restore (returns true: don't send it now); otherwise returns false.
 bool request_fan(const std::string& fan);
+
+/// A held Tandem air check runs the unit in FAN mode and restores the user's
+/// mode afterwards. A mode command during one becomes the mode to restore
+/// (returns true: don't send it now); otherwise returns false.
+bool request_mode(const std::string& mode);
 
 /// Load config + persisted managed flag from NVS. Call before the CN105 task.
 void init(const Hooks& hooks);
@@ -43,7 +50,7 @@ void set_desired_power(bool on);
 void notify_intent_change();
 
 /// Physical settings -> what users should see (power ON while parked, the
-/// user's fan speed during a quiet air check).
+/// user's fan speed / mode during an air check).
 cn105::Settings overlay(cn105::Settings s);
 
 /// True when the enable / min-off / probe settings come from the group's
@@ -58,8 +65,9 @@ park::Config set_config(const park::Config& c);
 
 /// Time-slicing (#133): while @p active the machine runs even if the user
 /// disabled off-at-setpoint (it is how heads park and report satisfaction),
-/// and @p hold keeps the unit parked off until its slice comes up.
-void set_slice(bool active, bool hold);
+/// and @p hold keeps the unit parked off until its slice comes up. @p check
+/// (held only) asks for an air check of the room if there is no fresh verdict.
+void set_slice(bool active, bool hold, bool check = false);
 
 struct Snapshot {
     bool        enabled = false;
@@ -73,6 +81,8 @@ struct Snapshot {
     bool        forced = false;     ///< running only because slicing is on
     bool        slicing = false;    ///< group time-slicing is enabled
     bool        quiet_fan = false;  ///< air check running with the fan at QUIET
+    park::Need  need = park::Need::Yes;  ///< held: does the room need its slice
+    bool        checking = false;   ///< held air check running (unit in FAN mode)
 };
 Snapshot snapshot();
 
