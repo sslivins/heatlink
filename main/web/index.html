@@ -1350,7 +1350,7 @@ const I18N = { fr: {
   "Tandem":"Tandem","Tandem™":"Tandem™",
   "An outdoor unit can heat or cool, but not both, so a warm room and a cold room can't both get comfortable. Tandem™ fixes that by taking turns heating and cooling, automatically. Paused rooms are switched off (settings kept) and restart on their own. Auto mode isn't available with Tandem.":"Une unité extérieure peut chauffer ou refroidir, mais pas les deux : une pièce trop chaude et une pièce trop froide ne peuvent pas être confortables en même temps. Tandem™ règle cela en alternant automatiquement chauffage et refroidissement. Les pièces en pause sont arrêtées (réglages conservés) et redémarrent d’elles-mêmes. Le mode Auto n’est pas disponible avec Tandem.",
   "Now":"Maintenant","Minimum turn":"Tour minimal","Maximum turn":"Tour maximal",
-  "Pause between modes":"Pause entre les modes","Paused while other rooms heat":"En pause pendant que les autres pièces chauffent","Paused while other rooms cool":"En pause pendant que les autres pièces refroidissent","Paused while modes switch":"En pause pendant le changement de mode",
+  "Pause between modes":"Pause entre les modes","Paused while other rooms heat":"En pause pendant que les autres pièces chauffent","Paused while other rooms cool":"En pause pendant que les autres pièces refroidissent","Paused while modes switch":"En pause pendant le changement de mode","Checking if this room needs a turn":"Vérification : cette pièce a-t-elle besoin de son tour ?",
   "Switching modes":"Changement de mode",
   "No room needs heat or cool":"Aucune pièce n’a besoin de chauffage ou de refroidissement",
   "heating":"chauffage","cooling":"refroidissement","starting…":"démarrage…",
@@ -2204,6 +2204,7 @@ function pkFill(id,vals,label,cur){
 const pkMin=v=>(v%60?(v/60).toFixed(1):(v/60))+' min';
 // Tandem hold reason for a paused head: what the other rooms are doing.
 function tandemPaused(st){
+  if(st.checking) return i18n('Checking if this room needs a turn');
   return i18n(st.tandem==='heat'?'Paused while other rooms heat':
               st.tandem==='cool'?'Paused while other rooms cool':'Paused while modes switch');
 }

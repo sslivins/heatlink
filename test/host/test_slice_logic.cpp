@@ -398,6 +398,91 @@ static void test_disable_frees_everyone() {
     CHECK(n.max_term() == 1);  // terms never go backwards
 }
 
+static Member needing(Member m, Need n) {
+    m.need = n;
+    return m;
+}
+
+// #133 need check: at the max turn the waiting rooms are asked; if none needs
+// its turn the current one is extended by another max turn.
+static void test_max_extends_when_not_needed() {
+    uint32_t now;
+    Node n = coordinator(Mode::Heat, Mode::Cool, now);
+    drain(n);
+    n.set_check_lead(180);
+    std::vector<Member> ms = {mem("a", Mode::Heat), needing(mem("b", Mode::Cool), Need::No)};
+    run(n, ms, now, now + 1500);
+    CHECK(!n.state().check);
+    run(n, ms, now + 1500, now + 1700);
+    CHECK(n.state().check);                    // within the lead: waiting heads check
+    run(n, ms, now + 1700, now + 1900);
+    CHECK(n.state().phase == Phase::Run);
+    CHECK(n.state().mode == Mode::Heat);
+    CHECK(n.state().decide_s == 3600);
+    CHECK(!n.state().check);
+    CHECK(std::string(n.take_event()) ==
+          "Tandem: kept heating \xE2\x80\x94 rooms waiting to cool don't need it yet");
+    // Next decision: the cooling room now needs it.
+    ms[1].need = Need::Yes;
+    run(n, ms, now + 1900, now + 3590);
+    CHECK(n.state().phase == Phase::Run);
+    run(n, ms, now + 3590, now + 3610);
+    CHECK(n.state().phase == Phase::Changeover);
+    CHECK(n.state().mode == Mode::Cool);
+    CHECK(n.state().decide_s == 0);
+}
+
+static void test_waits_for_running_check() {
+    uint32_t now;
+    Node n = coordinator(Mode::Heat, Mode::Cool, now);
+    std::vector<Member> ms = {mem("a", Mode::Heat), needing(mem("b", Mode::Cool), Need::Checking)};
+    run(n, ms, now, now + 1800 + kCheckWaitS - 10);
+    CHECK(n.state().phase == Phase::Run);      // waits for the verdict
+    CHECK(n.state().decide_s == 0);            // not extended while checking
+    ms[1].need = Need::Yes;
+    run(n, ms, now + 1800 + kCheckWaitS - 10, now + 1800 + kCheckWaitS - 8);
+    CHECK(n.state().phase == Phase::Changeover);
+    // A check that never finishes hands over after kCheckWaitS.
+    Node m = coordinator(Mode::Heat, Mode::Cool, now);
+    ms[1].need = Need::Checking;
+    run(m, ms, now, now + 1800 + kCheckWaitS + 5);
+    CHECK(m.state().phase == Phase::Changeover);
+}
+
+static void test_satisfied_needs_waiting_demand() {
+    uint32_t now;
+    Node n = coordinator(Mode::Heat, Mode::Cool, now);
+    std::vector<Member> ms = {mem("a", Mode::Heat, /*satisfied=*/true),
+                              needing(mem("b", Mode::Cool), Need::No)};
+    run(n, ms, now, now + 590);
+    CHECK(!n.state().check);
+    run(n, ms, now + 590, now + 1000);
+    CHECK(n.state().phase == Phase::Run);      // nobody waiting needs it
+    CHECK(n.state().mode == Mode::Heat);
+    CHECK(n.state().check);                    // keep the waiting rooms checked
+    ms[1].need = Need::Yes;
+    run(n, ms, now + 1000, now + 1002);
+    CHECK(n.state().phase == Phase::Changeover);
+}
+
+static void test_follower_gets_check() {
+    Node f;
+    f.set_self("b");
+    f.configure(on_cfg(), 0);
+    State s = st(1, 1, Mode::Heat, Phase::Run, "a", 1700);
+    s.check = true;
+    s.decide_s = 3600;
+    std::vector<Member> ms = {mem("b", Mode::Cool), with_state(mem("a", Mode::Heat), s)};
+    run(f, ms, 0, 5);
+    CHECK(f.have_state());
+    CHECK(f.state().check);
+    CHECK(f.state().decide_s == 3600);
+    s.check = false;
+    ms[1] = with_state(mem("a", Mode::Heat), s);
+    run(f, ms, 5, 6);
+    CHECK(!f.state().check);
+}
+
 int main() {
     test_config();
     test_desired_and_elect();
@@ -415,6 +500,10 @@ int main() {
     test_lost_coordinator_falls_back();
     test_warmup_follows_peers_then_takes_over();
     test_disable_frees_everyone();
+    test_max_extends_when_not_needed();
+    test_waits_for_running_check();
+    test_satisfied_needs_waiting_demand();
+    test_follower_gets_check();
     if (g_failures) {
         std::printf("%d slice_logic test(s) FAILED\n", g_failures);
         return 1;

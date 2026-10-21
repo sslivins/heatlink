@@ -67,6 +67,14 @@ void save_term(uint64_t t) {
 
 bool is_auto(bool power_on, const std::string& mode) { return power_on && mode == "AUTO"; }
 
+slice::Need need_of(park::Need n) {
+    switch (n) {
+        case park::Need::No:       return slice::Need::No;
+        case park::Need::Checking: return slice::Need::Checking;
+        default:                   return slice::Need::Yes;
+    }
+}
+
 // Directive -> hold, for self. AUTO is held while slicing (it would choose its
 // own direction).
 bool hold_for_locked(bool power_on, const std::string& mode, uint32_t t) {
@@ -78,6 +86,7 @@ bool hold_for_locked(bool power_on, const std::string& mode, uint32_t t) {
 // Self first, then each enrolled peer (stale peers are present but not fresh).
 std::vector<slice::Member> members_locked(bool power_on, const std::string& mode,
                                           const cn105::Status& st, bool satisfied,
+                                          slice::Need need,
                                           const std::vector<std::string>& peers) {
     std::vector<slice::Member> ms;
     slice::Member self;
@@ -86,6 +95,7 @@ std::vector<slice::Member> members_locked(bool power_on, const std::string& mode
     self.capable = true;
     self.wants = slice::desired_of(power_on, mode);
     self.satisfied = satisfied;
+    self.need = need;
     self.defrost = st.subMode == "DEFROST";
     ms.push_back(self);
     const int64_t now_us = esp_timer_get_time();
@@ -99,6 +109,7 @@ std::vector<slice::Member> members_locked(bool power_on, const std::string& mode
             m.capable = o.capable;
             m.wants = slice::desired_of(o.power == "ON", upper(o.mode));
             m.satisfied = o.satisfied;
+            m.need = o.need;
             m.defrost = o.sub_mode == "DEFROST";
             m.has_state = o.has_state;
             m.state = o.state;
@@ -148,11 +159,13 @@ void tick() {
     const std::vector<std::string> peers = grouped ? hvac_group::get().peers
                                                    : std::vector<std::string>{};
     const uint32_t t = now_s();
+    // Waiting heads start their air checks this long before a turn decision.
+    const uint32_t lead = park_ctl::config().probe_duration_s + 60;
 
     std::vector<const char*> evs;
     std::string fix_mode;
     bool auto_stuck = false;
-    bool enabled = false, hold = false;
+    bool enabled = false, hold = false, check = false;
     uint64_t term = 0;
     {
         std::lock_guard<std::mutex> lk(s_mtx);
@@ -174,11 +187,15 @@ void tick() {
         std::string mode;
         self_desire_locked(s, t, power_on, mode);
         s_node.set_self(hvac_group::self_uid());
-        std::vector<slice::Member> ms = members_locked(power_on, mode, st, ps.satisfied, peers);
+        s_node.set_check_lead(lead);
+        std::vector<slice::Member> ms =
+            members_locked(power_on, mode, st, ps.satisfied, need_of(ps.need), peers);
         s_node.tick(ms, t);
         while (const char* e = s_node.take_event()) evs.push_back(e);
         enabled = s_node.enabled();
         hold = hold_for_locked(power_on, mode, t);
+        check = s_node.have_state() && s_node.state().phase == slice::Phase::Run &&
+                s_node.state().check;
         term = s_node.max_term();
 
         const std::string reported = upper(s.mode);
@@ -207,7 +224,7 @@ void tick() {
         ESP_LOGI(TAG, "%s", e);
         events::log(events::Cat::Group, events::Actor::System, e);
     }
-    park_ctl::set_slice(enabled, hold);
+    park_ctl::set_slice(enabled, hold, check);
     if (!fix_mode.empty() && s_hooks.set_mode) {
         s_hooks.set_mode(fix_mode);
         if (!s_auto_logged) {
@@ -268,6 +285,7 @@ Publish publish() {
     p.state = s_node.state();
     p.state.elapsed_s = s_node.elapsed_now(now_s());
     p.satisfied = ps.satisfied;
+    p.need = need_of(ps.need);
     return p;
 }
 
@@ -291,12 +309,13 @@ Status status() {
     bool power_on;
     std::string mode;
     self_desire_locked(s, t, power_on, mode);
-    for (const auto& m : members_locked(power_on, mode, st, ps.satisfied, peers)) {
+    for (const auto& m : members_locked(power_on, mode, st, ps.satisfied, need_of(ps.need), peers)) {
         MemberStatus ms;
         ms.uid = m.uid;
         ms.fresh = m.fresh;
         ms.capable = m.capable;
         ms.wants = m.wants;
+        ms.need = m.need;
         ms.directive = s_node.directive(m.wants, t);
         if (!m.fresh || !m.capable) out.all_capable = false;
         out.members.push_back(ms);

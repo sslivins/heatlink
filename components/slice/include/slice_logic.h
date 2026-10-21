@@ -8,6 +8,12 @@
 /// that want the current slice's mode run (parking at setpoint, #132), all
 /// others are held parked until their slice comes up.
 ///
+/// A turn is reconsidered after the max slice (or earlier, once the turn's
+/// rooms are all satisfied and the min slice has passed). It is handed over
+/// only if a waiting room needs it (Member::need: a room sensor, or a short
+/// FAN-mode air check by the waiting head); otherwise the turn is extended by
+/// another max slice.
+///
 /// Every head runs a Node. The coordinator (lowest reachable uid) runs the
 /// scheduler and publishes its State in the signed group snapshot; the other
 /// heads accept the coordinator's State, ordered by (term, seq) so a stale
@@ -63,6 +69,17 @@ constexpr uint32_t kStaleS  = 45;
 /// After enable/boot a head waits this long (>= 2 poll rounds) before acting
 /// as coordinator, so it first learns the group's current slice from peers.
 constexpr uint32_t kWarmupS = 30;
+/// Default time before a turn decision at which waiting heads start their
+/// air checks (the glue sets it from the probe duration).
+constexpr uint32_t kCheckLeadS = 180;
+/// How long past a decision the coordinator waits for air checks still
+/// running before handing over anyway.
+constexpr uint32_t kCheckWaitS = 300;
+
+/// Does a waiting head's room need its turn? Older firmware doesn't say: Yes.
+enum class Need : uint8_t { Yes, No, Checking };
+const char* need_str(Need n);               ///< "yes" | "no" | "checking"
+Need        parse_need(const std::string& s);
 
 /// Clamp into supported ranges (max slice is never below min slice).
 Config sanitize(const Config& c);
@@ -80,6 +97,13 @@ struct State {
     Phase       phase = Phase::Idle;
     uint32_t    elapsed_s = 0;  ///< time in this phase (defrost excluded in Run)
     std::string coordinator;
+    /// Run: elapsed time at which the turn is next reconsidered (0 = the max
+    /// turn). Pushed out by a max turn each time the waiting rooms turn out
+    /// not to need theirs.
+    uint32_t    decide_s = 0;
+    /// Run: waiting heads should air-check their rooms now (a decision is
+    /// near, or the turn's rooms are all satisfied).
+    bool        check = false;
 };
 
 /// (a.term, a.seq) >= (b.term, b.seq).
@@ -93,6 +117,7 @@ struct Member {
     Mode  wants = Mode::None;     ///< desired direction (power + mode)
     bool  satisfied = false;      ///< parked at setpoint (#132)
     bool  defrost = false;        ///< reports DEFROST
+    Need  need = Need::Yes;       ///< while waiting: does its room need a turn
     bool  has_state = false;      ///< published a slice State
     State state;
 };
@@ -113,6 +138,8 @@ public:
     void set_self(const std::string& uid) { self_ = uid; }
     void configure(const Config& c, uint32_t now_s);
     const Config& config() const { return cfg_; }
+    /// Lead time for waiting heads' air checks before a decision.
+    void set_check_lead(uint32_t s) { check_lead_ = s; }
 
     /// Restore the highest term seen (persisted) so a rebooted head never
     /// reuses an old term.
@@ -149,6 +176,7 @@ private:
 
     std::string self_;
     Config   cfg_{};
+    uint32_t check_lead_ = kCheckLeadS;
     State    state_{};
     bool     coord_ = false;
     std::string coord_uid_;

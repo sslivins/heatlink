@@ -243,12 +243,25 @@ on firmware that supports it), the group instead takes turns heating and cooling
   publishes the current turn — HEAT or COOL — in its signed group snapshot.
 - Heads that want the served mode run normally (with off-at-setpoint). Heads
   that want the other mode keep that mode but are held **parked** (shown as
-  "Paused while other rooms heat/cool") until their turn. HeatLink never
-  changes a head's mode to slice.
+  "Paused while other rooms heat/cool") until their turn. HeatLink doesn't
+  change a head's mode to slice (except briefly to FAN for the air check below).
 - A turn lasts at least the **minimum turn** (5–60 min, default 10; protects
-  the outdoor unit from short cycling). After that it hands over once every
-  head in the current mode is satisfied, or at the **maximum turn** (default
-  30 min) regardless. A mode nobody wants any more ends its turn at once.
+  the outdoor unit from short cycling). After that it may hand over once every
+  head in the current mode is satisfied, and is reconsidered at the **maximum
+  turn** (default 30 min). Either way the turn is handed over only if a waiting
+  room **needs** it (its room is past its restart threshold, the
+  off-at-setpoint delta); otherwise the current turn carries on for another
+  maximum turn and the activity log says so ("kept heating — rooms waiting to
+  cool don't need it yet"). A mode nobody wants any more ends its turn at once.
+- How a waiting head knows whether its room needs a turn: with a room sensor
+  it just reads it. Without one, the head's own sensor sits in still air, so
+  shortly before the decision (the air-check duration + 1 min ahead) it runs an
+  **air check in FAN mode** at QUIET fan — the compressor never runs the wrong
+  way — then powers off and restores its mode. The verdict is good for 10 min;
+  while the current turn's rooms are all satisfied the waiting rooms are
+  re-checked every 10 min. The coordinator waits up to 5 min past the decision
+  for a check still running, then hands over. If air checks are disabled, or a
+  head runs older firmware, a waiting room counts as needing its turn.
   Between modes every head is parked for the **pause between modes** (3–10 min,
   default 3; a safety margin in case the outdoor unit has no restart delay of
   its own). The turn clock pauses during defrost and never switches mid-defrost.

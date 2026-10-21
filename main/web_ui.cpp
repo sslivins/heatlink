@@ -378,6 +378,12 @@ cJSON* park_status_json() {
     cJSON_AddBoolToObject(o, "forced", ps.forced);  // enabled by time-slicing
     cJSON_AddBoolToObject(o, "slicing", ps.slicing);  // group time-slicing is on
     cJSON_AddBoolToObject(o, "quiet_fan", ps.quiet_fan);  // air check at QUIET fan
+    if (ps.held) {
+        // Tandem need check: does this waiting room need its turn, and is a
+        // FAN-mode air check running to find out.
+        cJSON_AddStringToObject(o, "need", park::need_str(ps.need));
+        cJSON_AddBoolToObject(o, "checking", ps.checking);
+    }
     // A fresh room sensor (#142) reads the room: air checks aren't needed.
     cJSON_AddBoolToObject(o, "room_sensor", room_sensor_ctl::active());
     if (ps.next_probe_s >= 0)
@@ -1395,6 +1401,7 @@ esp_err_t handle_group_state(httpd_req_t* req) {
         slice_ctl::Publish sp = slice_ctl::publish();
         cJSON_AddNumberToObject(root, "slice_v", slice::kSliceVersion);
         cJSON_AddBoolToObject(root, "sat", sp.satisfied);
+        cJSON_AddStringToObject(root, "need", slice::need_str(sp.need));
         if (sp.has_state) {
             cJSON* js = cJSON_CreateObject();
             cJSON_AddNumberToObject(js, "t", (double)sp.state.term);
@@ -1403,6 +1410,8 @@ esp_err_t handle_group_state(httpd_req_t* req) {
             cJSON_AddStringToObject(js, "p", slice::phase_str(sp.state.phase));
             cJSON_AddNumberToObject(js, "e", sp.state.elapsed_s);
             cJSON_AddStringToObject(js, "c", sp.state.coordinator.c_str());
+            if (sp.state.decide_s) cJSON_AddNumberToObject(js, "d", sp.state.decide_s);
+            cJSON_AddBoolToObject(js, "k", sp.state.check);
             cJSON_AddItemToObject(root, "slice", js);
         }
     }
@@ -1608,6 +1617,8 @@ bool poll_peer(const std::string& uid, hvac_group::MemberObs& out, bool& incompa
                         so.capable = jsv && cJSON_IsNumber(jsv) &&
                                      jsv->valueint == slice::kSliceVersion;
                         so.satisfied = cJSON_IsTrue(cJSON_GetObjectItem(j, "sat"));
+                        const cJSON* jneed = cJSON_GetObjectItem(j, "need");
+                        if (cJSON_IsString(jneed)) so.need = slice::parse_need(jneed->valuestring);
                         so.power    = (jpwr  && cJSON_IsString(jpwr))  ? jpwr->valuestring  : "";
                         so.mode     = (jmode && cJSON_IsString(jmode)) ? jmode->valuestring : "";
                         so.sub_mode = (jsub  && cJSON_IsString(jsub))  ? jsub->valuestring  : "";
@@ -1631,6 +1642,11 @@ bool poll_peer(const std::string& uid, hvac_group::MemberObs& out, bool& incompa
                                 so.state.phase = slice::parse_phase(jp->valuestring);
                                 so.state.elapsed_s = (uint32_t)je->valuedouble;
                                 so.state.coordinator = jc->valuestring;
+                                const cJSON* jd = cJSON_GetObjectItem(js, "d");
+                                if (cJSON_IsNumber(jd) && jd->valuedouble >= 0 &&
+                                    jd->valuedouble <= 4294967295.0)
+                                    so.state.decide_s = (uint32_t)jd->valuedouble;
+                                so.state.check = cJSON_IsTrue(cJSON_GetObjectItem(js, "k"));
                             }
                         }
                         slice_ctl::observe_peer(uid, so);
@@ -2017,10 +2033,14 @@ cJSON* slice_status_json() {
         cJSON_AddStringToObject(o, "mode", slice::mode_str(ss.state.mode));
         cJSON_AddStringToObject(o, "phase", slice::phase_str(ss.state.phase));
         cJSON_AddNumberToObject(o, "elapsed_s", ss.elapsed_s);
+        // When the running turn is next reconsidered (elapsed seconds).
+        cJSON_AddNumberToObject(o, "decide_s",
+            ss.state.decide_s ? ss.state.decide_s : ss.cfg.max_slice_s);
     } else {
         cJSON_AddNullToObject(o, "mode");
         cJSON_AddNullToObject(o, "phase");
         cJSON_AddNullToObject(o, "elapsed_s");
+        cJSON_AddNullToObject(o, "decide_s");
     }
     cJSON_AddStringToObject(o, "coordinator", ss.coordinator.c_str());
     cJSON_AddBoolToObject(o, "is_coordinator", ss.is_coordinator);
@@ -2031,6 +2051,7 @@ cJSON* slice_status_json() {
         cJSON_AddBoolToObject(e, "fresh", m.fresh);
         cJSON_AddBoolToObject(e, "capable", m.capable);
         cJSON_AddStringToObject(e, "wants", slice::mode_str(m.wants));
+        cJSON_AddStringToObject(e, "need", slice::need_str(m.need));
         cJSON_AddStringToObject(e, "directive", ss.cfg.enabled ? slice::directive_str(m.directive)
                                                               : "free");
         cJSON_AddItemToArray(jm, e);

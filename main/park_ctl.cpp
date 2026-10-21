@@ -5,6 +5,7 @@
 #include "events.h"
 #include "group_config.h"
 
+#include <cctype>
 #include <mutex>
 
 #include "esp_log.h"
@@ -29,6 +30,11 @@ bool          s_quiet = false;     // air check running at QUIET; s_saved_fan is
 std::string   s_saved_fan;
 uint32_t      s_quiet_at = 0;
 constexpr const char* kQuietFan = "QUIET";
+// Held (Tandem) air check running in FAN mode; s_saved_mode is the user's mode.
+bool          s_fanmode = false;
+std::string   s_saved_mode;
+uint32_t      s_fanmode_at = 0;
+constexpr const char* kFanMode = "FAN";
 
 // The head's settings with the outdoor unit's shared fields applied.
 park::Config configured_locked() {
@@ -95,6 +101,60 @@ void persist_fan_locked() {
     nvs_close(h);
 }
 
+void persist_mode_locked() {
+    nvs_handle_t h;
+    if (nvs_open(kNs, NVS_READWRITE, &h) != ESP_OK) return;
+    if (s_fanmode) nvs_set_str(h, "pmode", s_saved_mode.c_str());
+    else nvs_erase_key(h, "pmode");
+    nvs_commit(h);
+    nvs_close(h);
+}
+
+// Run the unit in FAN mode exactly while a held (Tandem) air check runs, so the
+// compressor never runs the other slice's direction. Called before a power
+// command is sent so FAN is in the same CN105 packet as power ON (and the
+// user's mode is restored with power OFF). Also after a reboot mid-check
+// (s_fanmode restored from NVS).
+void sync_mode() {
+    if (!s_hooks.set_mode || !s_hooks.get_mode) return;
+    const std::string mode = s_hooks.get_mode();  // outside s_mtx (CN105 lock)
+    std::string send;
+    bool republish = false;
+    {
+        std::lock_guard<std::mutex> lk(s_mtx);
+        const bool want = s_m.checking();
+        if (want && !s_fanmode) {
+            if (mode.empty() || mode == kFanMode) return;  // not connected yet
+            s_saved_mode = mode;
+            s_fanmode = true;
+            s_fanmode_at = now_s();
+            persist_mode_locked();
+            send = kFanMode;
+            republish = true;
+        } else if (!want && s_fanmode) {
+            s_fanmode = false;
+            persist_mode_locked();
+            send = s_saved_mode;
+            republish = true;
+        } else if (s_fanmode && now_s() - s_fanmode_at >= park::kCmdSettleS &&
+                   !mode.empty() && mode != kFanMode) {
+            // Changed on the IR remote mid-check: that's the user's new mode.
+            // Keep checking in FAN; the slice controller judges the new mode.
+            ESP_LOGI(TAG, "mode changed to %s during air check", mode.c_str());
+            s_saved_mode = mode;
+            s_fanmode_at = now_s();
+            persist_mode_locked();
+            send = kFanMode;
+            republish = true;
+        }
+    }
+    if (!send.empty()) {
+        ESP_LOGI(TAG, "held air check mode -> %s", send.c_str());
+        s_hooks.set_mode(send);
+    }
+    if (republish && s_hooks.on_change) s_hooks.on_change();
+}
+
 // Keep the fan at QUIET exactly while probing. Runs after every step (and
 // after a reboot mid-probe, where s_quiet was restored from NVS).
 void sync_fan() {
@@ -158,6 +218,7 @@ void step(F fn) {
             ESP_LOGI(TAG, "%s -> %s (%s)", park::state_str(before),
                      park::state_str(s_m.state()), s_m.reason());
     }
+    sync_mode();
     if (o.action != park::Action::None && s_hooks.set_power)
         s_hooks.set_power(o.action == park::Action::PowerOn);
     if (o.event) events::log(events::Cat::Power, events::Actor::System, o.event);
@@ -184,6 +245,11 @@ void init(const Hooks& hooks) {
         if (nvs_get_str(h, "pfan", buf, &len) == ESP_OK && buf[0]) {
             s_saved_fan = buf;
             s_quiet = true;  // rebooted mid air check: restored on the first tick
+        }
+        len = sizeof(buf);
+        if (nvs_get_str(h, "pmode", buf, &len) == ESP_OK && buf[0]) {
+            s_saved_mode = buf;
+            s_fanmode = true;  // rebooted mid held air check: restored on the first tick
         }
         nvs_close(h);
     }
@@ -229,6 +295,7 @@ void tick() {
     {
         std::lock_guard<std::mutex> lk(s_mtx);
         s_unit_on = in.phys_on;
+        if (s_fanmode) in.mode = s_saved_mode;  // judge the room by the user's mode
     }
     step([&](park::Machine& m) { return m.tick(in, t); });
 }
@@ -247,7 +314,21 @@ cn105::Settings overlay(cn105::Settings s) {
     std::lock_guard<std::mutex> lk(s_mtx);
     if (s_m.parked()) s.power = "ON";
     if (s_quiet) s.fan = s_saved_fan;
+    if (s_fanmode) s.mode = s_saved_mode;
     return s;
+}
+
+bool request_mode(const std::string& mode) {
+    {
+        std::lock_guard<std::mutex> lk(s_mtx);
+        if (!s_fanmode) return false;
+        std::string m = mode;
+        for (auto& c : m) c = static_cast<char>(toupper(static_cast<unsigned char>(c)));
+        s_saved_mode = m;
+        persist_mode_locked();
+    }
+    if (s_hooks.on_change) s_hooks.on_change();
+    return true;
 }
 
 bool request_fan(const std::string& fan) {
@@ -290,7 +371,7 @@ park::Config set_config(const park::Config& c) {
     return out;
 }
 
-void set_slice(bool active, bool hold) {
+void set_slice(bool active, bool hold, bool check) {
     uint32_t t = now_s();
     bool republish = false;
     step([&](park::Machine& m) {
@@ -303,7 +384,15 @@ void set_slice(bool active, bool hold) {
         // After (re)enable the hold takes effect on the machine's first tick
         // (next CN105 loop pass, <= ~1 s), once it has fresh inputs.
         park::Action h = m.set_hold(active && hold, t);
-        return h != park::Action::None ? h : a;
+        if (h != park::Action::None) return h;
+        if (a != park::Action::None) return a;
+        if (active && hold && check) {
+            park::State before = m.state();
+            park::Action c = m.start_check(t);
+            if (m.state() != before) republish = true;
+            return c;
+        }
+        return park::Action::None;
     });
     if (republish && s_hooks.on_change) s_hooks.on_change();
 }
@@ -322,6 +411,8 @@ Snapshot snapshot() {
     s.forced = s_slice_active && !s_user.enabled;
     s.slicing = s_slice_active;
     s.quiet_fan = s_quiet;
+    s.need = s_m.need(now_s());
+    s.checking = s_m.checking();
     return s;
 }
 

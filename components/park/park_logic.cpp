@@ -86,6 +86,31 @@ const char* state_str(State s) {
 
 bool eligible_mode(const std::string& mode) { return is_heat(mode) || is_cool(mode); }
 
+const char* need_str(Need n) {
+    switch (n) {
+        case Need::No:       return "no";
+        case Need::Checking: return "checking";
+        default:             return "yes";
+    }
+}
+
+Need Machine::need(uint32_t now_s) const {
+    if (!cfg_.enabled || !hold_) return Need::Yes;
+    if (state_ == State::Probing) return Need::Checking;
+    if (external_) return sensor_need_ ? Need::Yes : Need::No;
+    if (have_verdict_ && now_s - verdict_at_ < kNeedValidS)
+        return verdict_need_ ? Need::Yes : Need::No;
+    return Need::Yes;
+}
+
+Action Machine::start_check(uint32_t now_s) {
+    if (!cfg_.enabled || !initialized_ || !hold_ || state_ != State::Parked) return Action::None;
+    if (external_ || !cfg_.probe_enabled || mismatch_) return Action::None;
+    if (have_verdict_ && now_s - verdict_at_ < kNeedValidS) return Action::None;
+    Action a = enter_probing(now_s, kWaitingForSlice, true);
+    return a;
+}
+
 bool Machine::satisfied(const Inputs& in) const {
     if (in.room <= 0.0f) return false;  // no reading yet
     if (is_heat(in.mode)) return in.room >= in.setpoint - kEps;
@@ -152,7 +177,10 @@ Action Machine::set_hold(bool hold, uint32_t now_s) {
         }
         return Action::None;
     }
-    if (state_ == State::Parked) return enter_running(now_s, nullptr);
+    have_verdict_ = false;  // the next hold starts with a fresh look at the room
+    // Released (also mid air check: the unit is already on, it just changes
+    // from FAN to its mode).
+    if (state_ == State::Parked || state_ == State::Probing) return enter_running(now_s, nullptr);
     return Action::None;
 }
 
@@ -206,6 +234,7 @@ Action Machine::set_desired_power(bool on, uint32_t now_s) {
 }
 
 Action Machine::notify_intent_change(uint32_t now_s) {
+    if (hold_) have_verdict_ = false;  // new target: the last air check no longer applies
     if (!cfg_.enabled || state_ != State::Parked || hold_) return Action::None;
     if (external_) {
         reeval_ = true;  // the room sensor already knows the room: no air needed
@@ -233,6 +262,8 @@ Action Machine::tick(const Inputs& in, uint32_t now_s) {
     have_tick_ = true;
     last_tick_ = now_s;
     external_ = in.room_external;
+    // No reading yet counts as needing the slice (the safe default).
+    sensor_need_ = in.room <= 0.0f || needs_conditioning(in);
     const bool reeval = reeval_;
     reeval_ = false;
 
@@ -356,11 +387,24 @@ Action Machine::tick(const Inputs& in, uint32_t now_s) {
         }
 
         case State::Probing: {
-            if (!eligible_mode(in.mode)) return enter_running(now_s, nullptr);
+            if (!eligible_mode(in.mode)) {
+                if (hold_) return enter_parked(now_s, kWaitingForSlice, nullptr);
+                return enter_running(now_s, nullptr);
+            }
             if (in.phys_on && !fan_held(in.sub_mode)) probe_airflow_s_ += dt;
             const bool done = probe_airflow_s_ >= cfg_.probe_duration_s ||
                               now_s - probe_start_ >= cfg_.probe_duration_s + kProbeExtraMaxS;
             if (!done) return Action::None;
+            if (hold_) {
+                // Held air check: record the verdict and stay parked for the slice.
+                have_verdict_ = true;
+                verdict_need_ = in.room <= 0.0f || needs_conditioning(in);
+                verdict_at_ = now_s;
+                event_ = verdict_need_
+                    ? "Air check \xE2\x80\x94 room needs its Tandem turn"
+                    : "Air check \xE2\x80\x94 room doesn't need its Tandem turn yet";
+                return enter_parked(now_s, kWaitingForSlice, nullptr);
+            }
             if (needs_conditioning(in))
                 return enter_running(now_s, "Resumed \xE2\x80\x94 probe found room needs conditioning");
             return enter_parked(now_s, "setpoint reached", nullptr);
