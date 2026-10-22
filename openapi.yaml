@@ -1410,6 +1410,8 @@ components:
         satisfied: { type: boolean, description: Parked because the room reached its setpoint }
         held: { type: boolean, description: 'Held off waiting for its time slice (reason "waiting_for_slice")' }
         tandem: { type: string, enum: [heat, cool, switch], description: 'Only when held: what the other rooms are doing (switch = changing modes)' }
+        tandem_eta_s: { type: integer, nullable: true, description: 'Only when held: estimated seconds until this room''s turn starts (rest of the pause between modes, or the latest the running turn can end plus that pause); null when unknown' }
+        tandem_next: { type: string, enum: [heat, cool], description: 'Only when tandem_eta_s is set: the mode this room''s turn will run' }
         need: { type: string, enum: ['yes', 'no', checking], description: 'Only when held: does this room need its Tandem turn (checking until its air check reports; yes when checks are off)' }
         checking: { type: boolean, description: 'Only when held: an air check is running in FAN mode (settings report the user''s mode)' }
         forced: { type: boolean, description: Off-at-setpoint is forced on by group time-slicing }

@@ -1356,6 +1356,7 @@ const I18N = { fr: {
   "heating":"chauffage","cooling":"refroidissement","starting…":"démarrage…",
   "switching to heating…":"passage au chauffage…","switching to cooling…":"passage au refroidissement…",
   "heating within {n} min":"chauffage d’ici {n} min","cooling within {n} min":"refroidissement d’ici {n} min",
+  "heating starts in ~{n} min":"chauffage dans ~{n} min","cooling starts in ~{n} min":"refroidissement dans ~{n} min",
   "Up next":"À suivre",
   "Starting…":"Démarrage…",
   // Room sensor (#142)
@@ -2205,8 +2206,15 @@ const pkMin=v=>(v%60?(v/60).toFixed(1):(v/60))+' min';
 // Tandem hold reason for a paused head: what the other rooms are doing.
 function tandemPaused(st){
   if(st.checking) return i18n('Checking if this room needs a turn');
-  return i18n(st.tandem==='heat'?'Paused while other rooms heat':
+  const why=i18n(st.tandem==='heat'?'Paused while other rooms heat':
               st.tandem==='cool'?'Paused while other rooms cool':'Paused while modes switch');
+  if(st.tandem_eta_s==null||!st.tandem_next) return why;
+  // When this room's turn starts: a fixed pause between modes ("starts in"),
+  // or the latest the running turn can end ("within").
+  const n=Math.max(1,Math.ceil(st.tandem_eta_s/60)),heat=st.tandem_next==='heat';
+  const key=st.tandem==='switch'?(heat?'heating starts in ~{n} min':'cooling starts in ~{n} min')
+                               :(heat?'heating within {n} min':'cooling within {n} min');
+  return why+' \u00b7 '+i18n(key,{n:n});
 }
 function pkStatusText(st){
   if(!st||!st.enabled) return i18n('Disabled');

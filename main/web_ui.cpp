@@ -374,6 +374,30 @@ cJSON* park_status_json() {
         cJSON_AddStringToObject(o, "tandem",
             ss.have_state && ss.state.phase == slice::Phase::Run
                 ? slice::mode_str(ss.state.mode) : "switch");
+        // Seconds until this room's turn starts: the rest of the pause between
+        // modes, or (while it needs a turn) the latest the running turn can
+        // end plus that pause. Null when unknown.
+        const slice::Mode wants = ss.members.empty() ? slice::Mode::None : ss.members[0].wants;
+        bool has_eta = false;
+        int64_t eta = 0;
+        if (ss.have_state && wants != slice::Mode::None) {
+            const int64_t el = ss.elapsed_s, settle = ss.cfg.settle_s;
+            if (ss.state.phase == slice::Phase::Changeover && ss.state.mode == wants) {
+                has_eta = true;
+                eta = settle - el;
+            } else if (ss.state.phase == slice::Phase::Run && ss.state.mode != wants &&
+                       ps.need == park::Need::Yes) {
+                const int64_t decide = ss.state.decide_s ? ss.state.decide_s : ss.cfg.max_slice_s;
+                has_eta = true;
+                eta = decide - el + settle;
+            }
+        }
+        if (has_eta) {
+            cJSON_AddNumberToObject(o, "tandem_eta_s", (double)(eta < 0 ? 0 : eta));
+            cJSON_AddStringToObject(o, "tandem_next", slice::mode_str(wants));
+        } else {
+            cJSON_AddNullToObject(o, "tandem_eta_s");
+        }
     }
     cJSON_AddBoolToObject(o, "forced", ps.forced);  // enabled by time-slicing
     cJSON_AddBoolToObject(o, "slicing", ps.slicing);  // group time-slicing is on

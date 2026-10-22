@@ -243,7 +243,10 @@ on firmware that supports it), the group instead takes turns heating and cooling
   publishes the current turn — HEAT or COOL — in its signed group snapshot.
 - Heads that want the served mode run normally (with off-at-setpoint). Heads
   that want the other mode keep that mode but are held **parked** (shown as
-  "Paused while other rooms heat/cool") until their turn. HeatLink doesn't
+  "Paused while other rooms heat/cool") until their turn. Once a waiting room
+  needs its turn, its Climate tab shows when that turn will start: "cooling
+  within N min" (the latest the running turn can end) or, during the pause
+  between modes, "cooling starts in ~N min". HeatLink doesn't
   change a head's mode to slice (except briefly to FAN for the air check below).
 - A turn lasts at least the **minimum turn** (5–60 min, default 10; protects
   the outdoor unit from short cycling). After that it may hand over once every
