@@ -188,6 +188,12 @@ buttons** (reset brownout count, reset WiFi drops, reset admin password), so the
 web UI shows are available as native HA entities you can chart, alert, or
 automate on.
 
+Discovery can be turned off under Settings → MQTT (or `POST /api/mqtt
+{"discovery":false}`). The head then sends an empty retained config for every
+discovery topic, so Home Assistant removes the MQTT entities; state topics keep
+publishing. Use this once the native HeatLink integration is set up, so each
+unit doesn't show up twice.
+
 ## Off at setpoint (parking)
 
 Mitsubishi wall heads keep the indoor fan running after they reach their
@@ -464,7 +470,7 @@ true while the unit reports an error code.
 | `POST` | `/api/remote-temp` | feed an outside room temperature (`{temp,ttl_s}`, `temp:null` stops); lapses after `ttl_s` (default 600 s) |
 | `GET`  | `/api/capabilities` | detected unit capabilities (e.g. wide-vane) + override |
 | `POST` | `/api/capabilities` | trigger a capability probe / set an override |
-| `GET`  | `/api/park` | off-at-setpoint config + live status |
+| `GET`  | `/api/park` | off-at-setpoint config + live status (`shared_fields` lists what a write changes for the whole group) |
 | `POST` | `/api/park` | (admin) update off-at-setpoint config (partial; values are clamped) |
 | `GET`  | `/api/sensor` | wireless room sensor: pairing state, latest reading, nearby sensors while pairing |
 | `POST` | `/api/sensor` | (admin) `{"action":"pair"|"cancel"|"select"|"remove"}` (`select` takes `addr`) |

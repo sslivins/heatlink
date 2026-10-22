@@ -49,6 +49,14 @@ void nvs_get_string(nvs_handle_t h, const char* key, std::string& out) {
 
 std::string t(const char* suffix) { return g_base + suffix; }
 
+// Every HA discovery config goes through here. With discovery off the topic
+// gets an empty retained message instead, which removes that entity from HA.
+int publish_config(const std::string& topic, const char* payload) {
+    if (!payload) return -1;
+    return esp_mqtt_client_publish(g_client, topic.c_str(),
+                                   g_cfg.discovery ? payload : "", 0, 1, true);
+}
+
 // Build the HA `device` block shared by every entity this firmware exposes, so
 // the climate, firmware-update (and future) entities all group under one device
 // in Home Assistant. Keyed on the hardware-unique id so 4 physical units never
@@ -180,6 +188,8 @@ StoredSettings load_settings(const StoredSettings& fallback) {
         nvs_get_string(h, "pass", s.password);
         nvs_get_string(h, "base", s.base_topic);
         nvs_get_string(h, "friendly", s.friendly_name);
+        uint8_t disc = 1;
+        if (nvs_get_u8(h, "disc", &disc) == ESP_OK) s.discovery = disc != 0;
         nvs_close(h);
     }
     g_settings = s;  // cache so get_settings() reflects the active config
@@ -196,6 +206,7 @@ esp_err_t save_settings(const StoredSettings& s) {
     nvs_set_str(h, "pass", s.password.c_str());
     nvs_set_str(h, "base", s.base_topic.c_str());
     nvs_set_str(h, "friendly", s.friendly_name.c_str());
+    nvs_set_u8(h, "disc", s.discovery ? 1 : 0);
     err = nvs_commit(h);
     nvs_close(h);
     return err;
@@ -239,7 +250,7 @@ esp_err_t publish_update_discovery() {
 
     char* payload = cJSON_PrintUnformatted(root);
     std::string topic = "homeassistant/update/" + g_did + "/config";
-    int id = payload ? esp_mqtt_client_publish(g_client, topic.c_str(), payload, 0, 1, true) : -1;
+    int id = publish_config(topic, payload);
     ESP_LOGI(TAG, "publish_update_discovery -> %s", topic.c_str());
     if (payload) cJSON_free(payload);
     cJSON_Delete(root);
@@ -307,7 +318,7 @@ static esp_err_t publish_diag_sensor(const char* name, const char* id_suffix,
     char* payload = cJSON_PrintUnformatted(root);
     std::string topic = "homeassistant/sensor/" + g_did + "_" +
                         id_suffix + "/config";
-    int id = payload ? esp_mqtt_client_publish(g_client, topic.c_str(), payload, 0, 1, true) : -1;
+    int id = publish_config(topic, payload);
     if (payload) cJSON_free(payload);
     cJSON_Delete(root);
     return id < 0 ? ESP_FAIL : ESP_OK;
@@ -332,7 +343,7 @@ esp_err_t publish_diag_button(const char* name, const char* id_suffix,
     cJSON_AddItemToObject(b, "device", make_device_block());
     char* payload = cJSON_PrintUnformatted(b);
     std::string topic = "homeassistant/button/" + g_did + "_" + id_suffix + "/config";
-    int id = payload ? esp_mqtt_client_publish(g_client, topic.c_str(), payload, 0, 1, true) : -1;
+    int id = publish_config(topic, payload);
     if (payload) cJSON_free(payload);
     cJSON_Delete(b);
     return id < 0 ? ESP_FAIL : ESP_OK;
@@ -423,7 +434,7 @@ static esp_err_t publish_group_entity(const char* component, const char* name,
     char* payload = cJSON_PrintUnformatted(root);
     std::string topic = std::string("homeassistant/") + component + "/" +
                         g_did + "_" + id_suffix + "/config";
-    int id = payload ? esp_mqtt_client_publish(g_client, topic.c_str(), payload, 0, 1, true) : -1;
+    int id = publish_config(topic, payload);
     if (payload) cJSON_free(payload);
     cJSON_Delete(root);
     return id < 0 ? ESP_FAIL : ESP_OK;
@@ -653,7 +664,7 @@ esp_err_t publish_discovery(const cn105::Settings& s) {
 
     char* payload = cJSON_PrintUnformatted(root);
     std::string topic = "homeassistant/climate/" + g_did + "/config";
-    int id = payload ? esp_mqtt_client_publish(g_client, topic.c_str(), payload, 0, 1, true) : -1;
+    int id = publish_config(topic, payload);
     ESP_LOGI(TAG, "publish_discovery -> %s", topic.c_str());
     if (payload) cJSON_free(payload);
     cJSON_Delete(root);
