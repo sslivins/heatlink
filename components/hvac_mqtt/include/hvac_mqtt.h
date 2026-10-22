@@ -42,6 +42,7 @@ struct Config {
                                 ///< for HA unique_id/device.identifiers so 4 units
                                 ///< never merge or collide. e.g. "E609A1".
     std::string sw_version;     ///< firmware version, shown on the HA device.
+    bool        discovery = true;  ///< false: clear every HA discovery config instead of publishing it
 };
 
 /// A command parsed from a .../*/set topic, to be applied to the heat pump.
@@ -63,6 +64,7 @@ struct StoredSettings {
     std::string password;
     std::string base_topic;
     std::string friendly_name;  ///< blank → firmware derives "heatlink-<uid>"
+    bool        discovery = true;  ///< publish HA MQTT discovery (off once the native integration is in use)
 };
 
 /// Read the persisted broker settings from NVS, falling back per-field to

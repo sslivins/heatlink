@@ -1121,6 +1121,11 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
       <input type="text" id="mqBase" placeholder="heatlink2mqtt"></div>
     <div class="mqf"><label>Friendly name</label>
       <input type="text" id="mqFriendly" placeholder="(blank → heatlink-&lt;id&gt;)"></div>
+    <div class="row">
+      <label>Home Assistant discovery</label>
+      <div class="toggle"><input type="checkbox" id="mqDisc" onchange="mqEditing=true;mqChanged()"><span class="slider" onclick="document.getElementById('mqDisc').click()"></span></div>
+    </div>
+    <div class="hint">Turn off once you use the HeatLink integration, so Home Assistant doesn't show each unit twice. Turning it off removes the MQTT entities.</div>
     <div id="mqMsg" class="status hidden" style="margin:10px 0"></div>
     <button class="btn btn-warn" id="mqSaveBtn" onclick="saveMqtt()" disabled>Save &amp; reboot</button>
   </div>
@@ -2842,7 +2847,7 @@ function mqMsg(m,cls){const el=$('mqMsg');if(cls==='ok'){el.classList.add('hidde
 // Save is enabled only when a field differs from what the device has (or a new
 // password was typed).
 let mqSaved='';
-function mqForm(){ return ['mqHost','mqPort','mqUser','mqBase','mqFriendly'].map(id=>$(id).value.trim()).join('\n'); }
+function mqForm(){ return ['mqHost','mqPort','mqUser','mqBase','mqFriendly'].map(id=>$(id).value.trim()).join('\n')+'\n'+$('mqDisc').checked; }
 function mqChanged(){ $('mqSaveBtn').disabled=mqForm()===mqSaved&&!$('mqPass').value; }
 
 async function loadMqtt(){
@@ -2857,6 +2862,7 @@ async function loadMqtt(){
       $('mqUser').value=m.username||'';
       $('mqBase').value=m.base_topic||'';
       $('mqFriendly').value=m.friendly_name||'';
+      $('mqDisc').checked=m.discovery!==false;
       $('mqPass').value='';
       $('mqPass').placeholder=m.password_set?'••••••••':'None set';
       mqSaved=mqForm(); mqChanged();
@@ -2880,7 +2886,8 @@ async function saveMqtt(){
     port:parseInt($('mqPort').value,10)||1883,
     username:$('mqUser').value.trim(),
     base_topic:$('mqBase').value.trim(),
-    friendly_name:$('mqFriendly').value.trim()
+    friendly_name:$('mqFriendly').value.trim(),
+    discovery:$('mqDisc').checked
   };
   const pw=$('mqPass').value;
   if(pw) body.password=pw;

@@ -1351,6 +1351,11 @@ paths:
                     type: array
                     items: { type: string }
                     example: [tokens, events, history, park, room_sensors, group, tandem]
+                  mqtt:
+                    type: object
+                    properties:
+                      configured: { type: boolean, description: A broker is set }
+                      discovery: { type: boolean, description: 'HA MQTT discovery is on, so HA may also have MQTT entities for this head' }
                   group:
                     type: object
                     description: Absent when the head is standalone
@@ -1805,6 +1810,12 @@ components:
             shared:
               type: boolean
               description: In a zone group, so enable / min-off / probe settings are shared by all its heads
+            shared_fields:
+              type: array
+              items: { type: string }
+              description: >-
+                The fields a write changes on every head in the group while
+                `shared` is true. Everything else (`delta_c`) stays per head.
             status: { $ref: '#/components/schemas/ParkStatus' }
     SettingsUpdate:
       type: object
@@ -1825,6 +1836,7 @@ components:
         base_topic: { type: string }
         friendly_name: { type: string }
         password_set: { type: boolean }
+        discovery: { type: boolean, description: Home Assistant MQTT discovery is published }
         connected: { type: boolean }
     MqttSettingsUpdate:
       type: object
@@ -1836,6 +1848,11 @@ components:
         password: { type: string, format: password }
         base_topic: { type: string }
         friendly_name: { type: string }
+        discovery:
+          type: boolean
+          description: >-
+            false sends an empty retained config for every HA discovery topic,
+            which removes the MQTT entities. State topics keep publishing.
     WifiSettings:
       type: object
       properties:

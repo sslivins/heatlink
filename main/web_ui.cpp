@@ -680,6 +680,11 @@ cJSON* park_config_json(const park::Config& c) {
     cJSON_AddNumberToObject(o, "probe_duration_s", c.probe_duration_s);
     // Grouped: enable / min-off / probe are the outdoor unit's (all its heads).
     cJSON_AddBoolToObject(o, "shared", hvac_group::in_group());
+    // Fields replicated to the whole group while `shared` (park::encode_shared);
+    // the rest (delta_c, the restart threshold) stay per head.
+    static const char* const kShared[] = {"enabled", "min_off_s", "probe_enabled",
+                                          "probe_interval_s", "probe_duration_s"};
+    cJSON_AddItemToObject(o, "shared_fields", cJSON_CreateStringArray(kShared, 5));
     cJSON_AddItemToObject(o, "status", park_status_json());
     return o;
 }
@@ -1244,6 +1249,7 @@ esp_err_t handle_mqtt_get(httpd_req_t* req) {
     cJSON_AddStringToObject(root, "base_topic", s.base_topic.c_str());
     cJSON_AddStringToObject(root, "friendly_name", s.friendly_name.c_str());
     cJSON_AddBoolToObject(root, "password_set", !s.password.empty());
+    cJSON_AddBoolToObject(root, "discovery", s.discovery);
     cJSON_AddBoolToObject(root, "connected",
                           s_hooks.mqtt_connected && s_hooks.mqtt_connected());
     char* str = cJSON_PrintUnformatted(root);
@@ -1286,6 +1292,8 @@ esp_err_t handle_mqtt_post(httpd_req_t* req) {
         s.base_topic = v->valuestring;
     if ((v = cJSON_GetObjectItem(json, "friendly_name")) && cJSON_IsString(v))
         s.friendly_name = v->valuestring;
+    if ((v = cJSON_GetObjectItem(json, "discovery")) && cJSON_IsBool(v))
+        s.discovery = cJSON_IsTrue(v);
     cJSON_Delete(json);
 
     if (s.host.empty()) {
@@ -3754,8 +3762,14 @@ esp_err_t handle_info(httpd_req_t* req) {
     cJSON_AddBoolToObject(ja, "tokens", true);
     cJSON* jf = cJSON_AddArrayToObject(o, "features");
     for (const char* f : {"tokens", "token_tickets", "events", "history", "park",
-                          "room_sensors", "group", "tandem", "remote_temp", "fault"})
+                          "room_sensors", "group", "tandem", "remote_temp", "fault",
+                          "shared_fields", "mqtt_discovery_switch"})
         cJSON_AddItemToArray(jf, cJSON_CreateString(f));
+    // Lets the HA integration warn about duplicate MQTT-discovered entities.
+    hvac_mqtt::StoredSettings ms = hvac_mqtt::get_settings();
+    cJSON* jm = cJSON_AddObjectToObject(o, "mqtt");
+    cJSON_AddBoolToObject(jm, "configured", !ms.host.empty());
+    cJSON_AddBoolToObject(jm, "discovery", !ms.host.empty() && ms.discovery);
     std::string gh = hvac_group::group_fingerprint();
     if (!gh.empty()) {
         cJSON* jg = cJSON_AddObjectToObject(o, "group");

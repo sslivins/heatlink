@@ -551,6 +551,7 @@ extern "C" void app_main() {
             .friendly_name = friendly,
             .device_uid    = uid,
             .sw_version    = esp_app_get_description()->version,
+            .discovery     = ms.discovery,
         };
         if (hvac_mqtt::init(mcfg, on_mqtt_command_external) != ESP_OK) {
             ESP_LOGE(TAG, "MQTT init failed");
