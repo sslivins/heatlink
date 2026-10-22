@@ -3740,8 +3740,8 @@ esp_err_t handle_info(httpd_req_t* req) {
     cJSON_AddBoolToObject(ja, "api_key", auth_mgr_api_auth_enabled());
     cJSON_AddBoolToObject(ja, "tokens", true);
     cJSON* jf = cJSON_AddArrayToObject(o, "features");
-    for (const char* f : {"tokens", "events", "history", "park", "room_sensors", "group",
-                          "tandem"})
+    for (const char* f : {"tokens", "token_tickets", "events", "history", "park",
+                          "room_sensors", "group", "tandem"})
         cJSON_AddItemToArray(jf, cJSON_CreateString(f));
     std::string gh = hvac_group::group_fingerprint();
     if (!gh.empty()) {
@@ -3841,6 +3841,133 @@ esp_err_t handle_tokens_delete(httpd_req_t* req) {
                 peer_ipv4(req));
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_sendstr(req, "{\"status\":\"ok\"}");
+}
+
+// ── Token tickets: one pairing for the whole outdoor unit ───────────────
+// An integration holding a token on this head asks for a ticket for another
+// group member, then redeems it there for that head's own token with the same
+// name and scope. Same signing as the admin handoff, under its own subkey:
+//   issuer.target.exp.nonce.scope.sig
+//   sig = HMAC(subkey "hl-tok1", "hl-tok1|issuer|target|exp|nonce|scope|label")
+std::string tok_ticket_sig(const std::string& issuer, const std::string& target, int64_t exp,
+                           const std::string& nonce, const std::string& scope,
+                           const std::string& label) {
+    uint8_t k[32];
+    if (!hvac_group::group_subkey("hl-tok1", k)) return "";
+    return hmac_key_hex(k, "hl-tok1|" + issuer + "|" + target + "|" +
+                               std::to_string((long long)exp) + "|" + nonce + "|" + scope +
+                               "|" + label);
+}
+
+// POST /api/tokens/ticket {"uid"} ─ token callers only
+esp_err_t handle_tokens_ticket(httpd_req_t* req) {
+    set_cors(req);
+    tokens::Entry te;
+    switch (bearer_token(req, &te)) {
+        case TokenAuth::Ok: break;
+        case TokenAuth::Bad: send_unauthorized(req); return ESP_FAIL;
+        case TokenAuth::None:
+            return send_json_error(req, "403 Forbidden",
+                                   "tickets are issued to integration tokens only");
+    }
+    char* body = recv_body(req);
+    cJSON* json = body ? cJSON_Parse(body) : nullptr;
+    free(body);
+    const cJSON* ju = json ? cJSON_GetObjectItem(json, "uid") : nullptr;
+    const std::string target = cJSON_IsString(ju) ? ju->valuestring : "";
+    cJSON_Delete(json);
+    if (!hvac_group::is_peer(target))
+        return send_json_error(req, "404 Not Found", "not a member of this outdoor unit");
+    const time_t now = time(nullptr);
+    if (now < kSsoMinEpoch)
+        return send_json_error(req, "503 Service Unavailable", "clock not set");
+    const std::string issuer = hvac_group::self_uid();
+    const int64_t exp = (int64_t)now + kSsoLifeS;
+    const std::string nonce = hvac_group::generate_nonce();
+    const char* scope = tokens::scope_str(te.scope);
+    const std::string sig = tok_ticket_sig(issuer, target, exp, nonce, scope, te.label);
+    if (sig.empty()) return send_json_error(req, "409 Conflict", "not in a group");
+    cJSON* o = cJSON_CreateObject();
+    cJSON_AddStringToObject(o, "ticket", (issuer + "." + target + "." +
+                                          std::to_string((long long)exp) + "." + nonce + "." +
+                                          scope + "." + sig)
+                                             .c_str());
+    cJSON_AddStringToObject(o, "label", te.label.c_str());
+    cJSON_AddStringToObject(o, "scope", scope);
+    cJSON_AddNumberToObject(o, "expires", (double)exp);
+    return send_cjson(req, o);
+}
+
+// POST /api/tokens/redeem {"ticket","label"} ─ NO auth: the ticket is the proof.
+// Replaces an earlier token of the same name (no stronger scope), so pairing
+// again doesn't pile up copies.
+esp_err_t handle_tokens_redeem(httpd_req_t* req) {
+    set_cors(req);
+    if (auth_mgr_login_lockout_secs() > 0)
+        return send_json_error(req, "429 Too Many Requests", "too many attempts");
+    char* body = recv_body(req);
+    cJSON* json = body ? cJSON_Parse(body) : nullptr;
+    free(body);
+    const cJSON* jt = json ? cJSON_GetObjectItem(json, "ticket") : nullptr;
+    const cJSON* jl = json ? cJSON_GetObjectItem(json, "label") : nullptr;
+    const std::string ticket = cJSON_IsString(jt) ? jt->valuestring : "";
+    const std::string label = cJSON_IsString(jl) ? jl->valuestring : "";
+    cJSON_Delete(json);
+
+    std::vector<std::string> f;
+    for (size_t pos = 0;;) {
+        const size_t dot = ticket.find('.', pos);
+        f.push_back(ticket.substr(pos, dot == std::string::npos ? dot : dot - pos));
+        if (dot == std::string::npos || f.size() > 6) break;
+        pos = dot + 1;
+    }
+    if (f.size() != 6) f.assign(6, "");
+    const std::string& issuer = f[0];
+    const std::string& target = f[1];
+    const std::string& nonce = f[3];
+    tokens::Scope scope = tokens::Scope::Read;
+    char* end = nullptr;
+    const long long exp = f[2].empty() ? 0 : strtoll(f[2].c_str(), &end, 10);
+    const int64_t now = (int64_t)time(nullptr);
+    const char* why = nullptr;
+    if (!end || *end != '\0' || nonce.empty() || f[5].empty() ||
+        !tokens::parse_scope(f[4], &scope) || tokens::sanitize_label(label) != label ||
+        label.empty())
+        why = "malformed";
+    else if (target != hvac_group::self_uid() || !hvac_group::is_peer(issuer))
+        why = "not for this head";
+    else if (now < kSsoMinEpoch)
+        why = "clock not set";
+    else if (exp + kSsoSkewS < now || exp > now + kSsoLifeS + kSsoSkewS)
+        why = "expired";
+    else {
+        const std::string want = tok_ticket_sig(issuer, target, exp, nonce, f[4], label);
+        if (want.empty() || !ct_equal(want, f[5])) {
+            auth_mgr_note_failed_login();
+            why = "bad signature";
+        } else if (!sso_nonce_take(nonce, exp + kSsoSkewS, now)) {
+            why = "already used";
+        }
+    }
+    if (why) {
+        ESP_LOGW(TAG, "token ticket refused from %s: %s", peer_ipv4(req).c_str(), why);
+        return send_json_error(req, "401 Unauthorized", why);
+    }
+    std::string text;
+    tokens::Entry e;
+    if (!token_store_create(label, scope, &text, &e, true))
+        return send_json_error(req, "409 Conflict", "token limit reached; revoke one first");
+    std::string from = hvac_group::member_display_name(issuer);
+    if (from.empty()) from = issuer;
+    events::log(events::Cat::System, events::Actor::WebUI,
+                ("Integration token \"" + e.label + "\" created (" + tokens::scope_str(scope) +
+                 ") via " + from)
+                    .c_str(),
+                e.label.c_str(), peer_ipv4(req));
+    cJSON* o = token_json(e);
+    cJSON_AddStringToObject(o, "token", text.c_str());
+    httpd_resp_set_status(req, "201 Created");
+    return send_cjson(req, o);
 }
 
 esp_err_t handle_options(httpd_req_t* req) {
@@ -4195,6 +4322,8 @@ esp_err_t init(const Hooks& hooks) {
         {"/api/tokens",              HTTP_GET,      handle_tokens_get,     nullptr},
         {"/api/tokens",              HTTP_POST,     handle_tokens_post,    nullptr},
         {"/api/tokens",              HTTP_DELETE,   handle_tokens_delete,  nullptr},
+        {"/api/tokens/ticket",       HTTP_POST,     handle_tokens_ticket,  nullptr},
+        {"/api/tokens/redeem",       HTTP_POST,     handle_tokens_redeem,  nullptr},
         {"/api/*",                   HTTP_OPTIONS, handle_options,        nullptr},
     };
     static_assert(sizeof(uris) / sizeof(uris[0]) <= 70, "raise max_uri_handlers");

@@ -15,9 +15,10 @@ void token_store_init();
 
 /// Create a token. On success @p token_out holds the full token text (shown
 /// once) and @p entry_out its stored record. False if the label is empty after
-/// sanitizing, the table is full, or persisting failed.
+/// sanitizing, the table is full, or persisting failed. With @p replace, tokens
+/// with the same label and no stronger scope are revoked first (re-pairing).
 bool token_store_create(const std::string& label, tokens::Scope scope, std::string* token_out,
-                        tokens::Entry* entry_out);
+                        tokens::Entry* entry_out, bool replace = false);
 
 /// Revoke by id; false if unknown.
 bool token_store_revoke(const std::string& id);
