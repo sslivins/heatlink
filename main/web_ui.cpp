@@ -382,8 +382,10 @@ cJSON* park_status_json() {
         int64_t eta = 0;
         if (ss.have_state && wants != slice::Mode::None) {
             const int64_t el = ss.elapsed_s, settle = ss.cfg.settle_s;
+            // A changeover past its settle time is a stale copy of the
+            // coordinator's state (it has already moved on): no estimate.
             if (ss.state.phase == slice::Phase::Changeover && ss.state.mode == wants) {
-                has_eta = true;
+                has_eta = el < settle;
                 eta = settle - el;
             } else if (ss.state.phase == slice::Phase::Run && ss.state.mode != wants &&
                        ps.need == park::Need::Yes) {
