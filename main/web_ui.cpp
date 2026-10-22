@@ -18,6 +18,7 @@
 #include "capability.h"
 #include "factory_reset.h"
 #include "diag.h"
+#include "token_store.h"
 
 #include <algorithm>
 #include <cstdlib>
@@ -62,6 +63,9 @@ extern const uint8_t manifest_end[]       asm("_binary_manifest_webmanifest_end"
 namespace web_ui {
 
 namespace {
+
+// Bumped on breaking changes to the REST API (see GET /api/info).
+constexpr int kApiVersion = 1;
 
 httpd_handle_t s_server = nullptr;
 Hooks          s_hooks;
@@ -132,7 +136,31 @@ static bool open_climate() {
     return auth_mgr_state() == AUTH_STATE_CLAIMED && !auth_mgr_user_password_set();
 }
 
+// Integration token from "Authorization: Bearer <token>".
+enum class TokenAuth { None, Bad, Ok };
+TokenAuth bearer_token(httpd_req_t* req, tokens::Entry* e = nullptr) {
+    char hdr[96];
+    size_t hlen = httpd_req_get_hdr_value_len(req, "Authorization");
+    if (hlen == 0) return TokenAuth::None;
+    if (hlen >= sizeof(hdr) ||
+        httpd_req_get_hdr_value_str(req, "Authorization", hdr, sizeof(hdr)) != ESP_OK ||
+        strncasecmp(hdr, "Bearer ", 7) != 0)
+        return TokenAuth::Bad;
+    const char* t = hdr + 7;
+    while (*t == ' ') ++t;
+    tokens::Entry tmp;
+    return token_store_validate(t, e ? e : &tmp) ? TokenAuth::Ok : TokenAuth::Bad;
+}
+
+// A presented token is judged on its own: a bad one is refused even where the
+// endpoint would otherwise be open, so an integration learns it must re-auth.
+// Tokens work whether or not the legacy API-key toggle is on.
 bool api_authorized(httpd_req_t* req) {
+    switch (bearer_token(req)) {
+        case TokenAuth::Ok: return true;
+        case TokenAuth::Bad: return false;
+        case TokenAuth::None: break;
+    }
     if (!auth_mgr_web_auth_enabled()) return true;
     if (open_climate()) return true;
     char tok[AUTH_SESSION_TOKEN_LEN + 1];
@@ -150,6 +178,12 @@ bool api_authorized(httpd_req_t* req) {
 // role is denied. An API key (when API auth is on) and a web-auth-disabled
 // device both count as admin.
 bool admin_authorized(httpd_req_t* req) {
+    tokens::Entry te;
+    switch (bearer_token(req, &te)) {
+        case TokenAuth::Ok: return te.scope == tokens::Scope::Admin;
+        case TokenAuth::Bad: return false;
+        case TokenAuth::None: break;
+    }
     if (!auth_mgr_web_auth_enabled()) return true;  // no web login → full access
     if (auth_mgr_api_auth_enabled()) {
         char key[AUTH_API_KEY_LEN + 1];
@@ -183,6 +217,8 @@ std::string peer_ipv4(httpd_req_t* req) {
 // log. Empty when web auth is disabled (the UI is anonymous). Admin resolves to
 // the configured username; the shared climate-only role logs as "climate user".
 std::string web_actor_name(httpd_req_t* req) {
+    tokens::Entry te;
+    if (bearer_token(req, &te) == TokenAuth::Ok) return te.label;
     if (!auth_mgr_web_auth_enabled()) return "";
     char tok[AUTH_SESSION_TOKEN_LEN + 1];
     if (get_cookie_token(req, tok, sizeof(tok))) {
@@ -233,12 +269,29 @@ void clear_session_cookie(httpd_req_t* req) {
 }
 
 // Guard helper used at the top of protected handlers.
-#define REQUIRE_API_AUTH(req)                         \
-    do {                                              \
-        if (!api_authorized(req)) {                   \
-            send_unauthorized(req);                   \
-            return ESP_FAIL;                          \
-        }                                             \
+void send_forbidden(httpd_req_t* req, const char* msg) {
+    set_cors(req);
+    httpd_resp_set_status(req, "403 Forbidden");
+    httpd_resp_set_type(req, "application/json");
+    char body[96];
+    snprintf(body, sizeof(body), "{\"error\":\"%s\"}", msg);
+    httpd_resp_sendstr(req, body);
+}
+
+// A read-scoped token may only make GET requests.
+bool token_scope_denies(httpd_req_t* req) {
+    if (req->method == HTTP_GET) return false;
+    tokens::Entry te;
+    return bearer_token(req, &te) == TokenAuth::Ok && te.scope == tokens::Scope::Read;
+}
+
+#define REQUIRE_API_AUTH(req)                                                  \
+    do {                                                                       \
+        if (!api_authorized(req)) { send_unauthorized(req); return ESP_FAIL; } \
+        if (token_scope_denies(req)) {                                         \
+            send_forbidden(req, "token is read-only");                         \
+            return ESP_FAIL;                                                   \
+        }                                                                      \
     } while (0)
 
 // Guard for admin-only handlers: requires API auth AND an admin-level role
@@ -247,10 +300,7 @@ void clear_session_cookie(httpd_req_t* req) {
     do {                                                                    \
         if (!api_authorized(req)) { send_unauthorized(req); return ESP_FAIL; } \
         if (!admin_authorized(req)) {                                       \
-            set_cors(req);                                                  \
-            httpd_resp_set_status(req, "403 Forbidden");                    \
-            httpd_resp_set_type(req, "application/json");                   \
-            httpd_resp_sendstr(req, "{\"error\":\"admin access required\"}"); \
+            send_forbidden(req, "admin access required");                   \
             return ESP_FAIL;                                                \
         }                                                                   \
     } while (0)
@@ -3332,14 +3382,20 @@ esp_err_t handle_sso(httpd_req_t* req) {
 esp_err_t handle_auth_get(httpd_req_t* req) {
     set_cors(req);
     auth_role_t role;
-    if (!auth_mgr_web_auth_enabled()) {
+    tokens::Entry te;
+    const TokenAuth ta = bearer_token(req, &te);
+    if (ta != TokenAuth::None) {
+        role = ta == TokenAuth::Bad                 ? AUTH_ROLE_NONE
+               : te.scope == tokens::Scope::Admin ? AUTH_ROLE_ADMIN
+                                                    : AUTH_ROLE_USER;
+    } else if (!auth_mgr_web_auth_enabled()) {
         role = AUTH_ROLE_ADMIN;  // no web login → full access
     } else {
         char tok[AUTH_SESSION_TOKEN_LEN + 1];
         role = get_cookie_token(req, tok, sizeof(tok)) ? auth_mgr_session_role(tok)
                                                        : AUTH_ROLE_NONE;
     }
-    bool guest = role == AUTH_ROLE_NONE && open_climate();
+    bool guest = role == AUTH_ROLE_NONE && ta == TokenAuth::None && open_climate();
     if (guest) role = AUTH_ROLE_USER;
     bool authed = role != AUTH_ROLE_NONE;
     const char* rname = role == AUTH_ROLE_ADMIN ? "admin"
@@ -3356,6 +3412,7 @@ esp_err_t handle_auth_get(httpd_req_t* req) {
     cJSON_AddStringToObject(root, "name", wifi::device_display_name().c_str());
     cJSON_AddStringToObject(root, "hostname", wifi::mdns_hostname().c_str());
     cJSON_AddStringToObject(root, "role", rname);
+    if (ta == TokenAuth::Ok) cJSON_AddStringToObject(root, "token_scope", tokens::scope_str(te.scope));
     cJSON_AddBoolToObject(root, "web_password_set", auth_mgr_web_password_set());
     cJSON_AddBoolToObject(root, "user_password_set", auth_mgr_user_password_set());
     cJSON_AddBoolToObject(root, "authenticated", authed);
@@ -3660,10 +3717,136 @@ esp_err_t handle_history_get(httpd_req_t* req) {
 }
 
 // ── OPTIONS /api/* (CORS preflight) ────────────────────────────────────
+// ── GET /api/info ─ public identity + capabilities, for discovery ───────
+// Unauthenticated: lets an integration recognise a HeatLink head, check the
+// API version and learn which sign-in methods apply before it has a token.
+esp_err_t handle_info(httpd_req_t* req) {
+    set_cors(req);
+    cJSON* o = cJSON_CreateObject();
+    cJSON_AddStringToObject(o, "uid", wifi::device_uid().c_str());
+    cJSON_AddStringToObject(o, "name", wifi::device_display_name().c_str());
+    cJSON_AddStringToObject(o, "hostname", wifi::mdns_hostname().c_str());
+    cJSON_AddStringToObject(o, "model", "stamp-s3");
+    cJSON_AddStringToObject(o, "fw", esp_app_get_description()->version);
+    cJSON_AddNumberToObject(o, "api_version", kApiVersion);
+    cJSON_AddNumberToObject(o, "pv", hvac_group::kProtocolVersion);
+    auth_state_t st = auth_mgr_state();
+    cJSON* ja = cJSON_AddObjectToObject(o, "auth");
+    cJSON_AddStringToObject(ja, "state", st == AUTH_STATE_CLAIMED     ? "claimed"
+                                         : st == AUTH_STATE_UNCLAIMED ? "unclaimed"
+                                                                      : "legacy");
+    cJSON_AddBoolToObject(ja, "web_login", auth_mgr_web_auth_enabled());
+    cJSON_AddBoolToObject(ja, "open_climate", open_climate());
+    cJSON_AddBoolToObject(ja, "api_key", auth_mgr_api_auth_enabled());
+    cJSON_AddBoolToObject(ja, "tokens", true);
+    cJSON* jf = cJSON_AddArrayToObject(o, "features");
+    for (const char* f : {"tokens", "events", "history", "park", "room_sensors", "group",
+                          "tandem"})
+        cJSON_AddItemToArray(jf, cJSON_CreateString(f));
+    std::string gh = hvac_group::group_fingerprint();
+    if (!gh.empty()) {
+        cJSON* jg = cJSON_AddObjectToObject(o, "group");
+        cJSON_AddStringToObject(jg, "ghash", gh.c_str());
+        cJSON_AddStringToObject(jg, "label", hvac_group::get().group_label.c_str());
+    }
+    char* str = cJSON_PrintUnformatted(o);
+    cJSON_Delete(o);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, str ? str : "{}");
+    cJSON_free(str);
+    return ESP_OK;
+}
+
+// ── Integration tokens (admin) ──────────────────────────────────────────
+cJSON* token_json(const tokens::Entry& e) {
+    cJSON* o = cJSON_CreateObject();
+    cJSON_AddStringToObject(o, "id", e.id.c_str());
+    cJSON_AddStringToObject(o, "label", e.label.c_str());
+    cJSON_AddStringToObject(o, "scope", tokens::scope_str(e.scope));
+    if (e.created) cJSON_AddNumberToObject(o, "created", e.created);
+    else cJSON_AddNullToObject(o, "created");
+    if (e.last_used) cJSON_AddNumberToObject(o, "last_used", e.last_used);
+    else cJSON_AddNullToObject(o, "last_used");
+    return o;
+}
+
+esp_err_t send_cjson(httpd_req_t* req, cJSON* o) {
+    char* str = cJSON_PrintUnformatted(o);
+    cJSON_Delete(o);
+    httpd_resp_set_type(req, "application/json");
+    esp_err_t r = httpd_resp_sendstr(req, str ? str : "{}");
+    cJSON_free(str);
+    return r;
+}
+
+// GET /api/tokens
+esp_err_t handle_tokens_get(httpd_req_t* req) {
+    set_cors(req);
+    REQUIRE_ADMIN(req);
+    cJSON* o = cJSON_CreateObject();
+    cJSON_AddNumberToObject(o, "max", tokens::kMaxTokens);
+    cJSON* arr = cJSON_AddArrayToObject(o, "tokens");
+    for (const auto& e : token_store_list()) cJSON_AddItemToArray(arr, token_json(e));
+    return send_cjson(req, o);
+}
+
+// POST /api/tokens {"label","scope"} → the token text, shown only this once.
+esp_err_t handle_tokens_post(httpd_req_t* req) {
+    set_cors(req);
+    REQUIRE_ADMIN(req);
+    char* body = recv_body(req);
+    cJSON* json = body ? cJSON_Parse(body) : nullptr;
+    free(body);
+    const cJSON* jl = json ? cJSON_GetObjectItem(json, "label") : nullptr;
+    const cJSON* js = json ? cJSON_GetObjectItem(json, "scope") : nullptr;
+    tokens::Scope scope = tokens::Scope::Control;
+    std::string label = cJSON_IsString(jl) ? jl->valuestring : "";
+    bool scope_ok = js == nullptr || (cJSON_IsString(js) && tokens::parse_scope(js->valuestring, &scope));
+    cJSON_Delete(json);
+    if (tokens::sanitize_label(label).empty() || !scope_ok)
+        return send_json_error(req, "400 Bad Request",
+                               "label is required; scope must be read, control or admin");
+    if (token_store_list().size() >= tokens::kMaxTokens)
+        return send_json_error(req, "409 Conflict", "token limit reached; revoke one first");
+    std::string text;
+    tokens::Entry e;
+    if (!token_store_create(label, scope, &text, &e))
+        return send_json_error(req, "500 Internal Server Error", "could not create token");
+    events::log(events::Cat::System, events::Actor::WebUI,
+                ("Integration token \"" + e.label + "\" created (" + tokens::scope_str(scope) +
+                 ")").c_str(),
+                web_actor_name(req).c_str(), peer_ipv4(req));
+    cJSON* o = token_json(e);
+    cJSON_AddStringToObject(o, "token", text.c_str());
+    httpd_resp_set_status(req, "201 Created");
+    return send_cjson(req, o);
+}
+
+// DELETE /api/tokens?id=<id>
+esp_err_t handle_tokens_delete(httpd_req_t* req) {
+    set_cors(req);
+    REQUIRE_ADMIN(req);
+    char q[64] = "", id[tokens::kIdLen + 2] = "";
+    if (httpd_req_get_url_query_str(req, q, sizeof(q)) == ESP_OK)
+        httpd_query_key_value(q, "id", id, sizeof(id));
+    std::string label;
+    for (const auto& e : token_store_list())
+        if (e.id == id) label = e.label;
+    // Name the actor before revoking: a token may be revoking itself.
+    std::string who = web_actor_name(req);
+    if (label.empty() || !token_store_revoke(id))
+        return send_json_error(req, "404 Not Found", "no such token");
+    events::log(events::Cat::System, events::Actor::WebUI,
+                ("Integration token \"" + label + "\" revoked").c_str(), who.c_str(),
+                peer_ipv4(req));
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_sendstr(req, "{\"status\":\"ok\"}");
+}
+
 esp_err_t handle_options(httpd_req_t* req) {
     httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
     httpd_resp_set_hdr(req, "Access-Control-Allow-Methods", "GET,POST,DELETE,OPTIONS");
-    httpd_resp_set_hdr(req, "Access-Control-Allow-Headers", "Content-Type");
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Headers", "Content-Type, Authorization");
     httpd_resp_set_status(req, "204 No Content");
     return httpd_resp_send(req, nullptr, 0);
 }
@@ -3925,10 +4108,11 @@ esp_err_t handle_group_discover(httpd_req_t* req) {
 esp_err_t init(const Hooks& hooks) {
     s_hooks = hooks;
     auth_mgr_init();
+    token_store_init();
 
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
     cfg.uri_match_fn = httpd_uri_match_wildcard;
-    cfg.max_uri_handlers = 60;  // must exceed the uris[] count below
+    cfg.max_uri_handlers = 70;  // must exceed the uris[] count below
     cfg.stack_size = 8192;
     // The default 7 sockets reserve 3 for internal use, leaving only 4 for
     // clients — fewer than the 6 keep-alive connections a single browser tab
@@ -4007,9 +4191,13 @@ esp_err_t init(const Hooks& hooks) {
         {"/api/logs",                HTTP_GET,      handle_logs_get,       nullptr},
         {"/api/logs",                HTTP_DELETE,   handle_logs_clear,     nullptr},
         {"/api/history",             HTTP_GET,      handle_history_get,    nullptr},
+        {"/api/info",                HTTP_GET,      handle_info,           nullptr},
+        {"/api/tokens",              HTTP_GET,      handle_tokens_get,     nullptr},
+        {"/api/tokens",              HTTP_POST,     handle_tokens_post,    nullptr},
+        {"/api/tokens",              HTTP_DELETE,   handle_tokens_delete,  nullptr},
         {"/api/*",                   HTTP_OPTIONS, handle_options,        nullptr},
     };
-    static_assert(sizeof(uris) / sizeof(uris[0]) <= 60, "raise max_uri_handlers");
+    static_assert(sizeof(uris) / sizeof(uris[0]) <= 70, "raise max_uri_handlers");
     for (const auto& u : uris) {
         if (httpd_register_uri_handler(s_server, &u) != ESP_OK)
             ESP_LOGE(TAG, "failed to register %s", u.uri);

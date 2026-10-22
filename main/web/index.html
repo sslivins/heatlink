@@ -1220,6 +1220,26 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
          target="_blank" rel="noopener" style="color:var(--blue)">View the API reference &#8599;</a>
       &mdash; interactive OpenAPI docs for every <code>/api</code> endpoint.
     </p>
+    <h2 style="margin-top:22px">Integration tokens</h2>
+    <div class="sub" style="margin:-4px 0 12px">Give Home Assistant or a script its own token instead of a password. Tokens work whether or not the API key is required, and each can be revoked on its own.</div>
+    <div id="tokList"></div>
+    <div id="tokNew" class="hidden" style="margin:10px 0">
+      <label style="font-size:.85em;color:var(--fg-2);display:block;margin:4px 0 6px">New token &mdash; copy it now, it won't be shown again</label>
+      <div class="keyrow">
+        <input type="text" id="tokNewVal" readonly>
+        <button class="iconbtn" onclick="copyToken()" title="Copy token to clipboard" aria-label="Copy token">&#x29c9;</button>
+      </div>
+    </div>
+    <div class="mqf"><label for="tokLabel">Name</label>
+      <input type="text" id="tokLabel" maxlength="32" autocomplete="off" placeholder="e.g. Home Assistant"></div>
+    <div class="mqf"><label for="tokScope">Access</label>
+      <select id="tokScope">
+        <option value="control">Climate control</option>
+        <option value="read">Read only</option>
+        <option value="admin">Full admin</option>
+      </select></div>
+    <button class="btn" id="tokCreateBtn" onclick="createToken()">Create token</button>
+    <div id="tokMsg" class="status hidden" style="margin:10px 0 0"></div>
   </div>
 
   <div class="card" data-grp="settings" id="sec-device">
@@ -1503,6 +1523,20 @@ const I18N = { fr: {
   // API
   "API Access":"Accès API","Require API key for /api":"Exiger une clé API pour /api",
   "API key":"Clé API","View the API reference ↗":"Voir la référence de l’API ↗",
+  "Integration tokens":"Jetons d’intégration",
+  "Give Home Assistant or a script its own token instead of a password. Tokens work whether or not the API key is required, and each can be revoked on its own.":
+    "Donnez à Home Assistant ou à un script son propre jeton plutôt qu’un mot de passe. Les jetons fonctionnent que la clé API soit exigée ou non, et chacun peut être révoqué séparément.",
+  "New token — copy it now, it won't be shown again":"Nouveau jeton — copiez-le maintenant, il ne sera plus affiché",
+  "Access":"Accès","e.g. Home Assistant":"p. ex. Home Assistant","Request failed":"Échec de la requête",
+  "Climate control":"Contrôle du climat","Read only":"Lecture seule","Full admin":"Administration complète",
+  "Create token":"Créer un jeton","Revoke":"Révoquer","No tokens yet.":"Aucun jeton pour l’instant.",
+  "never used":"jamais utilisé","used within the hour":"utilisé dans l’heure","used today":"utilisé aujourd’hui",
+  "used {d}":"utilisé le {d}","Give the token a name":"Donnez un nom au jeton",
+  "All 8 token slots are in use; revoke one first":"Les 8 emplacements de jeton sont utilisés ; révoquez-en un d’abord",
+  "Could not create the token":"Impossible de créer le jeton","Revoke “{name}”?":"Révoquer « {name} » ?",
+  "Anything using this token loses access immediately.":"Tout ce qui utilise ce jeton perd l’accès immédiatement.",
+  "Token revoked":"Jeton révoqué","Could not revoke the token":"Impossible de révoquer le jeton",
+  "Token copied":"Jeton copié","Copy token to clipboard":"Copier le jeton",
   // Heat pump sensors
   "Heat pump sensors":"Capteurs de la pompe à chaleur","Unit link":"Liaison unité",
   "Operating":"En marche","Compressor":"Compresseur","Unit room temp":"Temp. pièce (unité)",
@@ -1763,6 +1797,7 @@ function openSec(id){
   renderSettingsView();
   window.scrollTo(0,0);
   if(id==='sec-outdoor'||id==='sec-tandem') refreshGroup();
+  if(id==='sec-api'){ $('tokNew').classList.add('hidden'); $('tokNewVal').value=''; loadTokens(); }
 }
 function closeSec(){
   if(history.state&&history.state.sec){ history.back(); return; }
@@ -3436,6 +3471,64 @@ function copyKey(){
   if(navigator.clipboard) navigator.clipboard.writeText(k);
   else{$('secKey').select();document.execCommand('copy')}
   secApiMsg('API key copied','ok');
+}
+
+// ── Integration tokens ─────────────────────────────────────────────────
+const TOK_SCOPE={read:'Read only',control:'Climate control',admin:'Full admin'};
+function tokMsg(m,cls){const el=$('tokMsg');if(cls==='ok'){el.classList.add('hidden');toast(m);return}el.className='status '+cls;el.textContent=m;el.classList.remove('hidden')}
+function tokWhen(t){
+  if(!t) return i18n('never used');
+  const s=Math.max(0,Date.now()/1000-t);
+  if(s<3600) return i18n('used within the hour');
+  if(s<86400) return i18n('used today');
+  return i18n('used {d}',{d:new Date(t*1000).toLocaleDateString(histDateLocale(),{month:'short',day:'numeric'})});
+}
+function renderTokens(d){
+  const L=d.tokens||[];
+  $('tokList').innerHTML=L.length?L.map(t=>'<div class="row"><label>'+rsEsc(t.label)+'<br><span style="color:var(--fg-3)">'+
+    i18n(TOK_SCOPE[t.scope]||t.scope)+' \u00b7 '+tokWhen(t.last_used)+'</span></label>'+
+    '<button class="btn sm" onclick="revokeToken(\''+rsEsc(t.id)+'\',this)">'+i18n('Revoke')+'</button></div>').join('')
+    :'<div class="sub" style="margin:0 0 12px">'+i18n('No tokens yet.')+'</div>';
+  $('tokCreateBtn').disabled=L.length>=(d.max||8);
+}
+async function loadTokens(){
+  try{
+    const r=await fetch('/api/tokens');
+    if(r.ok) renderTokens(await r.json());
+  }catch(e){}
+}
+async function createToken(){
+  const label=$('tokLabel').value.trim();
+  if(!label){tokMsg(i18n('Give the token a name'),'err');$('tokLabel').focus();return}
+  $('tokCreateBtn').disabled=true;
+  try{
+    const r=await fetch('/api/tokens',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({label,scope:$('tokScope').value})});
+    const j=await r.json().catch(()=>({}));
+    if(r.ok&&j.token){
+      $('tokNewVal').value=j.token;
+      $('tokNew').classList.remove('hidden');
+      $('tokLabel').value='';
+      $('tokMsg').classList.add('hidden');
+    }else tokMsg(r.status===409?i18n('All 8 token slots are in use; revoke one first'):(j.error||i18n('Could not create the token')),'err');
+  }catch(e){tokMsg(i18n('Request failed'),'err')}
+  await loadTokens();
+}
+async function revokeToken(id,btn){
+  const name=btn.closest('.row').querySelector('label').firstChild.textContent;
+  if(!(await uiConfirm({title:i18n('Revoke “{name}”?',{name}),body:i18n('Anything using this token loses access immediately.'),okText:i18n('Revoke'),danger:true})))return;
+  try{
+    const r=await fetch('/api/tokens?id='+encodeURIComponent(id),{method:'DELETE'});
+    if(r.ok) tokMsg(i18n('Token revoked'),'ok'); else tokMsg(i18n('Could not revoke the token'),'err');
+  }catch(e){tokMsg(i18n('Request failed'),'err')}
+  loadTokens();
+}
+function copyToken(){
+  const k=$('tokNewVal').value;
+  if(!k) return;
+  if(navigator.clipboard) navigator.clipboard.writeText(k);
+  else{$('tokNewVal').select();document.execCommand('copy')}
+  tokMsg(i18n('Token copied'),'ok');
 }
 
 // ── Polling scheduler ──────────────────────────────────────────────────

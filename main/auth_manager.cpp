@@ -26,6 +26,7 @@
 #include "nvs_flash.h"
 #include "nvs.h"
 #include "psa/crypto.h"
+#include "token_store.h"
 
 static const char* TAG = "auth_mgr";
 
@@ -586,10 +587,12 @@ auth_claim_result_t auth_mgr_claim(const char* password, const char* token,
         return AUTH_CLAIM_INVALID;
     if (!auth_mgr_set_admin_password(password)) return AUTH_CLAIM_FAILED;
     if (replacing) {
-        // Whoever knew the old password loses access: drop sessions, new API key.
+        // Whoever knew the old password loses access: drop sessions, new API
+        // key, revoke integration tokens.
         generate_random_hex(state.api_key, AUTH_API_KEY_LEN);
         save_to_nvs();
         auth_mgr_logout_all();
+        token_store_revoke_all();
     }
     if (!create_session(AUTH_ROLE_ADMIN, session_token)) return AUTH_CLAIM_FAILED;
     ESP_LOGI(TAG, "admin password %s", replacing ? "replaced (reset procedure)"

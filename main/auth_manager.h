@@ -117,8 +117,8 @@ void auth_mgr_logout_all(void);
 bool auth_mgr_begin_claim(char* token_out);
 
 /// Set the admin password without logging in. Allowed while the recovery
-/// window is open (replacing any existing password; sessions are dropped and
-/// the API key rotated), or when no password is set and either no claim is
+/// window is open (replacing any existing password; sessions are dropped, the
+/// API key rotated and integration tokens revoked), or when no password is set and either no claim is
 /// pending (legacy head) or @p token matches the claim token. On success an
 /// admin session is created.
 auth_claim_result_t auth_mgr_claim(const char* password, const char* token,

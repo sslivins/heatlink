@@ -13,6 +13,7 @@ on:
       - 'components/slice/**'
       - 'components/history/**'
       - 'components/room_sensor/**'
+      - 'components/tokens/**'
       - 'test/host/**'
       - 'test/ui/**'
       - 'test/api/**'
@@ -102,6 +103,16 @@ jobs:
             test/host/test_room_sensor.cpp \
             -o room_sensor_tests
           ./room_sensor_tests
+
+      - name: Build and run host integration-token tests
+        shell: bash
+        run: |
+          g++ -std=c++17 -Wall -Wextra -fsanitize=address,undefined \
+            -I components/tokens/include \
+            components/tokens/token_logic.cpp \
+            test/host/test_token_logic.cpp \
+            -o token_tests
+          ./token_tests
 
       - name: Run Node host tests (web UI + API contract)
         shell: bash

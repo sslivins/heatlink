@@ -376,7 +376,7 @@ as a cut; with a battery, the input dropping out for 2 s or more and coming
 back counts. The Home Assistant **Reset admin password** button does the same
 thing. Either way, for the next **15 minutes** anyone who opens the web UI can
 set a new admin password without logging in; doing so also signs everyone out
-and rotates the API key. The old password keeps working meanwhile, and if no
+and rotates the API key and revokes integration tokens. The old password keeps working meanwhile, and if no
 new one is set within the window nothing changes. Wi-Fi, MQTT and the
 climate-only password are never touched.
 
@@ -428,6 +428,17 @@ from a script, a wall panel, or your own front-end. The full contract lives in
 The same reference is available in-app (Swagger UI, linked from **Settings → API
 access**). Optional per-endpoint API-key auth can be enabled there.
 
+**Integration tokens.** For Home Assistant or scripts, create a token under
+**Settings → API access → Integration tokens** (or `POST /api/tokens`) and send it
+as `Authorization: Bearer hlt1_…`. Each token has a name, shown in the activity
+log for what it changes, and a scope: **read only** (GET requests), **climate
+control** (same as the climate-only login) or **full admin**. A head holds up to
+8 tokens, stores only their hashes and shows each one once. Tokens work whether
+or not the API key is required, can be revoked one at a time, and are all revoked
+when the admin password is reset. A token that is sent but invalid gets 401 even
+where the endpoint would otherwise be open. `GET /api/info` is public and reports
+the head's identity and `api_version` for discovery.
+
 ### Control & status
 
 | Method | Path | Purpose |
@@ -462,6 +473,8 @@ access**). Optional per-endpoint API-key auth can be enabled there.
 | `GET`  | `/api/scan` | scan for nearby WiFi networks |
 | `POST` | `/api/device` | set the unit's friendly name / device identity |
 | `GET`/`POST` | `/api/auth` | admin/climate-only passwords, API-key gating, and the first-password claim (see [Admin password](#admin-password)) |
+| `GET`/`POST`/`DELETE` | `/api/tokens` | admin: list · create (`{label,scope}`, token shown once) · revoke (`?id=`) integration tokens |
+| `GET`  | `/api/info` | **unauthenticated** identity for discovery: uid, name, firmware, `api_version`, sign-in methods, features |
 | `POST` | `/api/login` · `/api/logout` | web-UI session auth (10 failed logins lock it for 30 s) |
 | `POST` | `/api/group/handoff` · `/api/sso` | admin: one-time sign-in ticket for a group member · redeem it on that member |
 
