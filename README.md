@@ -404,7 +404,7 @@ unit's MAC suffix shown on the Status tab). It has five tabs — **Climate**
 coordination with live Tandem status, plus a **House** view listing every head on the LAN grouped by
 outdoor unit when you have more than one), **History** (admin only — a chart of
 room/target/outdoor temperature and heating/cooling/defrost/parked bands
-over 4 h, 24 h or 7 days (7 days on wider screens only); one sample every 30 s is kept on flash for
+over 4 h, 24 h or 7 days (7 days on wider screens only; phones open on 4 h, wider screens on 24 h); one sample every 30 s is kept on flash for
 14 days and survives reboots and OTA), **Status** (live diagnostics — WiFi, controller power, heat-pump
 sensors, activity log), and **Settings** (display, wide-vane, off at setpoint,
 Tandem, WiFi, MQTT/HA,

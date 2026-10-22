@@ -4008,9 +4008,10 @@ const HF={CONN:1,POWER:2,OPER:4,DEFROST:8,PARKED:16};
 const HIST_SNAP={14400:900,86400:3600,604800:21600};
 const HIST_MODES=['','Heat','Cool','Dry','Fan','Auto'];
 const HIST_FAN=['Auto','Quiet','1','2','3','4'];
-let hist={window:86400,end:null,data:null,loading:false,loadedAt:0,error:''};
-let histTabActive=false, histGeom=null, histDrag=null, histWired=false;
 const histNarrowMQ=window.matchMedia('(max-width:640px)');
+// Phones open on 4 h (24 h is cramped at that width); wider screens on 24 h.
+let hist={window:histNarrowMQ.matches?14400:86400,end:null,data:null,loading:false,loadedAt:0,error:''};
+let histTabActive=false, histGeom=null, histDrag=null, histWired=false;
 // 7 d is hidden on phones; fall back to the live 24 h view.
 function histFitWindow(){
   if(!histNarrowMQ.matches||hist.window!==604800) return false;
