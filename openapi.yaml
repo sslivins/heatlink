@@ -13,6 +13,11 @@ info:
     browser session cookie. When API access is disabled, the endpoints are open
     on the local network. The API key is shown (and can be regenerated) in the
     dashboard's *API Access* card.
+
+    Integrations should prefer a scoped **integration token**
+    (`Authorization: Bearer hlt1_…`, see `/api/tokens`), which works regardless
+    of the API-key toggle and can be revoked on its own. `GET /api/info` is
+    public and reports the API version for discovery.
   version: 0.2.98
   license:
     name: See repository
@@ -51,6 +56,7 @@ paths:
       tags: [Status]
       summary: Device health and power telemetry
       security:
+        - BearerAuth: []
         - ApiKeyAuth: []
         - SessionCookie: []
       responses:
@@ -64,6 +70,7 @@ paths:
       tags: [Climate]
       summary: Current heat-pump settings and live status
       security:
+        - BearerAuth: []
         - ApiKeyAuth: []
         - SessionCookie: []
       responses:
@@ -80,6 +87,7 @@ paths:
         turns the head on, unless the same body has `"power": "OFF"`; then the
         mode is stored and the head stays off.
       security:
+        - BearerAuth: []
         - ApiKeyAuth: []
         - SessionCookie: []
       requestBody:
@@ -100,6 +108,7 @@ paths:
       tags: [Network]
       summary: Current MQTT broker settings (password masked)
       security:
+        - BearerAuth: []
         - ApiKeyAuth: []
         - SessionCookie: []
       responses:
@@ -115,6 +124,7 @@ paths:
         Omitted fields keep their stored value (notably `password`, which the
         GET never returns). The device reboots after saving.
       security:
+        - BearerAuth: []
         - ApiKeyAuth: []
         - SessionCookie: []
       requestBody:
@@ -137,6 +147,7 @@ paths:
       tags: [Network]
       summary: Current WiFi network (password never returned)
       security:
+        - BearerAuth: []
         - ApiKeyAuth: []
         - SessionCookie: []
       responses:
@@ -150,6 +161,7 @@ paths:
       summary: Set WiFi credentials, then reboot
       description: Omitting/blanking `password` preserves the stored key.
       security:
+        - BearerAuth: []
         - ApiKeyAuth: []
         - SessionCookie: []
       requestBody:
@@ -172,6 +184,7 @@ paths:
       tags: [Firmware]
       summary: Cached GitHub release-check result
       security:
+        - BearerAuth: []
         - ApiKeyAuth: []
         - SessionCookie: []
       responses:
@@ -185,6 +198,7 @@ paths:
       tags: [Firmware]
       summary: Trigger an immediate GitHub release poll
       security:
+        - BearerAuth: []
         - ApiKeyAuth: []
         - SessionCookie: []
       responses:
@@ -201,6 +215,7 @@ paths:
       tags: [Firmware]
       summary: Install the latest GitHub release
       security:
+        - BearerAuth: []
         - ApiKeyAuth: []
         - SessionCookie: []
       responses:
@@ -216,6 +231,7 @@ paths:
       tags: [Diagnostics]
       summary: Reset the cumulative brownout counter to zero
       security:
+        - BearerAuth: []
         - ApiKeyAuth: []
         - SessionCookie: []
       responses:
@@ -232,6 +248,7 @@ paths:
       tags: [Diagnostics]
       summary: Reset the session WiFi-drop counter to zero
       security:
+        - BearerAuth: []
         - ApiKeyAuth: []
         - SessionCookie: []
       responses:
@@ -249,6 +266,7 @@ paths:
       summary: Clear the persisted all-time-low input voltage (vin_min_ever)
       description: Resets the NVS record low to 0; the next reading re-seeds it from the current rail. Use to clear a stale record left by a pre-plausibility-floor glitch.
       security:
+        - BearerAuth: []
         - ApiKeyAuth: []
         - SessionCookie: []
       responses:
@@ -266,6 +284,7 @@ paths:
       summary: Upload a raw firmware .bin into the inactive slot
       description: Streams the request body to the OTA partition; reboots on success.
       security:
+        - BearerAuth: []
         - ApiKeyAuth: []
         - SessionCookie: []
       requestBody:
@@ -285,6 +304,7 @@ paths:
       tags: [Firmware]
       summary: Pull firmware from a URL in the background
       security:
+        - BearerAuth: []
         - ApiKeyAuth: []
         - SessionCookie: []
       requestBody:
@@ -311,6 +331,7 @@ paths:
       tags: [Firmware]
       summary: Current OTA progress
       security:
+        - BearerAuth: []
         - ApiKeyAuth: []
         - SessionCookie: []
       responses:
@@ -324,6 +345,7 @@ paths:
       tags: [System]
       summary: Reboot the device
       security:
+        - BearerAuth: []
         - ApiKeyAuth: []
         - SessionCookie: []
       responses:
@@ -344,6 +366,7 @@ paths:
         group membership, device name, and web/API passwords) and reboots into
         first-run provisioning (SoftAP). Admin only.
       security:
+        - BearerAuth: []
         - ApiKeyAuth: []
         - SessionCookie: []
       responses:
@@ -388,6 +411,7 @@ paths:
       tags: [Auth]
       summary: Invalidate the current session
       security:
+        - BearerAuth: []
         - SessionCookie: []
       responses:
         '200':
@@ -405,6 +429,7 @@ paths:
         `POST /api/sso` on the target head.
       security:
         - SessionCookie: []
+        - BearerAuth: []
         - ApiKeyAuth: []
       requestBody:
         required: true
@@ -491,6 +516,7 @@ paths:
         Changing the admin password logs every session out, then signs the
         caller back in (new cookie).
       security:
+        - BearerAuth: []
         - SessionCookie: []
       requestBody:
         required: true
@@ -517,6 +543,7 @@ paths:
       summary: Detected feature support and user overrides
       description: Currently reports wide-vane support only.
       security:
+        - BearerAuth: []
         - ApiKeyAuth: []
         - SessionCookie: []
       responses:
@@ -533,6 +560,7 @@ paths:
         detection, and/or set `detect: true` to run an on-demand detection probe
         (briefly moves the vane).
       security:
+        - BearerAuth: []
         - ApiKeyAuth: []
         - SessionCookie: []
       requestBody:
@@ -559,6 +587,7 @@ paths:
         and powered back on when the room drifts `delta_c` past the setpoint
         (after `min_off_s`) or a periodic probe run finds it needs conditioning.
       security:
+        - BearerAuth: []
         - ApiKeyAuth: []
         - SessionCookie: []
       responses:
@@ -578,6 +607,7 @@ paths:
         `enabled`, `min_off_s` and the probe settings are the outdoor unit's:
         they are replicated to every head in the group (`delta_c` stays per head).
       security:
+        - BearerAuth: []
         - ApiKeyAuth: []
         - SessionCookie: []
       requestBody:
@@ -611,6 +641,7 @@ paths:
         report on change or at least every 2 h). With none fresh the remote
         temperature is cleared and the head uses its own sensor.
       security:
+        - BearerAuth: []
         - ApiKeyAuth: []
         - SessionCookie: []
       responses:
@@ -636,6 +667,7 @@ paths:
           that triggers a report, 0.1–5.0). The sensor applies it when it
           next wakes (`pending`).
       security:
+        - BearerAuth: []
         - ApiKeyAuth: []
         - SessionCookie: []
       requestBody:
@@ -699,6 +731,7 @@ paths:
         overrides the web UI language ("" = auto-detect from the browser), applied
         live without a reboot.
       security:
+        - BearerAuth: []
         - SessionCookie: []
       requestBody:
         required: true
@@ -720,6 +753,7 @@ paths:
       tags: [Network]
       summary: Scan for nearby WiFi networks (blocking)
       security:
+        - BearerAuth: []
         - SessionCookie: []
       responses:
         '200':
@@ -736,6 +770,7 @@ paths:
       tags: [Activity]
       summary: Recent activity-log events (newest first)
       security:
+        - BearerAuth: []
         - SessionCookie: []
       parameters:
         - name: since
@@ -756,6 +791,7 @@ paths:
       tags: [Activity]
       summary: Clear the activity log
       security:
+        - BearerAuth: []
         - SessionCookie: []
       responses:
         '200':
@@ -777,6 +813,7 @@ paths:
         with a `=== restart (reason) ===` line; a power-on reset clears it.
         Not shown in the web UI.
       security:
+        - BearerAuth: []
         - SessionCookie: []
       responses:
         '200':
@@ -788,6 +825,7 @@ paths:
       tags: [Activity]
       summary: Clear the firmware log buffer
       security:
+        - BearerAuth: []
         - SessionCookie: []
       responses:
         '200':
@@ -811,6 +849,7 @@ paths:
         `fan`: 0 auto, 1 quiet, 2-5 speeds 1-4, 255 unknown. `freq` is the
         outdoor unit's compressor frequency (shared by every head).
       security:
+        - BearerAuth: []
         - SessionCookie: []
       parameters:
         - name: window
@@ -854,6 +893,7 @@ paths:
       tags: [Groups]
       summary: Group membership, self state, members and conflicts
       security:
+        - BearerAuth: []
         - ApiKeyAuth: []
         - SessionCookie: []
       responses:
@@ -989,6 +1029,7 @@ paths:
         setup claim token) or the admin-password reset window is open.
         Reboots when it inherits the group's MQTT broker.
       security:
+        - BearerAuth: []
         - SessionCookie: []
         - {}
       requestBody:
@@ -1025,6 +1066,7 @@ paths:
         head is unclaimed (`t` = the setup claim token) or the reset window is
         open, so a new head can list the outdoor units it could join.
       security:
+        - BearerAuth: []
         - SessionCookie: []
         - {}
       parameters:
@@ -1039,6 +1081,7 @@ paths:
       tags: [Groups]
       summary: Leave the current group
       security:
+        - BearerAuth: []
         - SessionCookie: []
       responses:
         '200':
@@ -1100,6 +1143,7 @@ paths:
         for the climate-only `user` role); `flip` switches them to
         `target_mode` (admin only, 403 otherwise).
       security:
+        - BearerAuth: []
         - SessionCookie: []
       requestBody:
         required: true
@@ -1128,6 +1172,7 @@ paths:
       tags: [Groups]
       summary: Rename the group
       security:
+        - BearerAuth: []
         - SessionCookie: []
       requestBody:
         required: true
@@ -1164,6 +1209,7 @@ paths:
         clamped (min slice 300-3600 s, max slice >= min and <= 7200 s,
         settle 180-600 s).
       security:
+        - BearerAuth: []
         - SessionCookie: []
       requestBody:
         required: true
@@ -1193,6 +1239,7 @@ paths:
       tags: [Groups]
       summary: Remove a member from the group by uid
       security:
+        - BearerAuth: []
         - SessionCookie: []
       requestBody:
         required: true
@@ -1227,6 +1274,7 @@ paths:
         `ghash` (outdoor-unit fingerprint, display-only). Read-only: changes are
         made by opening the target head's own UI.
       security:
+        - BearerAuth: []
         - ApiKeyAuth: []
         - SessionCookie: []
       responses:
@@ -1267,8 +1315,134 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/HouseSummary' }
+  /api/info:
+    get:
+      tags: [Status]
+      summary: Public identity, API version and sign-in methods
+      description: |
+        Unauthenticated, for discovery: an integration (e.g. Home Assistant via
+        the `_mmhvac._tcp` mDNS record) uses it to recognise a HeatLink head,
+        check `api_version` and see how to sign in before it has a token.
+      security: []
+      responses:
+        '200':
+          description: Head identity
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  uid: { type: string, description: 'Stable device id (MAC-derived)' }
+                  name: { type: string }
+                  hostname: { type: string }
+                  model: { type: string, example: stamp-s3 }
+                  fw: { type: string, example: 1.5.0 }
+                  api_version: { type: integer, example: 1, description: 'Bumped on breaking REST API changes' }
+                  pv: { type: integer, description: 'Group protocol version' }
+                  auth:
+                    type: object
+                    properties:
+                      state: { type: string, enum: [legacy, unclaimed, claimed] }
+                      web_login: { type: boolean, description: 'Browser login is enforced' }
+                      open_climate: { type: boolean, description: 'Climate control is open without signing in' }
+                      api_key: { type: boolean, description: 'The legacy X-API-Key toggle is on' }
+                      tokens: { type: boolean, description: 'Integration tokens are supported' }
+                  features:
+                    type: array
+                    items: { type: string }
+                    example: [tokens, events, history, park, room_sensors, group, tandem]
+                  group:
+                    type: object
+                    description: Absent when the head is standalone
+                    properties:
+                      ghash: { type: string, description: 'Outdoor-unit fingerprint (8 hex)' }
+                      label: { type: string }
+  /api/tokens:
+    get:
+      tags: [Auth]
+      summary: List integration tokens (admin)
+      security:
+        - BearerAuth: []
+        - SessionCookie: []
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Tokens (the secret is never returned again)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  max: { type: integer, example: 8 }
+                  tokens:
+                    type: array
+                    items: { $ref: '#/components/schemas/Token' }
+        '401': { description: Unauthorized }
+        '403': { description: Not an admin }
+    post:
+      tags: [Auth]
+      summary: Create an integration token (admin)
+      description: |
+        Returns the token text once, in `token`; only a hash is stored. Send it
+        as `Authorization: Bearer <token>`.
+      security:
+        - BearerAuth: []
+        - SessionCookie: []
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [label]
+              properties:
+                label: { type: string, maxLength: 32, example: Home Assistant }
+                scope: { type: string, enum: [read, control, admin], default: control }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Token'
+                  - type: object
+                    properties:
+                      token: { type: string, example: hlt1_0a1b2c3d_00112233445566778899aabbccddeeff }
+        '400': { description: Missing label or unknown scope }
+        '401': { description: Unauthorized }
+        '403': { description: Not an admin }
+        '409': { description: All 8 token slots are in use }
+    delete:
+      tags: [Auth]
+      summary: Revoke an integration token (admin)
+      security:
+        - BearerAuth: []
+        - SessionCookie: []
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: query
+          required: true
+          schema: { type: string, example: 0a1b2c3d }
+      responses:
+        '200': { description: Revoked }
+        '401': { description: Unauthorized }
+        '403': { description: Not an admin }
+        '404': { description: No such token }
 components:
   securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      description: |
+        Integration token (`hlt1_<id>_<secret>`) created under Settings → API
+        access or via POST /api/tokens. Accepted whether or not the X-API-Key
+        toggle is on. Scope `read` allows GET requests, `control` adds climate
+        control (like the climate-only login), `admin` allows everything. A
+        token that is sent but invalid or revoked gets 401 even on endpoints
+        that are otherwise open.
     ApiKeyAuth:
       type: apiKey
       in: header
@@ -1278,6 +1452,14 @@ components:
       in: cookie
       name: mh_session
   schemas:
+    Token:
+      type: object
+      properties:
+        id: { type: string, description: '8 hex; public part of the token' }
+        label: { type: string }
+        scope: { type: string, enum: [read, control, admin] }
+        created: { type: integer, nullable: true, description: 'Unix seconds; null if the clock was not set' }
+        last_used: { type: integer, nullable: true, description: 'Unix seconds, updated at most daily in flash; null if never used' }
     HouseSummary:
       type: object
       properties:
@@ -1589,6 +1771,7 @@ components:
         web_password_set: { type: boolean }
         user_password_set: { type: boolean }
         role: { type: string, enum: [admin, user, none] }
+        token_scope: { type: string, enum: [read, control, admin], description: 'Present when the request used an integration token (role is then admin for an admin token, user otherwise)' }
         authenticated: { type: boolean, description: True for any role other than `none`, including a guest. }
         open_climate:
           type: boolean

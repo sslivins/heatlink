@@ -18,6 +18,7 @@ idf_component_register(
          "dns_server.cpp"
          "ota.cpp"
          "auth_manager.cpp"
+         "token_store.cpp"
          "diag.cpp"
          "events.cpp"
          "devlog.cpp"
@@ -42,7 +43,7 @@ idf_component_register(
              esp_timer esp_app_format esp_http_server lwip
              app_update esp_https_ota esp_http_client mbedtls spiffs
              cn105 m5pm1 hvac_mqtt hvac_group park slice history
-             bt room_sensor
+             bt room_sensor tokens
 )
 
 # Re-gzip at build time when the source HTML or the gzip script changes.
