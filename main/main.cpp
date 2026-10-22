@@ -25,6 +25,7 @@
 #include "status_led.h"
 #include "park_ctl.h"
 #include "room_sensor_ctl.h"
+#include "remote_temp.h"
 #include "slice_ctl.h"
 #include "history_ctl.h"
 
@@ -214,6 +215,19 @@ void cn105_task(void*) {
     });
     g_hp.setStatusChangedCallback([](const cn105::Status& st) {
         hvac_mqtt::publish_state(park_ctl::overlay(g_hp.getSettings()), st);
+        // Log unit faults as they start, change and clear.
+        static std::string last_err;
+        if (st.errorCode != last_err) {
+            const auto is_fault = [](const std::string& e) {
+                return !e.empty() && e != "No Error";
+            };
+            if (is_fault(st.errorCode))
+                events::log(events::Cat::Fault, events::Actor::System,
+                            "Unit fault: " + st.errorCode);
+            else if (is_fault(last_err))
+                events::log(events::Cat::Fault, events::Actor::System, "Unit fault cleared");
+            last_err = st.errorCode;
+        }
     });
 
     g_hp.enableExternalUpdate();
@@ -297,13 +311,16 @@ void on_mqtt_command(const hvac_mqtt::Command& cmd) {
                              // as a unit-initiated revert.
                              capability::notify_user_wide_vane_change();
                              break;
-        case K::RemoteTemp:
-            // A paired, fresh room sensor (#142) owns the remote temperature.
-            if (room_sensor_ctl::active())
+        case K::RemoteTemp: {
+            // Legacy feed (MQTT remote_temp/set, /api/settings): no expiry, as
+            // before; <= 0 clears. Refused while a room sensor owns it.
+            const float c = strtof(cmd.value.c_str(), nullptr);
+            if (c <= 0) remote_temp::clear("Home Assistant");
+            else if (remote_temp::set(c, 0, "mqtt", "Home Assistant") ==
+                     remote_temp::Res::SensorOwns)
                 ESP_LOGI(TAG, "remote_temp ignored: room sensor is active");
-            else
-                g_hp.setRemoteTemperature(strtof(cmd.value.c_str(), nullptr));
             break;
+        }
         case K::System:      ESP_LOGI(TAG, "system cmd: %s", cmd.value.c_str()); break;
         case K::Ota:         ota::start_url(cmd.value); break;
         case K::UpdateInstall: ota::install_latest(); break;
@@ -682,6 +699,18 @@ extern "C" void app_main() {
         room_sensor_ctl::Hooks rh;
         rh.set_remote = [](float c) { g_hp.setRemoteTemperature(c); };
         room_sensor_ctl::init(rh);
+
+        remote_temp::Hooks rt;
+        rt.set_remote = [](float c) { g_hp.setRemoteTemperature(c); };
+        rt.sensor_active = [] { return room_sensor_ctl::active(); };
+        rt.on_event = [](const std::string& msg, const std::string& source,
+                         const std::string& who) {
+            const events::Actor a = who.empty()          ? events::Actor::System
+                                    : source == "mqtt"   ? events::Actor::HomeAssistant
+                                                         : events::Actor::WebUI;
+            events::log(events::Cat::System, a, msg, who);
+        };
+        remote_temp::init(rt);
 
         slice_ctl::Hooks sh;
         sh.settings = [] { return park_ctl::overlay(g_hp.getSettings()); };

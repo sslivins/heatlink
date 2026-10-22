@@ -5,6 +5,7 @@
 #include "access_policy.h"
 #include "park_ctl.h"
 #include "room_sensor_ctl.h"
+#include "remote_temp.h"
 #include "slice_ctl.h"
 #include "wifi_manager.h"
 #include "ota.h"
@@ -547,6 +548,19 @@ esp_err_t handle_get_settings(httpd_req_t* req) {
         cJSON_AddStringToObject(root, "direction", sta.direction.c_str());
     if (!sta.errorCode.empty())
         cJSON_AddStringToObject(root, "errorCode", sta.errorCode.c_str());
+    cJSON_AddBoolToObject(root, "fault", !sta.errorCode.empty() && sta.errorCode != "No Error");
+    {
+        remote_temp::Snapshot rt = remote_temp::snapshot();
+        if (rt.active) {
+            cJSON* o = cJSON_AddObjectToObject(root, "remoteTemp");
+            cJSON_AddNumberToObject(o, "temp", rt.temp);
+            cJSON_AddStringToObject(o, "source", rt.source.c_str());
+            cJSON_AddStringToObject(o, "by", rt.who.c_str());
+            cJSON_AddNumberToObject(o, "age_s", rt.age_s);
+            if (rt.expires_in_s >= 0) cJSON_AddNumberToObject(o, "expires_in_s", rt.expires_in_s);
+            else cJSON_AddNullToObject(o, "expires_in_s");
+        }
+    }
 
     char* str = cJSON_PrintUnformatted(root);
     httpd_resp_set_type(req, "application/json");
@@ -645,9 +659,8 @@ esp_err_t handle_post_settings(httpd_req_t* req) {
         events::log(events::Cat::Setpoint, events::Actor::WebUI, msg, wname, wip);
     }
     if (admin && (v = cJSON_GetObjectItem(json, "remoteTemp")) && cJSON_IsNumber(v)) {
-        char buf[16];
-        snprintf(buf, sizeof(buf), "%.1f", v->valuedouble);
-        apply(K::RemoteTemp, buf);
+        if (v->valuedouble <= 0) remote_temp::clear(who);
+        else remote_temp::set((float)v->valuedouble, 0, "api", who);
     }
     cJSON_Delete(json);
 
@@ -3741,7 +3754,7 @@ esp_err_t handle_info(httpd_req_t* req) {
     cJSON_AddBoolToObject(ja, "tokens", true);
     cJSON* jf = cJSON_AddArrayToObject(o, "features");
     for (const char* f : {"tokens", "token_tickets", "events", "history", "park",
-                          "room_sensors", "group", "tandem"})
+                          "room_sensors", "group", "tandem", "remote_temp", "fault"})
         cJSON_AddItemToArray(jf, cJSON_CreateString(f));
     std::string gh = hvac_group::group_fingerprint();
     if (!gh.empty()) {
@@ -3967,6 +3980,49 @@ esp_err_t handle_tokens_redeem(httpd_req_t* req) {
     cJSON* o = token_json(e);
     cJSON_AddStringToObject(o, "token", text.c_str());
     httpd_resp_set_status(req, "201 Created");
+    return send_cjson(req, o);
+}
+
+// ── POST /api/remote-temp {"temp": °C | null, "ttl_s"} ───────────────────
+// Feed the unit a room temperature from elsewhere (an HA sensor). Each update
+// is a lease: renew within ttl_s (default 600, 60–3600) or the head goes back
+// to the unit's own sensor. null clears it now.
+esp_err_t handle_remote_temp_post(httpd_req_t* req) {
+    set_cors(req);
+    REQUIRE_API_AUTH(req);
+    char* body = recv_body(req);
+    cJSON* json = body ? cJSON_Parse(body) : nullptr;
+    free(body);
+    const cJSON* jt = json ? cJSON_GetObjectItem(json, "temp") : nullptr;
+    const cJSON* jl = json ? cJSON_GetObjectItem(json, "ttl_s") : nullptr;
+    const bool is_clear = cJSON_IsNull(jt);
+    const bool ok = json && (is_clear || cJSON_IsNumber(jt)) && (!jl || cJSON_IsNumber(jl));
+    const double temp = cJSON_IsNumber(jt) ? jt->valuedouble : 0;
+    const double ttl = cJSON_IsNumber(jl) ? jl->valuedouble : remote_temp::kDefaultTtlS;
+    cJSON_Delete(json);
+    if (!ok || ttl < remote_temp::kMinTtlS || ttl > remote_temp::kMaxTtlS)
+        return send_json_error(req, "400 Bad Request",
+                               "temp must be a number or null; ttl_s 60-3600");
+    const std::string who = web_actor_name(req);
+    if (is_clear) {
+        remote_temp::clear(who);
+    } else {
+        switch (remote_temp::set((float)temp, (uint32_t)ttl, "api", who)) {
+            case remote_temp::Res::Ok: break;
+            case remote_temp::Res::OutOfRange:
+                return send_json_error(req, "400 Bad Request", "temp must be 1-40 \xC2\xB0""C");
+            case remote_temp::Res::SensorOwns:
+                return send_json_error(req, "409 Conflict",
+                                       "a paired room sensor provides the temperature");
+        }
+    }
+    remote_temp::Snapshot rt = remote_temp::snapshot();
+    cJSON* o = cJSON_CreateObject();
+    cJSON_AddBoolToObject(o, "active", rt.active);
+    if (rt.active) {
+        cJSON_AddNumberToObject(o, "temp", rt.temp);
+        cJSON_AddNumberToObject(o, "expires_in_s", rt.expires_in_s);
+    }
     return send_cjson(req, o);
 }
 
@@ -4324,6 +4380,7 @@ esp_err_t init(const Hooks& hooks) {
         {"/api/tokens",              HTTP_DELETE,   handle_tokens_delete,  nullptr},
         {"/api/tokens/ticket",       HTTP_POST,     handle_tokens_ticket,  nullptr},
         {"/api/tokens/redeem",       HTTP_POST,     handle_tokens_redeem,  nullptr},
+        {"/api/remote-temp",         HTTP_POST,     handle_remote_temp_post, nullptr},
         {"/api/*",                   HTTP_OPTIONS, handle_options,        nullptr},
     };
     static_assert(sizeof(uris) / sizeof(uris[0]) <= 70, "raise max_uri_handlers");

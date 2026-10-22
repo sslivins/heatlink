@@ -19,6 +19,7 @@ idf_component_register(
          "ota.cpp"
          "auth_manager.cpp"
          "token_store.cpp"
+         "remote_temp.cpp"
          "diag.cpp"
          "events.cpp"
          "devlog.cpp"

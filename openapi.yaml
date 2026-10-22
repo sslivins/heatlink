@@ -1503,6 +1503,45 @@ paths:
           description: Ticket malformed, for another head, expired, already used or badly signed
         '409': { description: All 8 token slots are in use }
         '429': { description: Locked after too many failed attempts }
+  /api/remote-temp:
+    post:
+      tags: [Control]
+      summary: Feed the unit a room temperature from an outside sensor
+      description: |
+        Starts or refreshes a lease. The unit uses `temp` instead of its own
+        return-air sensor until the lease runs out, then goes back to its own
+        sensor. Send again before `expires_in_s` reaches 0 to keep it going.
+        `temp: null` ends the lease now. Refused while a paired room sensor
+        is feeding this head. Needs control scope.
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+        - SessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [temp]
+              properties:
+                temp: { type: number, nullable: true, minimum: 1, maximum: 40, description: Degrees C; null clears }
+                ttl_s: { type: integer, minimum: 60, maximum: 3600, default: 600, description: Seconds; outside 60-3600 is a 400 }
+      responses:
+        '200':
+          description: Lease state
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  active: { type: boolean }
+                  temp: { type: number }
+                  expires_in_s: { type: integer }
+        '400': { description: Bad JSON or temperature out of range }
+        '401': { description: Not logged in }
+        '403': { description: Token lacks control scope }
+        '409': { description: A room sensor is feeding this head }
 components:
   securitySchemes:
     BearerAuth:
@@ -1650,6 +1689,16 @@ components:
             Direction the outdoor unit is currently running (CN105 0x09
             data[5]). Mainly useful in AUTO; absent when unknown or idle.
         errorCode: { type: string, description: Only present when reported by the unit }
+        fault: { type: boolean, description: True when `errorCode` is set and isn't "No Error" }
+        remoteTemp:
+          type: object
+          description: Present while an outside temperature feed is active
+          properties:
+            temp: { type: number }
+            source: { type: string, description: 'api or mqtt' }
+            by: { type: string, description: Who started the feed }
+            age_s: { type: integer, description: Seconds since the last update }
+            expires_in_s: { type: integer, nullable: true, description: null when it doesn't expire }
         park: { $ref: '#/components/schemas/ParkStatus' }
     ParkStatus:
       type: object

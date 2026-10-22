@@ -445,6 +445,14 @@ and `POST /api/tokens/redeem {"ticket","label"}` on that head exchanges it for
 its own token with the same name and scope. Redeeming again replaces the
 earlier token of that name instead of adding another.
 
+An outside room temperature (from Home Assistant, say) goes through `POST
+/api/remote-temp`. It's a lease: if updates stop, the head goes back to its own
+sensor after `ttl_s` and logs it, so a dead integration can't leave the unit on
+a stale reading. `remoteTemp` in `/api/settings` and the MQTT `remote_temp`
+topic still work and never expire. A paired room sensor takes priority over
+both. `GET /api/settings` shows the active feed as `remoteTemp`, and `fault` is
+true while the unit reports an error code.
+
 ### Control & status
 
 | Method | Path | Purpose |
@@ -453,6 +461,7 @@ earlier token of that name instead of adding another.
 | `GET`  | `/api/status` | version, ip, ssid, uptime, free heap, unit/MQTT link, PMIC power telemetry, diagnostics (brownout/WiFi-drop counts, sags, min VIN) |
 | `GET`  | `/api/settings` | current heat-pump settings + status |
 | `POST` | `/api/settings` | apply any subset of `{power,mode,temperature,fan,vane,wideVane,remoteTemp}` |
+| `POST` | `/api/remote-temp` | feed an outside room temperature (`{temp,ttl_s}`, `temp:null` stops); lapses after `ttl_s` (default 600 s) |
 | `GET`  | `/api/capabilities` | detected unit capabilities (e.g. wide-vane) + override |
 | `POST` | `/api/capabilities` | trigger a capability probe / set an override |
 | `GET`  | `/api/park` | off-at-setpoint config + live status |
