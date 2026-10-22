@@ -3472,7 +3472,7 @@ function memberRow(o){
   // A whole card is a link to that zone's own UI. Buttons live inside and are
   // handled first by the delegated listener (so a tap on ✕/Leave never
   // navigates). data-* only — never interpolate names into an onclick.
-  const urlAttr=o.url?(' data-gurl="'+gEsc(o.url)+'"'):'';
+  const urlAttr=o.url?(' data-gurl="'+gEsc(o.url)+'"'+(o.huid?' data-huid="'+gEsc(o.huid)+'"':'')):'';
   return '<div class="gmember"'+urlAttr+'>'+
     '<span class="gdot '+o.dotcls+'"></span>'+
     '<div class="gmcol">'+
@@ -3555,7 +3555,7 @@ function renderGroupPanel(g){
   });
   $('gMembers').innerHTML=heads.map(h=>memberRow({ name:h.name, dotcls:h.dotcls, tag:h.tag,
     isLock:lockMatch(h.name,h.uid), uid:null, mode:h.mode, room:h.room, target:h.target, rs:h.rs,
-    url:h.url, turn:h.known?tandemTurn(sl,h.uid):null })).join('');
+    url:h.url, huid:h.isPeer?h.uid:null, turn:h.known?tandemTurn(sl,h.uid):null })).join('');
   $('ouMembers').innerHTML=heads.map(h=>memberRow({ name:h.name, dotcls:h.dotcls, tag:h.tag,
     uid:h.uid, isPeer:h.isPeer, url:null })).join('');
   wireMemberCtrls();
@@ -3609,9 +3609,36 @@ function wireMemberCtrls(){
   });
   view.addEventListener('click',e=>{
     const card=e.target.closest('.gmember[data-gurl]');
-    if(card&&card.dataset.gurl) window.open(card.dataset.gurl,'_blank','noopener');
+    if(card&&card.dataset.gurl) openZone(card.dataset.gurl,card.dataset.huid);
   });
   memberCtrlsWired=true;
+}
+// Open another zone's UI. A signed-in admin carries the sign-in over: this head
+// signs a one-time ticket the other head redeems (#sso=…, never sent to a
+// server in the URL). The tab opens first so the popup blocker allows it.
+async function openZone(url,uid){
+  if(!(uid&&authState.web&&authState.role==='admin'&&!authState.guest)){
+    window.open(url,'_blank','noopener'); return;
+  }
+  const w=window.open('about:blank','_blank');
+  let dest=url;
+  try{
+    const r=await jget('/api/group/handoff',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({uid:uid})});
+    if(r.ok){ const t=(await r.json()).ticket; if(t) dest=url+'#sso='+encodeURIComponent(t); }
+  }catch(e){}
+  if(w){ try{ w.opener=null; }catch(e){} w.location.replace(dest); }
+  else window.open(dest,'_blank','noopener');
+}
+// Redeem a sign-in handoff from another zone (see openZone).
+async function redeemHandoff(){
+  const m=/[#&]sso=([^&]+)/.exec(location.hash);
+  if(!m) return;
+  history.replaceState(null,'',location.pathname+location.search);
+  try{
+    await jget('/api/sso',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({ticket:decodeURIComponent(m[1])})});
+  }catch(e){}
 }
 let slDirty=false;
 function sliceNowText(sl){
@@ -4583,6 +4610,7 @@ function wzWaitReboot(msg){
 // ── Startup (gated by auth) ────────────────────────────────────────────
 (async()=>{
   setLang('');   // navigator default first, so the login gate/wizard are localized
+  await redeemHandoff();
   const ok=await loadAuth(true);   // defer revealing the app until the wizard decision is made
   if(!ok) return;  // login gate shown; loops start after login + reload
   try{ await pollOnce(); }catch(e){ console.error('startup poll failed',e); }
