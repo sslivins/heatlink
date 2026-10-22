@@ -3159,6 +3159,149 @@ esp_err_t handle_logout(httpd_req_t* req) {
     return httpd_resp_sendstr(req, "{\"status\":\"ok\"}");
 }
 
+// ── Admin sign-in handoff between heads of one group ───────────────────
+// Opening another zone from the Zones tab lands on a different origin, so the
+// admin cookie doesn't follow. The admin's head mints a ticket
+//   issuer.target.exp.nonce.sig   sig = HMAC(subkey "hl-sso1", fields)
+// that the target redeems once for its own admin session. The group secret is
+// already what heads trust to command each other, and every member shares the
+// admin password. Admin only: the climate-only user password is per head.
+constexpr int64_t kSsoLifeS = 60;
+constexpr int64_t kSsoSkewS = 30;     // tolerated clock difference between heads
+constexpr time_t  kSsoMinEpoch = 1735689600;  // 2025-01-01: NTP has synced
+
+struct SsoSeen { std::string nonce; int64_t until = 0; };
+SsoSeen s_sso_seen[16];
+
+std::string sso_sig(const std::string& issuer, const std::string& target, int64_t exp,
+                    const std::string& nonce) {
+    uint8_t k[32];
+    if (!hvac_group::group_subkey("hl-sso1", k)) return "";
+    return hmac_key_hex(k, "hl-sso1|" + issuer + "|" + target + "|" +
+                               std::to_string((long long)exp) + "|" + nonce);
+}
+
+// One-shot: false if @p nonce was already redeemed while still valid.
+bool sso_nonce_take(const std::string& nonce, int64_t until, int64_t now) {
+    SsoSeen* slot = &s_sso_seen[0];
+    for (auto& e : s_sso_seen) {
+        if (e.until > now && e.nonce == nonce) return false;
+        if (e.until < slot->until) slot = &e;
+    }
+    slot->nonce = nonce;
+    slot->until = until;
+    return true;
+}
+
+// ── POST /api/group/handoff {"uid"} ─ admin: ticket for a group member ──
+esp_err_t handle_group_handoff(httpd_req_t* req) {
+    REQUIRE_ADMIN(req);
+    set_cors(req);
+    char* body = recv_body(req);
+    cJSON* json = body ? cJSON_Parse(body) : nullptr;
+    free(body);
+    const cJSON* ju = json ? cJSON_GetObjectItem(json, "uid") : nullptr;
+    const std::string target = (ju && cJSON_IsString(ju)) ? ju->valuestring : "";
+    cJSON_Delete(json);
+    httpd_resp_set_type(req, "application/json");
+    if (!hvac_group::is_peer(target)) {
+        httpd_resp_set_status(req, "404 Not Found");
+        return httpd_resp_sendstr(req, "{\"error\":\"not a member of this outdoor unit\"}");
+    }
+    const time_t now = time(nullptr);
+    if (now < kSsoMinEpoch) {
+        httpd_resp_set_status(req, "503 Service Unavailable");
+        return httpd_resp_sendstr(req, "{\"error\":\"clock not set\"}");
+    }
+    const std::string issuer = hvac_group::self_uid();
+    const int64_t exp = (int64_t)now + kSsoLifeS;
+    const std::string nonce = hvac_group::generate_nonce();
+    const std::string sig = sso_sig(issuer, target, exp, nonce);
+    if (sig.empty()) {
+        httpd_resp_set_status(req, "409 Conflict");
+        return httpd_resp_sendstr(req, "{\"error\":\"not in a group\"}");
+    }
+    const std::string ticket = issuer + "." + target + "." +
+                               std::to_string((long long)exp) + "." + nonce + "." + sig;
+    cJSON* root = cJSON_CreateObject();
+    cJSON_AddStringToObject(root, "ticket", ticket.c_str());
+    char* out = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    esp_err_t r = httpd_resp_sendstr(req, out ? out : "{}");
+    free(out);
+    return r;
+}
+
+// ── POST /api/sso {"ticket"} ─ redeem a handoff ticket (NO auth) ────────
+esp_err_t handle_sso(httpd_req_t* req) {
+    set_cors(req);
+    httpd_resp_set_type(req, "application/json");
+    char cur[AUTH_SESSION_TOKEN_LEN + 1];
+    const bool have_cookie = get_cookie_token(req, cur, sizeof(cur));
+    if (!auth_mgr_web_auth_enabled() ||
+        (have_cookie && auth_mgr_session_role(cur) == AUTH_ROLE_ADMIN))
+        return httpd_resp_sendstr(req, "{\"status\":\"ok\",\"role\":\"admin\"}");
+    if (auth_mgr_login_lockout_secs() > 0) {
+        httpd_resp_set_status(req, "429 Too Many Requests");
+        return httpd_resp_sendstr(req, "{\"error\":\"too many attempts\"}");
+    }
+    char* body = recv_body(req);
+    cJSON* json = body ? cJSON_Parse(body) : nullptr;
+    free(body);
+    const cJSON* jt = json ? cJSON_GetObjectItem(json, "ticket") : nullptr;
+    const std::string ticket = (jt && cJSON_IsString(jt)) ? jt->valuestring : "";
+    cJSON_Delete(json);
+
+    std::vector<std::string> f;
+    for (size_t pos = 0;;) {
+        const size_t dot = ticket.find('.', pos);
+        f.push_back(ticket.substr(pos, dot == std::string::npos ? dot : dot - pos));
+        if (dot == std::string::npos || f.size() > 5) break;
+        pos = dot + 1;
+    }
+    if (f.size() != 5) f.assign(5, "");
+    const std::string& issuer = f[0];
+    const std::string& target = f[1];
+    const std::string& nonce = f[3];
+    char* end = nullptr;
+    const long long exp = f[2].empty() ? 0 : strtoll(f[2].c_str(), &end, 10);
+    const int64_t now = (int64_t)time(nullptr);
+    const char* why = nullptr;
+    if (!end || *end != '\0' || nonce.empty() || f[4].empty())
+        why = "malformed";
+    else if (target != hvac_group::self_uid() || !hvac_group::is_peer(issuer))
+        why = "not for this head";
+    else if (now < kSsoMinEpoch)
+        why = "clock not set";
+    else if (exp + kSsoSkewS < now || exp > now + kSsoLifeS + kSsoSkewS)
+        why = "expired";
+    else {
+        const std::string want = sso_sig(issuer, target, exp, nonce);
+        if (want.empty() || !ct_equal(want, f[4])) {
+            auth_mgr_note_failed_login();
+            why = "bad signature";
+        } else if (!sso_nonce_take(nonce, exp + kSsoSkewS, now)) {
+            why = "already used";
+        }
+    }
+    if (why) {
+        ESP_LOGW(TAG, "sign-in handoff refused from %s: %s", peer_ipv4(req).c_str(), why);
+        httpd_resp_set_status(req, "401 Unauthorized");
+        char out[80];
+        snprintf(out, sizeof(out), "{\"error\":\"%s\"}", why);
+        return httpd_resp_sendstr(req, out);
+    }
+    char token[AUTH_SESSION_TOKEN_LEN + 1] = {0};
+    if (!auth_mgr_create_admin_session(token)) {
+        httpd_resp_set_status(req, "500 Internal Server Error");
+        return httpd_resp_sendstr(req, "{\"error\":\"no session\"}");
+    }
+    if (have_cookie) auth_mgr_logout(cur);  // replaces a climate-only session
+    ESP_LOGI(TAG, "admin signed in by handoff from %s", issuer.c_str());
+    set_session_cookie(req, token);
+    return httpd_resp_sendstr(req, "{\"status\":\"ok\",\"role\":\"admin\"}");
+}
+
 // ── GET /api/auth — auth config + whether this client is authenticated ──
 esp_err_t handle_auth_get(httpd_req_t* req) {
     set_cors(req);
@@ -3829,6 +3972,8 @@ esp_err_t init(const Hooks& hooks) {
         {"/api/system/factory_reset",HTTP_POST,    handle_factory_reset,  nullptr},
         {"/api/login",               HTTP_POST,    handle_login,          nullptr},
         {"/api/logout",              HTTP_POST,    handle_logout,         nullptr},
+        {"/api/sso",                 HTTP_POST,    handle_sso,            nullptr},
+        {"/api/group/handoff",       HTTP_POST,    handle_group_handoff,  nullptr},
         {"/api/auth",                HTTP_GET,      handle_auth_get,       nullptr},
         {"/api/auth",                HTTP_POST,     handle_auth_post,      nullptr},
         {"/api/events",              HTTP_GET,      handle_events_get,     nullptr},

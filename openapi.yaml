@@ -395,6 +395,67 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/StatusOk' }
+  /api/group/handoff:
+    post:
+      tags: [Auth]
+      summary: Issue a one-time admin sign-in ticket for another head in the group
+      description: |
+        Admin only. The ticket (`issuer.target.exp.nonce.sig`, HMAC under a
+        group-secret subkey) is valid for 60 s and is redeemed once with
+        `POST /api/sso` on the target head.
+      security:
+        - SessionCookie: []
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [uid]
+              properties:
+                uid: { type: string, description: Target member's uid }
+      responses:
+        '200':
+          description: Ticket issued
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ticket: { type: string }
+        '403':
+          description: Not admin
+        '404':
+          description: uid is not a member of this head's group
+        '409':
+          description: This head isn't in a group
+        '503':
+          description: Clock not set (NTP), so the ticket can't carry an expiry
+  /api/sso:
+    post:
+      tags: [Auth]
+      summary: Redeem a sign-in ticket from another head in the group
+      description: |
+        No auth. On success an admin session is created and returned in
+        `Set-Cookie`, replacing any climate-only session. Already-admin
+        callers get 200 without a new session.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ticket]
+              properties:
+                ticket: { type: string }
+      responses:
+        '200':
+          description: 'Signed in as admin; `{"status":"ok","role":"admin"}`'
+        '401':
+          description: Ticket malformed, for another head, expired, already used or badly signed
+        '429':
+          description: Logins are locked after too many failed attempts
   /api/auth:
     get:
       tags: [Auth]

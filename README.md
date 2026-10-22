@@ -386,6 +386,12 @@ any head syncs it to the rest of the group (the newest change wins), carried
 encrypted in the signed peer polls. A head upgraded without a password adopts its
 group's password the same way.
 
+**Moving between zones.** When you're signed in as admin, opening another zone
+from the **Zones** tab signs you in there too. Your head signs a one-time ticket
+with the group key. The ticket is valid for 60 s, and the other head trades it for
+its own admin session. This needs the heads' clocks set (NTP). The climate-only
+password is set per head, so climate-only sign-ins don't carry over.
+
 ## Web UI / REST API
 
 Once connected to WiFi the device serves a responsive touch dashboard at
@@ -454,6 +460,7 @@ access**). Optional per-endpoint API-key auth can be enabled there.
 | `POST` | `/api/device` | set the unit's friendly name / device identity |
 | `GET`/`POST` | `/api/auth` | admin/climate-only passwords, API-key gating, and the first-password claim (see [Admin password](#admin-password)) |
 | `POST` | `/api/login` · `/api/logout` | web-UI session auth (10 failed logins lock it for 30 s) |
+| `POST` | `/api/group/handoff` · `/api/sso` | admin: one-time sign-in ticket for a group member · redeem it on that member |
 
 ### Zone coordination (multi-head)
 
