@@ -439,6 +439,12 @@ when the admin password is reset. A token that is sent but invalid gets 401 even
 where the endpoint would otherwise be open. `GET /api/info` is public and reports
 the head's identity and `api_version` for discovery.
 
+One token covers a whole outdoor unit: with it, `POST /api/tokens/ticket
+{"uid"}` returns a one-time ticket (valid 60 s) for another head in the group,
+and `POST /api/tokens/redeem {"ticket","label"}` on that head exchanges it for
+its own token with the same name and scope. Redeeming again replaces the
+earlier token of that name instead of adding another.
+
 ### Control & status
 
 | Method | Path | Purpose |
@@ -474,6 +480,8 @@ the head's identity and `api_version` for discovery.
 | `POST` | `/api/device` | set the unit's friendly name / device identity |
 | `GET`/`POST` | `/api/auth` | admin/climate-only passwords, API-key gating, and the first-password claim (see [Admin password](#admin-password)) |
 | `GET`/`POST`/`DELETE` | `/api/tokens` | admin: list · create (`{label,scope}`, token shown once) · revoke (`?id=`) integration tokens |
+| `POST` | `/api/tokens/ticket` | token only: one-time ticket (`{uid}`) for the same token on another head in the group |
+| `POST` | `/api/tokens/redeem` | no auth: exchange a ticket (`{ticket,label}`) for this head's own token |
 | `GET`  | `/api/info` | **unauthenticated** identity for discovery: uid, name, firmware, `api_version`, sign-in methods, features |
 | `POST` | `/api/login` · `/api/logout` | web-UI session auth (10 failed logins lock it for 30 s) |
 | `POST` | `/api/group/handoff` · `/api/sso` | admin: one-time sign-in ticket for a group member · redeem it on that member |

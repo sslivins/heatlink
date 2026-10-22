@@ -66,6 +66,10 @@ public:
     bool add(const Entry& e);
     /// Remove by id; false if absent.
     bool remove(const std::string& id);
+    /// Remove every entry labelled @p label whose scope is at most @p max, so
+    /// re-pairing an integration replaces its token instead of piling up
+    /// copies. Returns how many were removed.
+    size_t remove_label(const std::string& label, Scope max);
     void clear() { entries_.clear(); }
     /// The entry whose id matches and whose hash equals @p hash, or nullptr.
     const Entry* match(const std::string& id, const Hash& hash) const;

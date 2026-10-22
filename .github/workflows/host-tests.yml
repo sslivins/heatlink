@@ -117,3 +117,9 @@ jobs:
       - name: Run Node host tests (web UI + API contract)
         shell: bash
         run: node test/run_all.mjs
+
+      - name: Check openapi.yaml parses
+        shell: bash
+        run: |
+          python3 -c 'import yaml' 2>/dev/null || python3 -m pip install --quiet --break-system-packages pyyaml
+          python3 -c "import yaml; yaml.safe_load(open('openapi.yaml', encoding='utf-8')); print('openapi.yaml OK')"

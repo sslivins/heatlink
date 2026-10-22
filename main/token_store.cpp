@@ -70,21 +70,25 @@ void token_store_init() {
 }
 
 bool token_store_create(const std::string& label, tokens::Scope scope, std::string* token_out,
-                        tokens::Entry* entry_out) {
+                        tokens::Entry* entry_out, bool replace) {
     std::lock_guard<std::mutex> g(s_mtx);
     load_locked();
     tokens::Entry e;
     e.label = tokens::sanitize_label(label);
-    if (e.label.empty() || s_table.full()) return false;
+    if (e.label.empty()) return false;
+    const tokens::Table backup = s_table;
+    if (replace) s_table.remove_label(e.label, scope);
+    if (s_table.full()) {
+        s_table = backup;
+        return false;
+    }
     do e.id = random_hex(tokens::kIdLen);
     while (s_table.has_id(e.id));
     std::string secret = random_hex(tokens::kSecretLen);
-    if (!hash_secret(secret, &e.hash)) return false;
     e.scope = scope;
     e.created = now_unix();
-    if (!s_table.add(e)) return false;
-    if (!save_locked()) {
-        s_table.remove(e.id);
+    if (!hash_secret(secret, &e.hash) || !s_table.add(e) || !save_locked()) {
+        s_table = backup;
         return false;
     }
     *token_out = tokens::format_token(e.id, secret);

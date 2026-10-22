@@ -709,8 +709,8 @@ paths:
       parameters:
         - { name: k, in: query, required: true, schema: { type: string }, description: Sensor token }
         - { name: t, in: query, schema: { type: number }, description: Temperature, °C }
-        - { name: h, in: query, schema: { type: number }, description: Humidity, %RH }
-        - { name: b, in: query, schema: { type: integer }, description: Battery, % }
+        - { name: h, in: query, schema: { type: number }, description: 'Humidity, %RH' }
+        - { name: b, in: query, schema: { type: integer }, description: 'Battery, %' }
         - { name: r, in: query, schema: { type: integer }, description: Wi-Fi RSSI, dBm }
       responses:
         '200':
@@ -1431,6 +1431,78 @@ paths:
         '401': { description: Unauthorized }
         '403': { description: Not an admin }
         '404': { description: No such token }
+  /api/tokens/ticket:
+    post:
+      tags: [Auth]
+      summary: Get a ticket for this token on another head of the outdoor unit
+      description: |
+        Integration tokens only (sessions and API keys get 403). Returns a
+        one-time ticket, valid for 60 s, that the target head named by `uid`
+        exchanges at `POST /api/tokens/redeem` for its own token with this
+        token's name and scope. Heads must be in the same group with their
+        clocks set.
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [uid]
+              properties:
+                uid: { type: string, description: Target head's uid (from its /api/info) }
+      responses:
+        '200':
+          description: Ticket
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ticket: { type: string }
+                  label: { type: string, description: Pass back unchanged when redeeming }
+                  scope: { type: string, enum: [read, control, admin] }
+                  expires: { type: integer, description: Unix seconds }
+        '401': { description: Bad token }
+        '403': { description: Not an integration token }
+        '404': { description: Target is not a member of this outdoor unit }
+        '409': { description: This head is not in a group }
+        '503': { description: Clock not set }
+  /api/tokens/redeem:
+    post:
+      tags: [Auth]
+      summary: Exchange a ticket from another head for a token on this one
+      description: |
+        No auth; the signed ticket is the proof. Creates a token with the
+        ticket's name and scope, replacing any earlier token with the same
+        name and no stronger scope so pairing again doesn't pile up copies.
+        The token text is returned once.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ticket, label]
+              properties:
+                ticket: { type: string }
+                label: { type: string, description: The `label` returned with the ticket }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Token'
+                  - type: object
+                    properties:
+                      token: { type: string }
+        '401':
+          description: Ticket malformed, for another head, expired, already used or badly signed
+        '409': { description: All 8 token slots are in use }
+        '429': { description: Locked after too many failed attempts }
 components:
   securitySchemes:
     BearerAuth:

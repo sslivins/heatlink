@@ -123,6 +123,16 @@ bool Table::remove(const std::string& id) {
     return true;
 }
 
+size_t Table::remove_label(const std::string& label, Scope max) {
+    const size_t before = entries_.size();
+    entries_.erase(std::remove_if(entries_.begin(), entries_.end(),
+                                  [&](const Entry& e) {
+                                      return e.label == label && e.scope <= max;
+                                  }),
+                   entries_.end());
+    return before - entries_.size();
+}
+
 const Entry* Table::match(const std::string& id, const Hash& hash) const {
     for (const Entry& e : entries_) {
         if (e.id == id) return hash_equal(e.hash, hash) ? &e : nullptr;

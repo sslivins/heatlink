@@ -100,6 +100,21 @@ void test_table_add_remove_match() {
     CHECK(!t.add(entry("abcdef01")));
 }
 
+void test_remove_label() {
+    Table t;
+    t.add(entry("00000001", Scope::Read));
+    t.add(entry("00000002", Scope::Control));
+    t.add(entry("00000003", Scope::Admin));
+    Entry other = entry("00000004", Scope::Read);
+    other.label = "Script";
+    t.add(other);
+    // A control-scoped re-pair replaces read/control copies, never a stronger one.
+    CHECK(t.remove_label("Home Assistant", Scope::Control) == 2);
+    CHECK(t.entries().size() == 2);
+    CHECK(t.has_id("00000003") && t.has_id("00000004"));
+    CHECK(t.remove_label("Nope", Scope::Admin) == 0);
+}
+
 void test_touch() {
     Table t;
     t.add(entry(kId));
@@ -163,6 +178,7 @@ int main() {
     test_scope();
     test_sanitize_label();
     test_table_add_remove_match();
+    test_remove_label();
     test_touch();
     test_serialize_roundtrip();
     test_deserialize_rejects_garbage();
