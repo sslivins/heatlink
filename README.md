@@ -243,7 +243,10 @@ on firmware that supports it), the group instead takes turns heating and cooling
   publishes the current turn — HEAT or COOL — in its signed group snapshot.
 - Heads that want the served mode run normally (with off-at-setpoint). Heads
   that want the other mode keep that mode but are held **parked** (shown as
-  "Paused while other rooms heat/cool") until their turn. HeatLink doesn't
+  "Paused while other rooms heat/cool") until their turn. Once a waiting room
+  needs its turn, its Climate tab shows when that turn will start: "cooling
+  within N min" (the latest the running turn can end) or, during the pause
+  between modes, "cooling starts in ~N min". HeatLink doesn't
   change a head's mode to slice (except briefly to FAN for the air check below).
 - A turn lasts at least the **minimum turn** (5–60 min, default 10; protects
   the outdoor unit from short cycling). After that it may hand over once every
@@ -401,7 +404,7 @@ unit's MAC suffix shown on the Status tab). It has five tabs — **Climate**
 coordination with live Tandem status, plus a **House** view listing every head on the LAN grouped by
 outdoor unit when you have more than one), **History** (admin only — a chart of
 room/target/outdoor temperature and heating/cooling/defrost/parked bands
-over 4 h, 24 h or 7 days (7 days on wider screens only); one sample every 30 s is kept on flash for
+over 4 h, 24 h or 7 days (7 days on wider screens only; phones open on 4 h, wider screens on 24 h); one sample every 30 s is kept on flash for
 14 days and survives reboots and OTA), **Status** (live diagnostics — WiFi, controller power, heat-pump
 sensors, activity log), and **Settings** (display, wide-vane, off at setpoint,
 Tandem, WiFi, MQTT/HA,

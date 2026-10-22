@@ -1356,6 +1356,7 @@ const I18N = { fr: {
   "heating":"chauffage","cooling":"refroidissement","starting…":"démarrage…",
   "switching to heating…":"passage au chauffage…","switching to cooling…":"passage au refroidissement…",
   "heating within {n} min":"chauffage d’ici {n} min","cooling within {n} min":"refroidissement d’ici {n} min",
+  "heating starts in ~{n} min":"chauffage dans ~{n} min","cooling starts in ~{n} min":"refroidissement dans ~{n} min",
   "Up next":"À suivre",
   "Starting…":"Démarrage…",
   // Room sensor (#142)
@@ -2205,8 +2206,15 @@ const pkMin=v=>(v%60?(v/60).toFixed(1):(v/60))+' min';
 // Tandem hold reason for a paused head: what the other rooms are doing.
 function tandemPaused(st){
   if(st.checking) return i18n('Checking if this room needs a turn');
-  return i18n(st.tandem==='heat'?'Paused while other rooms heat':
+  const why=i18n(st.tandem==='heat'?'Paused while other rooms heat':
               st.tandem==='cool'?'Paused while other rooms cool':'Paused while modes switch');
+  if(st.tandem_eta_s==null||!st.tandem_next) return why;
+  // When this room's turn starts: a fixed pause between modes ("starts in"),
+  // or the latest the running turn can end ("within").
+  const n=Math.max(1,Math.ceil(st.tandem_eta_s/60)),heat=st.tandem_next==='heat';
+  const key=st.tandem==='switch'?(heat?'heating starts in ~{n} min':'cooling starts in ~{n} min')
+                               :(heat?'heating within {n} min':'cooling within {n} min');
+  return why+' \u00b7 '+i18n(key,{n:n});
 }
 function pkStatusText(st){
   if(!st||!st.enabled) return i18n('Disabled');
@@ -4000,9 +4008,10 @@ const HF={CONN:1,POWER:2,OPER:4,DEFROST:8,PARKED:16};
 const HIST_SNAP={14400:900,86400:3600,604800:21600};
 const HIST_MODES=['','Heat','Cool','Dry','Fan','Auto'];
 const HIST_FAN=['Auto','Quiet','1','2','3','4'];
-let hist={window:86400,end:null,data:null,loading:false,loadedAt:0,error:''};
-let histTabActive=false, histGeom=null, histDrag=null, histWired=false;
 const histNarrowMQ=window.matchMedia('(max-width:640px)');
+// Phones open on 4 h (24 h is cramped at that width); wider screens on 24 h.
+let hist={window:histNarrowMQ.matches?14400:86400,end:null,data:null,loading:false,loadedAt:0,error:''};
+let histTabActive=false, histGeom=null, histDrag=null, histWired=false;
 // 7 d is hidden on phones; fall back to the live 24 h view.
 function histFitWindow(){
   if(!histNarrowMQ.matches||hist.window!==604800) return false;
