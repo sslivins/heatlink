@@ -709,8 +709,8 @@ paths:
       parameters:
         - { name: k, in: query, required: true, schema: { type: string }, description: Sensor token }
         - { name: t, in: query, schema: { type: number }, description: Temperature, °C }
-        - { name: h, in: query, schema: { type: number }, description: Humidity, %RH }
-        - { name: b, in: query, schema: { type: integer }, description: Battery, % }
+        - { name: h, in: query, schema: { type: number }, description: 'Humidity, %RH' }
+        - { name: b, in: query, schema: { type: integer }, description: 'Battery, %' }
         - { name: r, in: query, schema: { type: integer }, description: Wi-Fi RSSI, dBm }
       responses:
         '200':
@@ -1503,7 +1503,8 @@ paths:
           description: Ticket malformed, for another head, expired, already used or badly signed
         '409': { description: All 8 token slots are in use }
         '429': { description: Locked after too many failed attempts }
-components:  securitySchemes:
+components:
+  securitySchemes:
     BearerAuth:
       type: http
       scheme: bearer
