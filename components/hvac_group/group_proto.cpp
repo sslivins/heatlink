@@ -347,10 +347,13 @@ UnitView evaluate_unit(const std::vector<MemberObs>& members, Demand tandem_mode
     UnitView u;
     if (tandem_mode != Demand::Heat && tandem_mode != Demand::Cool) tandem_mode = Demand::Neutral;
     bool any_unknown = false, any_on = false, active = false, warmup = false, mixed = false;
+    bool any_resting = false;
     Demand active_dir = Demand::Neutral, on_dir = Demand::Neutral;
     for (const auto& m : members) {
         if (m.state == MemberState::Unknown) { any_unknown = true; continue; }
         if (!m.power_on || m.demand == Demand::Neutral) continue;
+        // A parked or held room asks nothing of the outdoor unit.
+        if (m.resting && !m.active_now) { any_resting = true; continue; }
         any_on = true;
         // AUTO counts as the direction it reports running in, if any.
         const Demand d = (m.demand == Demand::Auto) ? m.direction : m.demand;
@@ -380,6 +383,7 @@ UnitView evaluate_unit(const std::vector<MemberObs>& members, Demand tandem_mode
     } else {
         // Only claim Off when every head was seen.
         u.power = any_unknown ? UnitPower::Unknown : UnitPower::Off;
+        u.resting = any_resting;
     }
     const bool running = u.power == UnitPower::Active && !u.defrost;
     if (tandem_changeover && tandem_mode != Demand::Neutral &&

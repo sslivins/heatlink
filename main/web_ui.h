@@ -63,6 +63,8 @@ struct DiagTelemetry {
 /// Application-supplied accessors. All are invoked from the HTTP server task.
 struct Hooks {
     std::function<cn105::Settings()>               get_settings;
+    /// The unit's physical settings, without the park overlay (optional).
+    std::function<cn105::Settings()>               get_unit_settings;
     std::function<cn105::Status()>                 get_status;
     std::function<bool()>                          unit_connected;
     std::function<bool()>                          mqtt_connected;

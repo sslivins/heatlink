@@ -124,6 +124,7 @@ struct MemberObs {
     Demand      demand = Demand::Neutral;   ///< classified from power+mode.
     bool        active_now = false;         ///< operating==true (running now).
     bool        standby = false;            ///< STANDBY+IDLE+!operating (blocked).
+    bool        resting = false;            ///< on, but HeatLink has the indoor unit off/fan (parked, held).
     // Display-only extras for the Zones-tab cards. Never consulted by
     // evaluate_group — a sentinel of -1000 means "unknown/not reported".
     float       room_temp   = -1000.f;      ///< current room temp, °C.
@@ -211,6 +212,7 @@ struct UnitView {
     Demand    direction = Demand::Neutral;  ///< Heat/Cool it is serving or set to; Neutral = unknown/mixed.
     bool      defrost   = false;            ///< a head reports DEFROST (unit-wide).
     Demand    pending   = Demand::Neutral;  ///< Heat/Cool it is starting or switching to.
+    bool      resting   = false;            ///< Off only because every room that's on is resting.
 };
 
 /// Derive the unit view from the member observations. @p tandem_mode is the

@@ -541,6 +541,21 @@ static void test_unit_view() {
         CHECK_TRUE(u.direction == Demand::Heat);
         CHECK_TRUE(u.pending == Demand::Neutral);
     }
+    // A parked room asks nothing of the unit → Off (resting), not Idle/Heat.
+    {
+        MemberObs a = mk("a", MemberState::SelfKnown, true, Demand::Heat, false, false);
+        a.resting = true;
+        std::vector<MemberObs> ms = {a, mk("b", MemberState::Known, false, Demand::Neutral, false, false)};
+        UnitView u = evaluate_unit(ms, Demand::Heat, false);
+        CHECK_TRUE(u.power == U::Off);
+        CHECK_TRUE(u.resting);
+        // Another room still on in heat keeps the unit Idle/Heat.
+        ms[1] = mk("b", MemberState::Known, true, Demand::Heat, false, false);
+        u = evaluate_unit(ms, Demand::Neutral, false);
+        CHECK_TRUE(u.power == U::Idle);
+        CHECK_TRUE(u.direction == Demand::Heat);
+        CHECK_TRUE(!u.resting);
+    }
     // Defrost wins and reads as heating.
     {
         MemberObs a = mk("a", MemberState::SelfKnown, true, Demand::Heat, false, false);
