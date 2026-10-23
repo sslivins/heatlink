@@ -2044,6 +2044,10 @@ components:
         name: { type: string }
         state: { type: string, enum: [known, incompatible, unknown] }
         configured_demand: { type: string, description: Present when state is known }
+        operating: { type: boolean, description: Present when state is known }
+        standby: { type: boolean, description: Present when state is known }
+        subMode: { type: string, description: 'CN105 sub-mode (NORMAL, WARMUP, DEFROST, PREHEAT, STANDBY, OFF). Present when state is known.' }
+        dir: { type: string, description: 'Direction an AUTO head is running (HEAT/COOL). Present when known.' }
         mode: { type: string }
         roomTemp: { type: number }
         targetTemp: { type: number }
@@ -2057,6 +2061,8 @@ components:
         configured_demand: { type: string }
         operating: { type: boolean }
         standby: { type: boolean }
+        subMode: { type: string, description: CN105 sub-mode }
+        dir: { type: string, description: 'Direction an AUTO head is running (HEAT/COOL). Absent when unknown.' }
         mode: { type: string }
         roomTemp: { type: number }
         targetTemp: { type: number }
@@ -2093,6 +2099,15 @@ components:
           type: array
           items: { type: string }
         slice: { $ref: '#/components/schemas/SliceStatus' }
+        unit: { $ref: '#/components/schemas/UnitView' }
+    UnitView:
+      type: object
+      description: What the shared outdoor unit is doing, from every head's live state. Present when in a group.
+      properties:
+        power: { type: string, enum: [unknown, off, idle, active], description: 'idle = a mode is set but the compressor is resting' }
+        direction: { type: string, enum: [HEAT, COOL], nullable: true, description: 'null when off, unknown or rooms disagree' }
+        defrost: { type: boolean }
+        pending: { type: string, enum: [HEAT, COOL], nullable: true, description: 'Mode the unit is starting up in (Tandem changeover, or preheat)' }
     SliceStatus:
       type: object
       description: Group time-slicing settings and live schedule.

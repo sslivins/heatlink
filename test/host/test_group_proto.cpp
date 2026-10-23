@@ -517,6 +517,75 @@ static void test_merge_park_lww() {
     CHECK_EQ(ab.park.value, "0,300,1,900,120");
 }
 
+static void test_unit_view() {
+    using U = UnitPower;
+    // Everyone off and visible → Off.
+    {
+        std::vector<MemberObs> ms = {mk("a", MemberState::SelfKnown, false, Demand::Neutral, false, false),
+                                     mk("b", MemberState::Known, false, Demand::Neutral, false, false)};
+        UnitView u = evaluate_unit(ms, Demand::Neutral, false);
+        CHECK_EQ(unit_power_str(u.power), "off");
+    }
+    // A peer we can't see → can't claim Off.
+    {
+        std::vector<MemberObs> ms = {mk("a", MemberState::SelfKnown, false, Demand::Neutral, false, false),
+                                     mk("b", MemberState::Unknown, false, Demand::Neutral, false, false)};
+        CHECK_TRUE(evaluate_unit(ms, Demand::Neutral, false).power == U::Unknown);
+    }
+    // On in HEAT, compressor resting → Idle/Heat, not Off.
+    {
+        std::vector<MemberObs> ms = {mk("a", MemberState::SelfKnown, true, Demand::Heat, false, false),
+                                     mk("b", MemberState::Known, false, Demand::Neutral, false, false)};
+        UnitView u = evaluate_unit(ms, Demand::Neutral, false);
+        CHECK_TRUE(u.power == U::Idle);
+        CHECK_TRUE(u.direction == Demand::Heat);
+        CHECK_TRUE(u.pending == Demand::Neutral);
+    }
+    // Defrost wins and reads as heating.
+    {
+        MemberObs a = mk("a", MemberState::SelfKnown, true, Demand::Heat, false, false);
+        a.sub_mode = "DEFROST";
+        UnitView u = evaluate_unit({a}, Demand::Neutral, false);
+        CHECK_TRUE(u.power == U::Active);
+        CHECK_TRUE(u.defrost);
+        CHECK_TRUE(u.direction == Demand::Heat);
+    }
+    // AUTO running cool counts as cool.
+    {
+        MemberObs a = mk("a", MemberState::SelfKnown, true, Demand::Auto, true, false);
+        a.direction = Demand::Cool;
+        UnitView u = evaluate_unit({a}, Demand::Neutral, false);
+        CHECK_TRUE(u.power == U::Active);
+        CHECK_TRUE(u.direction == Demand::Cool);
+    }
+    // Tandem changeover heat→cool while heat winds down: Heat running, Cool pending.
+    {
+        std::vector<MemberObs> ms = {mk("a", MemberState::SelfKnown, true, Demand::Heat, true, false),
+                                     mk("b", MemberState::Known, true, Demand::Cool, false, false)};
+        UnitView u = evaluate_unit(ms, Demand::Cool, true);
+        CHECK_TRUE(u.direction == Demand::Heat);
+        CHECK_TRUE(u.pending == Demand::Cool);
+        // Once cool is running the switch is done.
+        ms[0].active_now = false; ms[1].active_now = true;
+        u = evaluate_unit(ms, Demand::Cool, true);
+        CHECK_TRUE(u.direction == Demand::Cool);
+        CHECK_TRUE(u.pending == Demand::Neutral);
+    }
+    // Mixed idle demands with Tandem off → direction unknown; with Tandem → its mode.
+    {
+        std::vector<MemberObs> ms = {mk("a", MemberState::SelfKnown, true, Demand::Heat, false, false),
+                                     mk("b", MemberState::Known, true, Demand::Cool, false, false)};
+        CHECK_TRUE(evaluate_unit(ms, Demand::Neutral, false).direction == Demand::Neutral);
+        CHECK_TRUE(evaluate_unit(ms, Demand::Cool, false).direction == Demand::Cool);
+    }
+    // PREHEAT signals a heat start.
+    {
+        MemberObs a = mk("a", MemberState::SelfKnown, true, Demand::Heat, false, false);
+        a.sub_mode = "PREHEAT";
+        CHECK_TRUE(evaluate_unit({a}, Demand::Neutral, false).pending == Demand::Heat);
+    }
+}
+
 int main() {
     test_hex_roundtrip();
     test_identity_validation();
@@ -527,6 +596,7 @@ int main() {
     test_should_adopt_admin();
     test_classify_demand();
     test_observe();
+    test_unit_view();
     test_is_valid_nonce();
     test_parse_resolution_inputs();
     test_plan_resolution();

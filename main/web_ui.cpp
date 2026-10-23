@@ -1482,6 +1482,8 @@ esp_err_t handle_group_state(httpd_req_t* req) {
     cJSON_AddBoolToObject(root, "operating", sta.operating);
     cJSON_AddStringToObject(root, "subMode", sta.subMode.c_str());
     cJSON_AddStringToObject(root, "stage", sta.stage.c_str());
+    // AUTO's running direction, for the peers' unit strip (older peers omit it).
+    if (!sta.direction.empty()) cJSON_AddStringToObject(root, "direction", sta.direction.c_str());
     // Display-only extras consumed by the poller's Zones-tab cards (pv-compatible:
     // an older peer simply omits them and the card renders "--").
     {
@@ -1709,6 +1711,10 @@ bool poll_peer(const std::string& uid, hvac_group::MemberObs& out, bool& incompa
                     }
                     out.ip          = ip;
                     {
+                        const cJSON* jdir = cJSON_GetObjectItem(j, "direction");
+                        if (cJSON_IsString(jdir)) out.direction = hvac_group::parse_direction(jdir->valuestring);
+                    }
+                    {
                         slice_ctl::PeerObs so;
                         const cJSON* jsv = cJSON_GetObjectItem(j, "slice_v");
                         so.capable = jsv && cJSON_IsNumber(jsv) &&
@@ -1860,6 +1866,8 @@ hvac_group::GroupView compute_group_view(std::vector<hvac_group::MemberObs>* out
     self_obs.target_temp = st.temperature;
     self_obs.mode_str    = (st.power == "OFF") ? std::string("OFF") : st.mode;
     self_obs.ip          = wifi::get_ip();
+    self_obs.sub_mode    = sta.subMode;
+    self_obs.direction   = hvac_group::parse_direction(sta.direction);
 
     std::vector<hvac_group::MemberObs> members;
     members.push_back(self_obs);
@@ -2185,6 +2193,9 @@ esp_err_t handle_group_get(httpd_req_t* req) {
     if (self_obs.target_temp > -900.f) cJSON_AddNumberToObject(self, "targetTemp", self_obs.target_temp);
     if (!self_obs.room_sensor.empty()) cJSON_AddStringToObject(self, "rs", self_obs.room_sensor.c_str());
     if (!self_obs.ip.empty())          cJSON_AddStringToObject(self, "ip", self_obs.ip.c_str());
+    if (!self_obs.sub_mode.empty())    cJSON_AddStringToObject(self, "subMode", self_obs.sub_mode.c_str());
+    if (self_obs.direction != hvac_group::Demand::Neutral)
+        cJSON_AddStringToObject(self, "dir", hvac_group::demand_str(self_obs.direction));
     cJSON_AddItemToObject(root, "self", self);
 
     cJSON* jmembers = cJSON_CreateArray();
@@ -2203,6 +2214,11 @@ esp_err_t handle_group_get(httpd_req_t* req) {
             if (m.room_temp   > -900.f)     cJSON_AddNumberToObject(jm, "roomTemp", m.room_temp);
             if (m.target_temp > -900.f)     cJSON_AddNumberToObject(jm, "targetTemp", m.target_temp);
             if (!m.room_sensor.empty())     cJSON_AddStringToObject(jm, "rs", m.room_sensor.c_str());
+            cJSON_AddBoolToObject(jm, "operating", m.active_now);
+            cJSON_AddBoolToObject(jm, "standby", m.standby);
+            if (!m.sub_mode.empty())        cJSON_AddStringToObject(jm, "subMode", m.sub_mode.c_str());
+            if (m.direction != hvac_group::Demand::Neutral)
+                cJSON_AddStringToObject(jm, "dir", hvac_group::demand_str(m.direction));
         }
         if (!m.ip.empty()) cJSON_AddStringToObject(jm, "ip", m.ip.c_str());
         cJSON_AddItemToArray(jmembers, jm);
@@ -2238,6 +2254,32 @@ esp_err_t handle_group_get(httpd_req_t* req) {
         cJSON_AddItemToArray(jwarn, cJSON_CreateString(w.c_str()));
     cJSON_AddItemToObject(root, "warnings", jwarn);
     cJSON_AddItemToObject(root, "slice", slice_status_json());
+    if (grouped) {
+        // The shared outdoor unit's state, for the Zones / Climate unit strip.
+        const slice_ctl::Status ss = slice_ctl::status();
+        hvac_group::Demand tmode = hvac_group::Demand::Neutral;
+        bool changeover = false;
+        if (ss.cfg.enabled && ss.have_state) {
+            tmode = hvac_group::parse_target_mode(slice::mode_str(ss.state.mode));
+            // A changeover long past its settle time is a stale copy of the
+            // coordinator's state, not a switch in progress.
+            changeover = ss.state.phase == slice::Phase::Changeover &&
+                         ss.elapsed_s < ss.cfg.settle_s + 120;
+        }
+        const hvac_group::UnitView u = hvac_group::evaluate_unit(members, tmode, changeover);
+        cJSON* ju = cJSON_CreateObject();
+        cJSON_AddStringToObject(ju, "power", hvac_group::unit_power_str(u.power));
+        if (u.direction != hvac_group::Demand::Neutral)
+            cJSON_AddStringToObject(ju, "direction", hvac_group::demand_str(u.direction));
+        else
+            cJSON_AddNullToObject(ju, "direction");
+        cJSON_AddBoolToObject(ju, "defrost", u.defrost);
+        if (u.pending != hvac_group::Demand::Neutral)
+            cJSON_AddStringToObject(ju, "pending", hvac_group::demand_str(u.pending));
+        else
+            cJSON_AddNullToObject(ju, "pending");
+        cJSON_AddItemToObject(root, "unit", ju);
+    }
 
     char* str = cJSON_PrintUnformatted(root);
     httpd_resp_set_type(req, "application/json");
