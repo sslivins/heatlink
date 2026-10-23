@@ -1427,7 +1427,7 @@ const I18N = { fr: {
   "at temperature":"température atteinte","compressor starting":"le compresseur démarre",
   "other rooms are heating":"les autres pièces chauffent","other rooms are cooling":"les autres pièces refroidissent",
   "modes are switching":"changement de mode en cours",
-  "All rooms are off":"Toutes les pièces sont arrêtées","Compressor resting":"Compresseur au repos",
+  "All rooms are off":"Toutes les pièces sont arrêtées","Compressor resting":"Compresseur au repos","Rooms at setpoint":"Pièces à la consigne",
   "A room is offline":"Une pièce est hors ligne","Outdoor unit":"Unité extérieure",
   // Room sensor (#142)
   "Room sensor":"Capteur de pièce",
@@ -3849,7 +3849,7 @@ function unitCaption(u,tandemShown){
   if(!u) return '';
   if(u.defrost) return i18n('Defrost')+' \u00b7 '+i18n('heat resumes in a few minutes');
   if(tandemShown) return '';
-  if(u.power==='off') return i18n('All rooms are off');
+  if(u.power==='off') return i18n(u.resting?'Rooms at setpoint':'All rooms are off');
   if(u.power==='unknown') return i18n('A room is offline');
   if(u.power==='idle'&&!u.pending) return i18n('Compressor resting');
   return '';

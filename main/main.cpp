@@ -598,6 +598,7 @@ extern "C" void app_main() {
     // and MQTT control paths funnel through identical apply logic.
     web_ui::Hooks hooks;
     hooks.get_settings   = [] { return park_ctl::overlay(g_hp.getSettings()); };
+    hooks.get_unit_settings = [] { return g_hp.getSettings(); };
     hooks.get_status     = [] { return g_hp.getStatus(); };
     hooks.unit_connected = [] { return g_hp.isConnected(); };
     hooks.mqtt_connected = [] { return hvac_mqtt::is_connected(); };

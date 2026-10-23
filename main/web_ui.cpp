@@ -1466,6 +1466,16 @@ std::string get_header(httpd_req_t* req, const char* name) {
     return v;
 }
 
+// On with heat/cool demand, but HeatLink has the indoor unit off or on fan
+// (parked at setpoint, held for a Tandem turn).
+bool self_resting(const cn105::Settings& logical) {
+    if (!s_hooks.get_unit_settings) return false;
+    if (hvac_group::classify_demand(logical.power, logical.mode) == hvac_group::Demand::Neutral)
+        return false;
+    const cn105::Settings unit = s_hooks.get_unit_settings();
+    return hvac_group::classify_demand(unit.power, unit.mode) == hvac_group::Demand::Neutral;
+}
+
 // ── GET /api/group/state — signed peer snapshot (Phase 2b) ─────────────
 // NOT session-gated: authentication is the HMAC signature over
 // signing_string(sender, self, gid, nonce, "") using the shared group secret.
@@ -1518,6 +1528,7 @@ esp_err_t handle_group_state(httpd_req_t* req) {
     // HeatLink's managed Auto (Tandem): "mode" stays the physical HEAT/COOL,
     // which is what slicing and conflict checks need; this is display-only.
     if (auto_ctl::active()) cJSON_AddBoolToObject(root, "auto", true);
+    if (self_resting(st)) cJSON_AddBoolToObject(root, "resting", true);
     // Display-only extras consumed by the poller's Zones-tab cards (pv-compatible:
     // an older peer simply omits them and the card renders "--").
     {
@@ -1737,6 +1748,7 @@ bool poll_peer(const std::string& uid, hvac_group::MemberObs& out, bool& incompa
                     const cJSON* jtt = cJSON_GetObjectItem(j, "targetTemp");
                     out.room_temp   = (jrt && cJSON_IsNumber(jrt)) ? (float)jrt->valuedouble : -1000.f;
                     out.target_temp = (jtt && cJSON_IsNumber(jtt)) ? (float)jtt->valuedouble : -1000.f;
+                    out.resting = cJSON_IsTrue(cJSON_GetObjectItem(j, "resting"));
                     {
                         const cJSON* jrs = cJSON_GetObjectItem(j, "rs");
                         if (cJSON_IsString(jrs) && (!strcmp(jrs->valuestring, "ok") ||
@@ -1904,6 +1916,7 @@ hvac_group::GroupView compute_group_view(std::vector<hvac_group::MemberObs>* out
     self_obs.sub_mode    = sta.subMode;
     self_obs.direction   = hvac_group::parse_direction(sta.direction);
     self_obs.managed_auto = auto_ctl::active();
+    self_obs.resting     = self_resting(st);
 
     std::vector<hvac_group::MemberObs> members;
     members.push_back(self_obs);
@@ -2312,6 +2325,7 @@ esp_err_t handle_group_get(httpd_req_t* req) {
         else
             cJSON_AddNullToObject(ju, "direction");
         cJSON_AddBoolToObject(ju, "defrost", u.defrost);
+        if (u.resting) cJSON_AddBoolToObject(ju, "resting", true);
         if (u.pending != hvac_group::Demand::Neutral)
             cJSON_AddStringToObject(ju, "pending", hvac_group::demand_str(u.pending));
         else

@@ -2121,9 +2121,10 @@ components:
       type: object
       description: What the shared outdoor unit is doing, from every head's live state. Present when in a group.
       properties:
-        power: { type: string, enum: [unknown, off, idle, active], description: 'idle = a mode is set but the compressor is resting' }
+        power: { type: string, enum: [unknown, off, idle, active], description: 'idle = an indoor unit is on in a mode but the compressor is resting; parked or held rooms count as off' }
         direction: { type: string, enum: [HEAT, COOL], nullable: true, description: 'null when off, unknown or rooms disagree' }
         defrost: { type: boolean }
+        resting: { type: boolean, description: 'Present (true) when off only because every room that is on is parked or held' }
         pending: { type: string, enum: [HEAT, COOL], nullable: true, description: 'Mode the unit is starting up in (Tandem changeover, or preheat)' }
     SliceStatus:
       type: object
