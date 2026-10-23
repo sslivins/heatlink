@@ -170,6 +170,15 @@ drive('renderClimate(power=off)', () => {
   probe.setClimate({ power: false, mode: 'HEAT', temp: 21, room: 20, operating: false });
   probe.renderClimate();
 });
+// Managed Auto range (Tandem): two thumbs, both directions.
+for (const dir of ['HEAT', 'COOL']) {
+  drive(`renderClimate(auto range dir=${dir})`, () => {
+    probe.setClimate({ power: true, mode: 'AUTO', temp: 21, room: 22, operating: true,
+      auto: { managed: true, available: true, heat_to: 20, cool_to: 24, dir } });
+    probe.renderClimate();
+  });
+}
+probe.setClimate({ auto: null });
 
 drive('renderCurrent()', () => probe.renderCurrent());
 

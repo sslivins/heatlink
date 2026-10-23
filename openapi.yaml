@@ -1705,6 +1705,19 @@ components:
             age_s: { type: integer, description: Seconds since the last update }
             expires_in_s: { type: integer, nullable: true, description: null when it doesn't expire }
         park: { $ref: '#/components/schemas/ParkStatus' }
+        auto:
+          type: object
+          description: >-
+            HeatLink's Auto range. With Tandem on, mode AUTO keeps the room
+            between `heat_to` and `cool_to` (at least 2 °C apart): the unit runs
+            HEAT at `heat_to` or COOL at `cool_to`, and `temperature` is the
+            active end. With Tandem off, AUTO is the unit's own Auto.
+          properties:
+            managed: { type: boolean, description: Mode AUTO is this range (the unit physically runs HEAT/COOL) }
+            available: { type: boolean, description: Tandem is on, so choosing AUTO uses the range }
+            heat_to: { type: number, description: Heat when the room falls below this (°C) }
+            cool_to: { type: number, description: Cool when the room rises above this (°C) }
+            dir: { type: string, enum: [HEAT, COOL], description: The end currently in use }
     ParkStatus:
       type: object
       description: Off-at-setpoint runtime status. While parked, `power` reports ON.
@@ -1723,7 +1736,7 @@ components:
         need: { type: string, enum: ['yes', 'no', checking], description: 'Only when held: does this room need its Tandem turn (checking until its air check reports; yes when checks are off)' }
         checking: { type: boolean, description: 'Only when held: an air check is running in FAN mode (settings report the user''s mode)' }
         forced: { type: boolean, description: Off-at-setpoint is forced on by group time-slicing }
-        slicing: { type: boolean, description: Group time-slicing (Tandem) is enabled (AUTO is unavailable) }
+        slicing: { type: boolean, description: Group time-slicing (Tandem) is enabled (AUTO uses the Auto range) }
         quiet_fan: { type: boolean, description: An air check is running with the fan at QUIET (settings report the user's fan) }
         room_sensor: { type: boolean, description: 'A fresh wireless room sensor supplies the room temperature, so no air checks run (next_probe_s is null)' }
     RoomSensors:
@@ -1822,7 +1835,9 @@ components:
       properties:
         power: { type: string, enum: ['ON', 'OFF'] }
         mode: { type: string, example: HEAT }
-        temperature: { type: number }
+        temperature: { type: number, description: 'In a managed Auto range, moves the end in use' }
+        heat_to: { type: number, description: 'Auto range heat-to end (°C); the other end moves to keep a 2 °C gap. Applied before `mode`.' }
+        cool_to: { type: number, description: 'Auto range cool-to end (°C); the other end moves to keep a 2 °C gap. Applied before `mode`.' }
         fan: { type: string }
         vane: { type: string }
         wideVane: { type: string }
@@ -2048,6 +2063,7 @@ components:
         standby: { type: boolean, description: Present when state is known }
         subMode: { type: string, description: 'CN105 sub-mode (NORMAL, WARMUP, DEFROST, PREHEAT, STANDBY, OFF). Present when state is known.' }
         dir: { type: string, description: 'Direction an AUTO head is running (HEAT/COOL). Present when known.' }
+        auto: { type: boolean, description: 'Present (true) when the head is in a managed Auto range; mode then shows the end in use' }
         mode: { type: string }
         roomTemp: { type: number }
         targetTemp: { type: number }
@@ -2063,6 +2079,7 @@ components:
         standby: { type: boolean }
         subMode: { type: string, description: CN105 sub-mode }
         dir: { type: string, description: 'Direction an AUTO head is running (HEAT/COOL). Absent when unknown.' }
+        auto: { type: boolean, description: 'Present (true) when this head is in a managed Auto range' }
         mode: { type: string }
         roomTemp: { type: number }
         targetTemp: { type: number }

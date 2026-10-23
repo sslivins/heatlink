@@ -83,6 +83,7 @@ struct Snapshot {
     bool        quiet_fan = false;  ///< air check running with the fan at QUIET
     park::Need  need = park::Need::Yes;  ///< held: does the room need its slice
     bool        checking = false;   ///< held air check running (unit in FAN mode)
+    park::Machine::Sample sample;   ///< latest trusted room reading (managed Auto)
 };
 Snapshot snapshot();
 

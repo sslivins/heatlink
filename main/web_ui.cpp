@@ -7,6 +7,7 @@
 #include "room_sensor_ctl.h"
 #include "remote_temp.h"
 #include "slice_ctl.h"
+#include "auto_ctl.h"
 #include "wifi_manager.h"
 #include "ota.h"
 #include "auth_manager.h"
@@ -474,13 +475,26 @@ cJSON* park_status_json() {
 esp_err_t handle_get_settings(httpd_req_t* req) {
     set_cors(req);
     REQUIRE_API_AUTH(req);
-    cn105::Settings st = s_hooks.get_settings ? s_hooks.get_settings() : cn105::Settings{};
+    cn105::Settings st = auto_ctl::present(s_hooks.get_settings ? s_hooks.get_settings()
+                                                                : cn105::Settings{});
     cn105::Status   sta = s_hooks.get_status ? s_hooks.get_status() : cn105::Status{};
 
     cJSON* root = cJSON_CreateObject();
     cJSON_AddStringToObject(root, "power", st.power.c_str());
     cJSON_AddStringToObject(root, "mode", st.mode.c_str());
     cJSON_AddNumberToObject(root, "temperature", st.temperature);
+    // HeatLink's Auto range (Tandem only). "managed": mode AUTO is this range
+    // and "temperature" is its active end; otherwise the stored range for the
+    // next time Auto is chosen.
+    {
+        const auto_ctl::View av = auto_ctl::view();
+        cJSON* ja = cJSON_AddObjectToObject(root, "auto");
+        cJSON_AddBoolToObject(ja, "managed", av.on);
+        cJSON_AddBoolToObject(ja, "available", slice_ctl::enabled());
+        cJSON_AddNumberToObject(ja, "heat_to", av.range.lo);
+        cJSON_AddNumberToObject(ja, "cool_to", av.range.hi);
+        cJSON_AddStringToObject(ja, "dir", autorange::dir_str(av.dir));
+    }
     cJSON_AddStringToObject(root, "fan", st.fan.c_str());
     cJSON_AddStringToObject(root, "vane", st.vane.c_str());
     cJSON_AddStringToObject(root, "wideVane", st.wideVane.c_str());
@@ -610,17 +624,31 @@ esp_err_t handle_post_settings(httpd_req_t* req) {
 
     using K = hvac_mqtt::Command::Kind;
     const cJSON* v;
-    if ((v = cJSON_GetObjectItem(json, "mode")) && cJSON_IsString(v) &&
-        strcasecmp(v->valuestring, "auto") == 0 && slice_ctl::enabled()) {
-        cJSON_Delete(json);
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST,
-                            "AUTO is not available in Tandem");
-        return ESP_FAIL;
-    }
     std::string who = web_actor_name(req);
     const char* wname = who.empty() ? "" : who.c_str();
     const std::string wip = peer_ipv4(req);
     const bool admin = admin_authorized(req);
+    // HeatLink's Auto range (Tandem). Set before the mode so choosing AUTO in
+    // the same request starts with it; either end alone keeps the other.
+    {
+        const cJSON* jlo = cJSON_GetObjectItem(json, "heat_to");
+        const cJSON* jhi = cJSON_GetObjectItem(json, "cool_to");
+        if (cJSON_IsNumber(jlo) || cJSON_IsNumber(jhi)) {
+            const auto_ctl::View av = auto_ctl::view();
+            float lo = cJSON_IsNumber(jlo) ? (float)jlo->valuedouble : av.range.lo;
+            float hi = cJSON_IsNumber(jhi) ? (float)jhi->valuedouble : av.range.hi;
+            if (!admin) {
+                lo = access_policy::clamp_user_setpoint(lo);
+                hi = access_policy::clamp_user_setpoint(hi);
+            }
+            auto_ctl::set_range(lo, hi);
+            const auto_ctl::View nv = auto_ctl::view();
+            char msg[64];
+            snprintf(msg, sizeof(msg), "Auto range %.1f\xE2\x80\x93%.1f\xC2\xB0""C",
+                     nv.range.lo, nv.range.hi);
+            events::log(events::Cat::Setpoint, events::Actor::WebUI, msg, wname, wip);
+        }
+    }
     // A mode command also powers the head on (HA expresses on/off as a mode),
     // so apply power after it: {"power":"OFF","mode":"COOL"} stores COOL and
     // leaves the head off.
@@ -632,9 +660,12 @@ esp_err_t handle_post_settings(httpd_req_t* req) {
                     ("Set to " + pretty_token(jmode->valuestring)).c_str(), wname, wip);
     }
     if ((v = cJSON_GetObjectItem(json, "power")) && cJSON_IsString(v)) {
-        apply(K::Power, v->valuestring);
-        // On+mode reads as one "Set to Heat" event; off is always logged.
         bool off = strcasecmp(v->valuestring, "off") == 0;
+        // A real mode already powered the head on. Applying ON again would
+        // re-announce the unit's old mode to Tandem and drop the new one.
+        const bool mode_on = has_mode && strcasecmp(jmode->valuestring, "off") != 0;
+        if (off || !mode_on) apply(K::Power, v->valuestring);
+        // On+mode reads as one "Set to Heat" event; off is always logged.
         if (!has_mode || off)
             events::log(events::Cat::Power, events::Actor::WebUI,
                         off ? "Turned off" : "Turned on", wname, wip);
@@ -1484,6 +1515,9 @@ esp_err_t handle_group_state(httpd_req_t* req) {
     cJSON_AddStringToObject(root, "stage", sta.stage.c_str());
     // AUTO's running direction, for the peers' unit strip (older peers omit it).
     if (!sta.direction.empty()) cJSON_AddStringToObject(root, "direction", sta.direction.c_str());
+    // HeatLink's managed Auto (Tandem): "mode" stays the physical HEAT/COOL,
+    // which is what slicing and conflict checks need; this is display-only.
+    if (auto_ctl::active()) cJSON_AddBoolToObject(root, "auto", true);
     // Display-only extras consumed by the poller's Zones-tab cards (pv-compatible:
     // an older peer simply omits them and the card renders "--").
     {
@@ -1714,6 +1748,7 @@ bool poll_peer(const std::string& uid, hvac_group::MemberObs& out, bool& incompa
                         const cJSON* jdir = cJSON_GetObjectItem(j, "direction");
                         if (cJSON_IsString(jdir)) out.direction = hvac_group::parse_direction(jdir->valuestring);
                     }
+                    out.managed_auto = cJSON_IsTrue(cJSON_GetObjectItem(j, "auto"));
                     {
                         slice_ctl::PeerObs so;
                         const cJSON* jsv = cJSON_GetObjectItem(j, "slice_v");
@@ -1868,6 +1903,7 @@ hvac_group::GroupView compute_group_view(std::vector<hvac_group::MemberObs>* out
     self_obs.ip          = wifi::get_ip();
     self_obs.sub_mode    = sta.subMode;
     self_obs.direction   = hvac_group::parse_direction(sta.direction);
+    self_obs.managed_auto = auto_ctl::active();
 
     std::vector<hvac_group::MemberObs> members;
     members.push_back(self_obs);
@@ -2196,6 +2232,7 @@ esp_err_t handle_group_get(httpd_req_t* req) {
     if (!self_obs.sub_mode.empty())    cJSON_AddStringToObject(self, "subMode", self_obs.sub_mode.c_str());
     if (self_obs.direction != hvac_group::Demand::Neutral)
         cJSON_AddStringToObject(self, "dir", hvac_group::demand_str(self_obs.direction));
+    if (self_obs.managed_auto) cJSON_AddBoolToObject(self, "auto", true);
     cJSON_AddItemToObject(root, "self", self);
 
     cJSON* jmembers = cJSON_CreateArray();
@@ -2219,6 +2256,7 @@ esp_err_t handle_group_get(httpd_req_t* req) {
             if (!m.sub_mode.empty())        cJSON_AddStringToObject(jm, "subMode", m.sub_mode.c_str());
             if (m.direction != hvac_group::Demand::Neutral)
                 cJSON_AddStringToObject(jm, "dir", hvac_group::demand_str(m.direction));
+            if (m.managed_auto) cJSON_AddBoolToObject(jm, "auto", true);
         }
         if (!m.ip.empty()) cJSON_AddStringToObject(jm, "ip", m.ip.c_str());
         cJSON_AddItemToArray(jmembers, jm);
@@ -3806,7 +3844,7 @@ esp_err_t handle_info(httpd_req_t* req) {
     cJSON* jf = cJSON_AddArrayToObject(o, "features");
     for (const char* f : {"tokens", "token_tickets", "events", "history", "park",
                           "room_sensors", "group", "tandem", "remote_temp", "fault",
-                          "shared_fields", "mqtt_discovery_switch"})
+                          "shared_fields", "mqtt_discovery_switch", "auto_range"})
         cJSON_AddItemToArray(jf, cJSON_CreateString(f));
     // Lets the HA integration warn about duplicate MQTT-discovered entities.
     hvac_mqtt::StoredSettings ms = hvac_mqtt::get_settings();
@@ -4146,7 +4184,8 @@ void refresh_house_advert() {
 
 // Read-only snapshot of this head for the House view.
 cJSON* build_house_summary() {
-    cn105::Settings st  = s_hooks.get_settings ? s_hooks.get_settings() : cn105::Settings{};
+    cn105::Settings st  = auto_ctl::present(s_hooks.get_settings ? s_hooks.get_settings()
+                                                                 : cn105::Settings{});
     cn105::Status   sta = s_hooks.get_status   ? s_hooks.get_status()   : cn105::Status{};
     const bool connected = s_hooks.unit_connected && s_hooks.unit_connected();
     cJSON* o = cJSON_CreateObject();

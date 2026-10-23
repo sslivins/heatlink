@@ -422,6 +422,7 @@ Snapshot snapshot() {
     s.quiet_fan = s_quiet;
     s.need = s_m.need(now_s());
     s.checking = s_m.checking();
+    s.sample = s_m.sample();
     return s;
 }
 

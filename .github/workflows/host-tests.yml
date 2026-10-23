@@ -10,6 +10,7 @@ on:
       - 'components/hvac_group/include/group_proto.h'
       - 'components/cn105/**'
       - 'components/park/**'
+      - 'components/autorange/**'
       - 'components/slice/**'
       - 'components/history/**'
       - 'components/room_sensor/**'
@@ -71,6 +72,16 @@ jobs:
             test/host/test_park_logic.cpp \
             -o park_tests
           ./park_tests
+
+      - name: Build and run host auto-range tests
+        shell: bash
+        run: |
+          g++ -std=c++17 -Wall -Wextra -fsanitize=address,undefined \
+            -I components/autorange/include \
+            components/autorange/auto_logic.cpp \
+            test/host/test_auto_logic.cpp \
+            -o auto_tests
+          ./auto_tests
 
       - name: Build and run host time-slice tests
         shell: bash
