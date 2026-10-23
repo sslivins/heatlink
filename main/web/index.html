@@ -2619,7 +2619,10 @@ function renderClimate(){
   if(climate.room!=null){const rp=polar(tToAngle(Math.max(T_MIN,Math.min(T_MAX,climate.room))),DR);
     rd.setAttribute('cx',rp[0]);rd.setAttribute('cy',rp[1]);rd.style.display='';}
   else rd.style.display='none';
-  $('dialMode').textContent=!climate.power?'OFF':ar?i18n(a.dir==='COOL'?'Auto · cool to':'Auto · heat to'):climate.mode;
+  // Name a direction only when the room is outside the range and so actually
+  // being driven toward one end; inside it there is nothing to heat or cool to.
+  const arDir=!ar||climate.room==null?null:climate.room<a.heat_to?'heat':climate.room>a.cool_to?'cool':null;
+  $('dialMode').textContent=!climate.power?'OFF':ar?i18n(arDir==='cool'?'Auto · cool to':arDir==='heat'?'Auto · heat to':'Auto'):climate.mode;
   $('dialWrap').classList.toggle('off',!climate.power);
   const op=$('opState');
   let opTxt;
