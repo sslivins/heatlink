@@ -656,6 +656,7 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
       <svg id="dialSvg" viewBox="0 0 200 200" aria-label="Temperature dial">
         <path id="dialTrack" class="dtrack"></path>
         <path id="dialFill" class="dfill"></path>
+        <path id="dialFill2" class="dfill" style="display:none"></path>
         <circle id="roomDot" class="rdot" r="4" style="display:none"></circle>
         <circle id="dialKnob" class="dknob" r="9" style="display:none"></circle>
         <circle id="dialKnob2" class="dknob" r="9" style="display:none"></circle>
@@ -2588,7 +2589,7 @@ function arc(t0,t1){
 }
 function renderClimate(){
   const t=Math.max(T_MIN,Math.min(T_MAX,climate.temp||21));
-  const ar=autoRange(), a=climate.auto, k2=$('dialKnob2'), rg=$('dialRange');
+  const ar=autoRange(), a=climate.auto, k2=$('dialKnob2'), f2=$('dialFill2'), rg=$('dialRange');
   const actC=ar?(a.dir==='COOL'?a.cool_to:a.heat_to):null;
   $('setTemp').textContent=ar?fmtTemp(actC):(climate.temp!=null?fmtTemp(t):'--');
   $('setUnit').textContent=unitSym();
@@ -2598,18 +2599,23 @@ function renderClimate(){
   const kn=$('dialKnob');
   rg.classList.toggle('hidden',!ar);
   if(ar){
-    const lo=Math.max(T_MIN,a.heat_to), hi=Math.min(T_MAX,a.cool_to), heat=a.dir!=='COOL';
-    $('dialFill').setAttribute('d',arc(lo,hi));
-    $('dialFill').style.stroke=MODE_COLOR.AUTO;
+    // Like HA's thermostat card: heat fills up to heat_to, cool fills down
+    // from cool_to, and the gap between (where nothing runs) stays bare track.
+    const lo=Math.max(T_MIN,a.heat_to), hi=Math.min(T_MAX,a.cool_to);
+    $('dialFill').setAttribute('d',arc(T_MIN,lo));
+    $('dialFill').style.stroke=MODE_COLOR.HEAT;
+    f2.setAttribute('d',arc(hi,T_MAX));
+    f2.style.stroke=MODE_COLOR.COOL;f2.style.display='';
     const p1=polar(tToAngle(lo),DR), p2=polar(tToAngle(hi),DR);
-    kn.setAttribute('cx',p1[0]);kn.setAttribute('cy',p1[1]);kn.setAttribute('r',heat?9:7);
+    kn.setAttribute('cx',p1[0]);kn.setAttribute('cy',p1[1]);kn.setAttribute('r',9);
     kn.style.fill=MODE_COLOR.HEAT;kn.style.display='';
-    k2.setAttribute('cx',p2[0]);k2.setAttribute('cy',p2[1]);k2.setAttribute('r',heat?7:9);
+    k2.setAttribute('cx',p2[0]);k2.setAttribute('cy',p2[1]);k2.setAttribute('r',9);
     k2.style.fill=MODE_COLOR.COOL;k2.style.display='';
     rg.innerHTML='<span class="h">'+fmtTemp(a.heat_to)+'</span> \u2013 <span class="c">'+fmtTemp(a.cool_to)+'</span>'+unitSym();
   } else {
     $('dialFill').setAttribute('d',arc(T_MIN,t));
     $('dialFill').style.stroke=color;
+    f2.style.display='none';
     const kp=polar(tToAngle(t),DR);
     kn.setAttribute('cx',kp[0]);kn.setAttribute('cy',kp[1]);kn.setAttribute('r',9);kn.style.fill='';
     kn.style.display=climate.power?'':'none';
