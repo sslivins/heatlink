@@ -126,9 +126,11 @@ console.log(`member-row render check passed: ${HOSTILE.length} hostile name(s) r
 {
   const ctx = vm.createContext({});
   vm.runInContext('function i18n(s,p){ return p ? s.replace(/\\{(\\w+)\\}/g,(m,k)=>p[k]) : s; }\n' +
-    ['tandemNow', 'tandemTurn'].map(h => extractFn(script, h)).join('\n'), ctx);
+    ['tandemNow', 'zoneBadge'].map(h => extractFn(script, h)).join('\n'), ctx);
   const tandemNow = vm.runInContext('tandemNow', ctx);
-  const tandemTurn = vm.runInContext('tandemTurn', ctx);
+  const zoneBadge = vm.runInContext('zoneBadge', ctx);
+  const head = (uid, mode, x = {}) => ({ uid, known: true, mode, ...x });
+  const badge = (sl, h, unit = {}) => { const b = zoneBadge({ slice: sl, unit }, h); return b ? b.t + (b.s ? ' ' + b.s : '') : null; };
   const base = { enabled: true, active: true, max_slice_s: 1800, min_slice_s: 600 };
   const heatRun = { ...base, phase: 'run', mode: 'heat', elapsed_s: 720, members: [
     { uid: 'a', wants: 'heat', directive: 'run' }, { uid: 'b', wants: 'cool', directive: 'hold' },
@@ -141,11 +143,37 @@ console.log(`member-row render check passed: ${HOSTILE.length} hostile name(s) r
   expect(tandemNow({ ...heatRun, elapsed_s: 1900 }), { s: 'heating', next: 'cooling within 1 min' }, 'countdown never hits 0');
   expect(tandemNow({ ...heatRun, members: [heatRun.members[0]] }), { s: 'heating' }, 'no countdown when nobody waits');
   expect(tandemNow({ ...base, phase: 'idle', members: [] }).s, 'idle', 'idle');
-  expect(['a', 'b', 'c'].map(u => tandemTurn(heatRun, u)), ['heat', 'next', null], 'run-phase badges');
   const change = { ...base, phase: 'changeover', mode: 'cool', elapsed_s: 30, members: heatRun.members.map(m => ({ ...m, directive: m.wants === 'none' ? 'free' : 'hold' })) };
   expect(tandemNow(change).s, 'switching to cooling…', 'changeover line');
-  expect(['a', 'b', 'c'].map(u => tandemTurn(change, u)), [null, 'next', null], 'changeover: incoming side is up next');
-  expect(['a', 'b'].map(u => tandemTurn({ ...base, phase: 'idle', members: change.members }, u)), [null, null], 'idle: no badges');
+
+  // Zone badges. settle_s 180, decide_s 1800, 720 s into a heat turn.
+  const run = { ...heatRun, settle_s: 180, decide_s: 1800, members: [
+    { uid: 'a', wants: 'heat', need: 'yes', directive: 'run' },
+    { uid: 'b', wants: 'cool', need: 'yes', directive: 'hold' },
+    { uid: 'c', wants: 'cool', need: 'no', directive: 'hold' },
+    { uid: 'd', wants: 'cool', need: 'checking', directive: 'hold' },
+    { uid: 'e', wants: 'heat', need: 'yes', directive: 'run', satisfied: true },
+    { uid: 'f', wants: 'heat', need: 'no', directive: 'run' }] };
+  expect(badge(run, head('a', 'HEAT', { operating: true })), 'Heating', 'running room');
+  expect(badge(run, head('a', 'HEAT')), null, 'on its turn but cycled off: no badge');
+  expect(badge({ ...run, elapsed_s: 60 }, head('a', 'HEAT')), 'Starting…', 'turn just began');
+  // 1800 − 720 + 180 = 1260 s → ~21 min.
+  expect(badge(run, head('b', 'COOL')), 'Up next ~21 min', 'held room with demand is up next');
+  expect(badge(run, head('c', 'COOL')), 'No demand', 'held room without demand is not up next');
+  expect(badge(run, head('d', 'COOL')), 'Checking room', 'held room being air-checked');
+  expect(badge(run, head('e', 'HEAT')), 'Parked', 'satisfied room parks');
+  expect(badge({ ...run, elapsed_s: 60 }, head('f', 'HEAT')), 'No demand', 'running mode but at temperature: never Starting');
+  expect(badge(run, head('a', 'HEAT', { subMode: 'DEFROST' }), { defrost: true }), 'Defrost', 'defrost');
+  expect(badge(run, head('a', 'HEAT', { subMode: 'PREHEAT' })), 'Starting…', 'preheat');
+  expect(badge(run, head('a', 'OFF')), null, 'off room: no badge');
+  expect(badge(run, { uid: 'z', known: false, offline: true }), 'Offline', 'offline peer');
+  const chg = { ...change, settle_s: 180, members: [
+    { uid: 'b', wants: 'cool', need: 'yes', directive: 'hold' },
+    { uid: 'c', wants: 'cool', need: 'no', directive: 'hold' }] };
+  expect(badge(chg, head('b', 'COOL')), 'Starting…', 'changeover: incoming room with demand starts');
+  expect(badge(chg, head('c', 'COOL')), 'No demand', 'changeover: incoming room without demand');
+  expect(badge({ members: [{ uid: 'a', satisfied: true }] }, head('a', 'HEAT')), 'Parked', 'Tandem off: parked');
+  expect(badge({}, head('a', 'COOL', { standby: true })), 'Blocked', 'Tandem off: blocked by the other mode');
   if (failures > 0) { console.error(`tandem status check FAILED: ${failures} problem(s)`); process.exit(1); }
-  console.log('tandem status check passed: countdown + turn badges');
+  console.log('tandem status check passed: countdown + zone badges');
 }
