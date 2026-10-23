@@ -131,6 +131,8 @@ struct MemberObs {
     std::string mode_str;                   ///< friendly mode ("COOL"/"OFF"/…).
     std::string ip;                         ///< resolved IPv4, for the zone link.
     std::string room_sensor;                ///< "" none / "ok" / "stale" (wall sensors).
+    std::string sub_mode;                   ///< uppercase CN105 subMode (NORMAL/DEFROST/PREHEAT/…).
+    Demand      direction = Demand::Neutral;  ///< AUTO's running direction (Heat/Cool), if reported.
 };
 
 /// Overall group status for the computed view.
@@ -192,6 +194,37 @@ const char* status_str(GroupStatus s);
 /// opposing owner isn't directly visible. Any Unknown/Incompatible peer downgrades
 /// an otherwise-Ok view to Indeterminate (never masks a detected conflict).
 GroupView evaluate_group(const std::vector<MemberObs>& members);
+
+// ── Outdoor-unit view (Zones / Climate unit strip) ──────────────────────────
+
+/// What the shared outdoor unit is doing, as far as its heads can tell.
+enum class UnitPower {
+    Unknown,  ///< nobody visible is on, but a peer is unreachable — can't say Off.
+    Off,      ///< every head is off (or FAN only): the compressor has no work.
+    Idle,     ///< a head is on in HEAT/COOL but nobody is running the compressor.
+    Active,   ///< the compressor is running (or defrosting) for a head.
+};
+
+struct UnitView {
+    UnitPower power     = UnitPower::Unknown;
+    Demand    direction = Demand::Neutral;  ///< Heat/Cool it is serving or set to; Neutral = unknown/mixed.
+    bool      defrost   = false;            ///< a head reports DEFROST (unit-wide).
+    Demand    pending   = Demand::Neutral;  ///< Heat/Cool it is starting or switching to.
+};
+
+/// Derive the unit view from the member observations. @p tandem_mode is the
+/// Tandem turn's mode (Neutral when Tandem is off/inactive); @p tandem_changeover
+/// is true while Tandem is switching to that mode. "Pending" is only raised on
+/// bounded transitional signals (Tandem changeover, PREHEAT/WARMUP), never on
+/// ordinary compressor cycling, so the strip doesn't flicker.
+UnitView evaluate_unit(const std::vector<MemberObs>& members, Demand tandem_mode,
+                       bool tandem_changeover);
+
+/// "unknown"/"off"/"idle"/"active".
+const char* unit_power_str(UnitPower p);
+
+/// Parse a CN105 AUTO direction ("HEAT"/"COOL") into Heat/Cool, else Neutral.
+Demand parse_direction(const std::string& dir);
 
 // ── Resolution planning (Phase 3) ───────────────────────────────────────────
 //

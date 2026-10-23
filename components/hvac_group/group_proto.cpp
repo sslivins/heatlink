@@ -200,6 +200,7 @@ MemberObs observe(const std::string& uid, const std::string& name,
     // compressor not running for it — the authoritative "my mode is blocked".
     m.standby    = (upper(sub_mode) == "STANDBY") && (upper(stage) == "IDLE") &&
                    !operating;
+    m.sub_mode   = upper(sub_mode);
     return m;
 }
 
@@ -323,6 +324,71 @@ GroupView evaluate_group(const std::vector<MemberObs>& members) {
     }
 
     return v;
+}
+
+Demand parse_direction(const std::string& dir) {
+    const std::string d = upper(dir);
+    if (d == "HEAT") return Demand::Heat;
+    if (d == "COOL") return Demand::Cool;
+    return Demand::Neutral;
+}
+
+const char* unit_power_str(UnitPower p) {
+    switch (p) {
+        case UnitPower::Off:    return "off";
+        case UnitPower::Idle:   return "idle";
+        case UnitPower::Active: return "active";
+        case UnitPower::Unknown: default: return "unknown";
+    }
+}
+
+UnitView evaluate_unit(const std::vector<MemberObs>& members, Demand tandem_mode,
+                       bool tandem_changeover) {
+    UnitView u;
+    if (tandem_mode != Demand::Heat && tandem_mode != Demand::Cool) tandem_mode = Demand::Neutral;
+    bool any_unknown = false, any_on = false, active = false, warmup = false, mixed = false;
+    Demand active_dir = Demand::Neutral, on_dir = Demand::Neutral;
+    for (const auto& m : members) {
+        if (m.state == MemberState::Unknown) { any_unknown = true; continue; }
+        if (!m.power_on || m.demand == Demand::Neutral) continue;
+        any_on = true;
+        // AUTO counts as the direction it reports running in, if any.
+        const Demand d = (m.demand == Demand::Auto) ? m.direction : m.demand;
+        const bool hc = (d == Demand::Heat || d == Demand::Cool);
+        const std::string sm = upper(m.sub_mode);
+        if (sm == "DEFROST") u.defrost = true;
+        if ((sm == "PREHEAT" || sm == "WARMUP") && d == Demand::Heat) warmup = true;
+        if (m.active_now) {
+            active = true;
+            if (active_dir == Demand::Neutral && hc) active_dir = d;
+        }
+        if (hc) {
+            if (on_dir == Demand::Neutral) on_dir = d;
+            else if (on_dir != d) mixed = true;
+        }
+    }
+    if (u.defrost) {
+        u.power = UnitPower::Active;
+        u.direction = Demand::Heat;  // defrost only happens while heating
+    } else if (active) {
+        u.power = UnitPower::Active;
+        u.direction = active_dir;
+    } else if (any_on) {
+        u.power = UnitPower::Idle;
+        u.direction = tandem_mode != Demand::Neutral ? tandem_mode
+                    : (mixed ? Demand::Neutral : on_dir);
+    } else {
+        // Only claim Off when every head was seen.
+        u.power = any_unknown ? UnitPower::Unknown : UnitPower::Off;
+    }
+    const bool running = u.power == UnitPower::Active && !u.defrost;
+    if (tandem_changeover && tandem_mode != Demand::Neutral &&
+        !(running && u.direction == tandem_mode)) {
+        u.pending = tandem_mode;
+    } else if (warmup && !u.defrost) {
+        u.pending = Demand::Heat;
+    }
+    return u;
 }
 
 Demand parse_target_mode(const std::string& mode) {

@@ -413,7 +413,36 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
 @media (prefers-color-scheme:light){
   .gturn.heat{background:rgba(249,115,22,.14);color:#c2410c}
   .gturn.cool{background:rgba(59,130,246,.14);color:#1d4ed8}
+  .gturn.defrost{background:rgba(84,174,255,.18);color:#0550ae}
+  .gturn.ol.heat{color:#c2410c}.gturn.ol.cool{color:#1d4ed8}
 }
+/* Zone badges beyond heat/cool: outlined (Up next / Starting…), defrost,
+   blocked, and a quiet text-only one (Checking room). */
+.gturn small{display:block;font-weight:500;font-size:.86em;opacity:.85;text-align:center}
+.gturn.defrost{background:rgba(84,174,255,.2);color:#9cd2ff}
+.gturn.ol{background:transparent;border:1.5px solid currentColor;padding:3px 9px;text-align:center}
+.gturn.ol.heat{color:#fdba74}.gturn.ol.cool{color:#93c5fd}
+.gturn.start{border-style:dashed;animation:upulse 1.6s ease-in-out infinite}
+.gturn.ghost{background:none;font-weight:500}
+.gturn.warn{background:var(--warn-bg);color:var(--orange);border:1px solid var(--warn-border);text-align:center}
+/* Outdoor-unit strip: filled = running, outlined = set to this mode but the
+   compressor is resting, pulsing = starting or switching to it, faded = not in it. */
+.ustrip{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 4px}
+.upill{display:inline-flex;align-items:center;gap:5px;font-size:.78em;font-weight:600;padding:4px 11px;border-radius:999px;border:1.5px solid transparent;background:var(--chip);color:var(--fg-3);opacity:.5}
+.upill.on,.upill.set,.upill.pulse{opacity:1}
+.upill.heat.set,.upill.heat.pulse{background:transparent;border-color:#f97316;color:#f97316}
+.upill.cool.set,.upill.cool.pulse{background:transparent;border-color:#3b82f6;color:#3b82f6}
+.upill.heat.on{background:#f97316;color:#fff}
+.upill.cool.on{background:#3b82f6;color:#fff}
+.upill.defrost.on{background:#54aeff;color:#fff}
+.upill.off.on{background:#57606a;color:#fff}
+.upill.pulse{animation:upulse 1.6s ease-in-out infinite}
+@keyframes upulse{0%,100%{opacity:1}50%{opacity:.4}}
+@media (prefers-reduced-motion:reduce){.upill.pulse,.gturn.start{animation:none}.upill.pulse{border-style:dashed}}
+.ucap{font-size:.84em;color:var(--fg-3);margin:0 0 6px}
+#opState .ustrip{justify-content:center;margin:10px 0 2px}
+#opState .opb{display:flex;align-items:center;justify-content:center;gap:8px;flex-wrap:wrap}
+#opState .gturn{font-size:.95em}
 .gempty{text-align:center;padding:22px 8px 8px;color:var(--fg-3)}
 .gempty svg{opacity:.5}
 .gempty-t{font-weight:600;color:var(--fg);margin-top:8px}
@@ -688,8 +717,11 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
         <span class="role-name" id="gLabel">—</span>
         <span class="pill" id="gStatus">—</span>
       </div>
+      <!-- Outdoor-unit strip (Off / Heat / Cool / Defrost). -->
+      <div id="gUnit"></div>
       <!-- Tandem (#133) status; hidden while Tandem is off. -->
       <div id="gTandem" class="gtandem hidden"></div>
+      <div id="gUnitCap" class="ucap hidden"></div>
       <div id="gMembers"></div>
     </div>
   </div>  <!-- House: every head on the LAN across all outdoor units (read-only; tap to open) -->
@@ -1384,6 +1416,12 @@ const I18N = { fr: {
   "heating starts in ~{n} min":"chauffage dans ~{n} min","cooling starts in ~{n} min":"refroidissement dans ~{n} min",
   "Up next":"À suivre",
   "Starting…":"Démarrage…",
+  // Outdoor-unit strip + zone badges
+  "Offline":"Hors ligne","No demand":"Aucun besoin","Blocked":"Bloquée",
+  "unit is heating":"l’unité chauffe","unit is cooling":"l’unité refroidit",
+  "heat resumes in a few minutes":"le chauffage reprend dans quelques minutes",
+  "All rooms are off":"Toutes les pièces sont arrêtées","Compressor resting":"Compresseur au repos",
+  "A room is offline":"Une pièce est hors ligne","Outdoor unit":"Unité extérieure",
   // Room sensor (#142)
   "Room sensor":"Capteur de pièce",
   "What is a room sensor?":"Qu’est-ce qu’un capteur de pièce ?",
@@ -1998,6 +2036,8 @@ async function refresh(){
       if(climate.rs&&climate.rs.state==='ok'&&climate.rs.temp!=null) climate.room=climate.rs.temp;
       climate.operating=!!c.operating;
       climate.direction=c.direction||null;
+      climate.subMode=c.subMode||'';
+      climate.standby=c.subMode==='STANDBY'&&c.stage==='IDLE'&&!c.operating;
       climate.park=c.park||null;
       if(c.fan&&confirmField('fan',c.fan))$('fan').value=c.fan;
       if(c.vane&&confirmField('vane',c.vane))$('vane').value=c.vane;
@@ -2008,7 +2048,7 @@ async function refresh(){
       // Heat pump detail — live serial telemetry. Optional fields are only in
       // the payload when the unit reports them; their rows hide otherwise.
       const conn=!!c.connected, has=k=>conn&&c[k]!=null;
-      $('dgOp').textContent=conn?($('opState').textContent||'--'):'--';
+      $('dgOp').textContent=conn?($('opState').dataset.txt||'--'):'--';
       const hz=c.compressorFrequency;
       $('dgComp').textContent=(conn&&hz!=null)?(hz>0?hz+' Hz':i18n('Off')+' (0 Hz)'):'--';
       $('dgRoom').textContent=(conn&&c.roomTemperature!=null&&c.roomTemperature>0)?(fmtTemp(c.roomTemperature)+' '+unitSym()):'--';
@@ -2149,6 +2189,7 @@ function closeStat(){
 
 // ── Climate dial ──────────────────────────────────────────────────────
 let climate={power:false,mode:'HEAT',temp:21,room:null,operating:false};
+let lastGroup=null;  // latest /api/group, shared by the Zones and Climate tabs
 const T_MIN=16,T_MAX=31,A_START=225,A_SWEEP=270,DR=80,DC=100;
 // Temperature display unit. Internal setpoint/room values are ALWAYS °C at the
 // head's 0.5 °C granularity; this only changes how they're shown/entered.
@@ -2560,7 +2601,23 @@ function renderClimate(){
       default: opTxt='Active';
     }
   }
-  op.textContent=i18n(opTxt);
+  op.dataset.txt=i18n(opTxt);
+  // Same room badge and outdoor-unit strip as the Zones tab, with a short
+  // detail line; plain text when no badge applies (Off, Idle, Fan running).
+  let b=climate.power?climateBadge():null;
+  if(!b&&climate.power&&pk&&pk.state==='probing'&&!climate.operating&&!pk.held) b={c:'ghost',t:'Checking room'};
+  if(b){
+    let det='';
+    if(b.t==='Parked'&&pk&&pk.next_probe_s!=null&&!pk.room_sensor)
+      det=i18n('air check in')+' '+Math.max(1,Math.ceil(pk.next_probe_s/60))+' min';
+    else if(pk&&pk.held&&(b.t==='Up next'||b.t==='No demand'||b.t==='Checking room')){ det=tandemPaused(pk); b=Object.assign({},b,{s:''}); }
+    else if(b.t==='Defrost') det=i18n('heat resumes in a few minutes');
+    op.innerHTML='<div class="opb"><span class="gturn '+b.c+'">'+gEsc(i18n(b.t))+(b.s?'<small>'+gEsc(b.s)+'</small>':'')+'</span>'+
+      (det?'<span>'+gEsc(det)+'</span>':'')+'</div>';
+    op.dataset.txt=i18n(b.t)+(det?' \u00b7 '+det:'');
+  } else op.textContent=i18n(opTxt);
+  const lg=(lastGroup&&lastGroup.in_group)?lastGroup:null;
+  if(lg&&lg.unit) op.insertAdjacentHTML('beforeend',unitStrip(lg.unit));
   op.className='op'+(climate.power&&climate.operating?' active':'');
   $('tDec').disabled=$('tInc').disabled=!climate.power;
   const slicing=!!(pk&&pk.slicing);
@@ -3573,11 +3630,9 @@ function memberRow(o){
     +(o.rs?'<span title="'+gEsc(i18n(o.rs==='ok'?'Room temperature from remote sensors':'Remote sensors not heard'))+'">'+RS_ICON(o.rs==='ok'?'gm-rs':'gm-rs warn')+'</span>':'')+'</span>');
   if(o.target!=null) parts.push('<span class="gmstat">Target <b>'+fmtTemp(o.target)+unitSym()+'</b></span>');
   if(parts.length) stats='<div class="gmstats">'+parts.join('')+'</div>';
-  // Tandem turn: Heating / Cooling while it has the outdoor unit, "Up next"
-  // while it waits for the other mode's turn to end, "Parked" while it has the
-  // turn but is off at its setpoint.
-  const TURN={heat:'Heating',cool:'Cooling',next:'Up next',parked:'Parked'};
-  const turn=TURN[o.turn]?'<span class="gturn '+o.turn+'">'+gEsc(i18n(TURN[o.turn]))+'</span>':'';
+  // One badge per room saying what it is doing now (see zoneBadge).
+  const zb=o.badge;
+  const turn=zb?'<span class="gturn '+zb.c+'">'+gEsc(i18n(zb.t))+(zb.s?'<small>'+gEsc(zb.s)+'</small>':'')+'</span>':'';
   // A whole card is a link to that zone's own UI. Buttons live inside and are
   // handled first by the delegated listener (so a tap on ✕/Leave never
   // navigates). data-* only — never interpolate names into an onclick.
@@ -3643,6 +3698,9 @@ function renderGroupPanel(g){
     tl.title=tn.tip?i18n(tn.tip):'';
   }
   const self=g.self||{};
+  $('gUnit').innerHTML=unitStrip(g.unit);
+  const cap=unitCaption(g.unit,!!tn), uc=$('gUnitCap');
+  uc.textContent=cap; uc.classList.toggle('hidden',!cap);
   // The "holds unit" badge only makes sense during a conflict: it names the head
   // whose mode won the shared compressor while blocking someone. When everyone
   // agrees (ok) the compressor is simply running and nobody is being held out —
@@ -3651,7 +3709,8 @@ function renderGroupPanel(g){
   const inConflict=(g.status==='conflict'||g.status==='pending_conflict');
   const lockMatch=(nm,uid)=>inConflict&&g.locked_by&&(g.locked_by===nm||g.locked_by===uid);
   const heads=[{ name:self.name||self.uid, dotcls:'selfdot', tag:'This device', uid:self.uid, isPeer:false,
-    known:true, mode:self.mode, room:self.roomTemp, target:self.targetTemp, rs:self.rs, url:null }];
+    known:true, mode:self.mode, room:self.roomTemp, target:self.targetTemp, rs:self.rs, url:null,
+    operating:self.operating, standby:self.standby, subMode:self.subMode, dir:self.dir }];
   (g.members||[]).forEach(m=>{
     const known=(m.state==='known');
     // An unreachable peer (no fresh signed poll within ~45s) comes back as
@@ -3659,12 +3718,14 @@ function renderGroupPanel(g){
     // zone dropped off, rather than the ambiguous "unknown".
     heads.push({ name:m.name||m.uid, dotcls:known?'known':'unknown',
       tag:known?'':(m.state==='incompatible'?'Incompatible':'Offline'), uid:m.uid, isPeer:true, known:known,
+      offline:m.state==='unknown',
       mode:known?m.mode:null, room:known?m.roomTemp:null, target:known?m.targetTemp:null, rs:known?m.rs:null,
+      operating:!!m.operating, standby:!!m.standby, subMode:m.subMode, dir:m.dir,
       url:m.ip?('http://'+m.ip+'/'):null });
   });
-  $('gMembers').innerHTML=heads.map(h=>memberRow({ name:h.name, dotcls:h.dotcls, tag:h.tag,
+  $('gMembers').innerHTML=heads.map(h=>memberRow({ name:h.name, dotcls:h.dotcls, tag:h.offline?'':h.tag,
     isLock:lockMatch(h.name,h.uid), uid:null, mode:h.mode, room:h.room, target:h.target, rs:h.rs,
-    url:h.url, huid:h.isPeer?h.uid:null, turn:h.known?tandemTurn(sl,h.uid):null })).join('');
+    url:h.url, huid:h.isPeer?h.uid:null, badge:zoneBadge(g,h) })).join('');
   $('ouMembers').innerHTML=heads.map(h=>memberRow({ name:h.name, dotcls:h.dotcls, tag:h.tag,
     uid:h.uid, isPeer:h.isPeer, url:null })).join('');
   wireMemberCtrls();
@@ -3694,18 +3755,80 @@ function tandemNow(sl){
   }
   return {s:'idle',tip:'No room needs heat or cool'};
 }
-// One head's Tandem turn: 'heat'/'cool' while it has the outdoor unit,
-// 'parked' while it has it but is off at its setpoint, 'next' while it waits
-// for the other mode, null when it isn't taking part.
-function tandemTurn(sl,uid){
-  if(!sl||!sl.enabled||!sl.active) return null;
-  const m=(sl.members||[]).find(x=>x.uid===uid);
-  if(!m) return null;
-  if(sl.phase==='run'){
-    if(m.directive==='run') return m.satisfied?'parked':sl.mode;
-    return m.directive==='hold'?'next':null;
+// Outdoor-unit strip from /api/group's `unit`: filled = running, outlined =
+// set to this mode but the compressor is resting, pulsing = starting or
+// switching to it, faded = not in this mode.
+function unitStrip(u){
+  if(!u) return '';
+  const p=u.power, dir=(u.direction||'').toLowerCase(), pend=(u.pending||'').toLowerCase();
+  const mc=k=>pend===k?'pulse':(u.defrost&&k==='heat')?'set':
+    (dir===k?(p==='active'?'on':(p==='idle'?'set':'')):'');
+  const pill=(k,ic,label,st)=>'<span class="upill '+k+(st?' '+st:'')+'"><span aria-hidden="true">'+ic+'</span>'+gEsc(i18n(label))+'</span>';
+  return '<div class="ustrip" title="'+gEsc(i18n('Outdoor unit'))+'">'+
+    pill('off','\u23FB','Off',p==='off'?'on':'')+
+    pill('heat','\u2600','Heat',mc('heat'))+
+    pill('cool','\u2744','Cool',mc('cool'))+
+    pill('defrost','\u2746','Defrost',u.defrost?'on':'')+'</div>';
+}
+// A short line under the strip for states the Tandem line doesn't cover.
+function unitCaption(u,tandemShown){
+  if(!u) return '';
+  if(u.defrost) return i18n('Defrost')+' \u00b7 '+i18n('heat resumes in a few minutes');
+  if(tandemShown) return '';
+  if(u.power==='off') return i18n('All rooms are off');
+  if(u.power==='unknown') return i18n('A room is offline');
+  if(u.power==='idle'&&!u.pending) return i18n('Compressor resting');
+  return '';
+}
+// One badge per room saying what it is doing now; first match wins.
+// h: {uid, known, offline, mode, operating, standby, subMode, dir}; g: /api/group.
+// "Up next" only appears when the waiting room actually needs its turn.
+function zoneBadge(g,h){
+  if(!h.known) return h.offline?{c:'',t:'Offline'}:null;
+  const md=h.mode||'OFF';
+  if(md==='OFF'||md==='FAN') return null;
+  const sl=(g&&g.slice)||{}, u=(g&&g.unit)||{};
+  const sm=(sl.members||[]).find(x=>x.uid===h.uid)||null;
+  const dir=md==='HEAT'?'heat':(md==='COOL'||md==='DRY')?'cool':
+    (h.dir==='HEAT'?'heat':(h.dir==='COOL'?'cool':null));
+  const tan=!!(sl.enabled&&sl.active&&sm);
+  const held=tan&&sm.directive==='hold';
+  const sub=h.subMode||'';
+  if(!held&&dir==='heat'&&(u.defrost||sub==='DEFROST')) return {c:'defrost',t:'Defrost'};
+  if(!held&&(sub==='PREHEAT'||sub==='WARMUP')) return {c:'ol start '+(dir||'heat'),t:'Starting\u2026'};
+  if(h.operating&&dir) return {c:dir,t:md==='DRY'?'Drying':(dir==='heat'?'Heating':'Cooling')};
+  if(tan){
+    const settle=sl.settle_s||180, el=sl.elapsed_s||0;
+    if(sl.phase==='changeover'&&sm.wants===sl.mode&&!sm.satisfied&&sm.need!=='no')
+      return {c:'ol start '+sl.mode,t:'Starting\u2026'};
+    if(sm.directive==='run'){
+      if(sm.satisfied) return {c:'',t:'Parked'};
+      // On the running mode but already at temperature: it won't start.
+      if(sm.need==='no') return {c:'',t:'No demand'};
+      // Just got the turn and the compressor hasn't started yet. Bounded to
+      // the turn's first few minutes so normal cycling never shows it.
+      if(sl.phase==='run'&&el<settle) return {c:'ol start '+sl.mode,t:'Starting\u2026'};
+      return null;
+    }
+    if(held){
+      if(sm.need==='checking') return {c:'ghost',t:'Checking room'};
+      if(sm.need!=='yes') return {c:'',t:'No demand'};
+      const w=(sm.wants==='heat'||sm.wants==='cool')?sm.wants:dir;
+      // The latest the running turn can end, plus the pause between modes. It
+      // can come sooner, and defrost stops the clock, hence "~".
+      let s='';
+      if(sl.phase==='run'){
+        const eta=(sl.decide_s||sl.max_slice_s||0)-el+settle;
+        s='~'+Math.max(1,Math.ceil(eta/60))+' min';
+      }
+      return {c:'ol '+(w||''),t:'Up next',s:s};
+    }
   }
-  if(sl.phase==='changeover') return m.wants===sl.mode?'next':null;
+  if(sm&&sm.satisfied) return {c:'',t:'Parked'};
+  if(!tan&&(h.standby||(g&&g.status==='conflict'&&(g.conflicts||[]).some(c=>c.uid===h.uid)))){
+    const lm=g&&g.locked_mode;
+    return {c:'warn',t:'Blocked',s:lm==='HEAT'?i18n('unit is heating'):(lm==='COOL'?i18n('unit is cooling'):'')};
+  }
   return null;
 }
 // Delegate member-row clicks. Using data-* attributes + one listener per list
@@ -3806,9 +3929,21 @@ async function refreshGroup(){
   let g;
   try{ const r=await jget('/api/group'); if(!r.ok) return; g=await r.json(); }
   catch(e){ return; }
+  lastGroup=g;
   renderGroupBanner(g);
   renderGroupPanel(g);
   renderSlice(g);
+  if(stC) renderClimate();
+}
+// This head's badge for the Climate tab, from its live status plus the latest
+// group view (or a stand-in when it isn't on a shared outdoor unit).
+function climateBadge(){
+  const lg=(lastGroup&&lastGroup.in_group)?lastGroup:null, pk=climate.park||{};
+  const uid=(lg&&lg.self&&lg.self.uid)||'_self';
+  const g=lg||{slice:{members:[{uid:uid,satisfied:!!pk.parked}]},
+    unit:{defrost:climate.subMode==='DEFROST'}};
+  return zoneBadge(g,{uid:uid,known:true,mode:climate.power?climate.mode:'OFF',
+    operating:climate.operating,standby:climate.standby,subMode:climate.subMode,dir:climate.direction});
 }function modeCap(m){ return m.charAt(0)+m.slice(1).toLowerCase(); }
 // ── House view (all heads across outdoor units) ─────────────────────────
 let groupTabActive=false, houseRetry=null;
