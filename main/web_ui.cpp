@@ -2149,6 +2149,7 @@ cJSON* slice_status_json() {
         cJSON_AddBoolToObject(e, "capable", m.capable);
         cJSON_AddStringToObject(e, "wants", slice::mode_str(m.wants));
         cJSON_AddStringToObject(e, "need", slice::need_str(m.need));
+        cJSON_AddBoolToObject(e, "satisfied", m.satisfied);
         cJSON_AddStringToObject(e, "directive", ss.cfg.enabled ? slice::directive_str(m.directive)
                                                               : "free");
         cJSON_AddItemToArray(jm, e);

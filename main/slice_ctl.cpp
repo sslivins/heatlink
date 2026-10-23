@@ -316,6 +316,7 @@ Status status() {
         ms.capable = m.capable;
         ms.wants = m.wants;
         ms.need = m.need;
+        ms.satisfied = m.satisfied;
         ms.directive = s_node.directive(m.wants, t);
         if (!m.fresh || !m.capable) out.all_capable = false;
         out.members.push_back(ms);
