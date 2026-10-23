@@ -970,7 +970,7 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
     <div class="sub" style="margin:0 0 8px">With the fan stopped the head only
       senses the air around itself. A short, quiet fan run moves room air past the
       sensor for a true reading.</div>
-    <div id="pkRsNote" class="sub hidden" style="margin:0 0 8px;color:var(--blue)">This head has wall sensors, so it only runs air checks if they all stop reporting.</div>
+    <div id="pkRsNote" class="sub hidden" style="margin:0 0 8px;color:var(--blue)">This head has remote sensors, so it only runs air checks if they all stop reporting.</div>
     <div class="row">
       <label for="pkInt">Check every</label>
       <select id="pkInt" onchange="pkChanged()"></select>
@@ -1367,7 +1367,7 @@ const I18N = { fr: {
   "Off at setpoint":"Arrêt à la consigne","Enabled":"Activé",
   "Turn back on when off by":"Rallumer après un écart de","Minimum off time":"Durée d’arrêt minimale",
   "Periodic air check":"Vérification périodique de l’air",
-  "This head has wall sensors, so it only runs air checks if they all stop reporting.":"Cette unité a des capteurs muraux : elle ne fait de vérification de l’air que s’ils cessent tous d’émettre.","Check every":"Vérifier toutes les",
+  "This head has remote sensors, so it only runs air checks if they all stop reporting.":"Cette unité a des capteurs distants : elle ne fait de vérification de l’air que s’ils cessent tous d’émettre.","Check every":"Vérifier toutes les",
   "Run the fan for":"Faire tourner le ventilateur pendant","Disabled":"Désactivé",
   "Parked":"En veille","Checking room":"Vérification de la pièce","Running":"En marche",
   "air check in":"vérification dans",
@@ -1403,12 +1403,12 @@ const I18N = { fr: {
   "Added {name}":"{name} ajouté",
   "This head already has 4 sensors":"Cette unité a déjà 4 capteurs",
   "Bluetooth":"Bluetooth",
-  "Using {n} wall sensors":"{n} capteurs muraux utilisés",
+  "Using {n} remote sensors":"{n} capteurs distants utilisés",
   "(average)":"(moyenne)",
-  "Using a wall sensor":"Capteur mural utilisé",
-  "Wall sensors not heard":"Capteurs muraux muets",
+  "Using a remote sensor":"Capteur distant utilisé",
+  "Remote sensors not heard":"Capteurs distants muets",
   "Using the head’s own sensor until they report again.":"L’unité utilise son propre capteur jusqu’à leur retour.",
-  "Room temperature from wall sensors":"Température de la pièce par capteurs muraux",
+  "Room temperature from remote sensors":"Température de la pièce par capteurs distants",
   "Name":"Nom",
   "Wi-Fi":"Wi-Fi",
   "Report every":"Signaler tous les",
@@ -2302,7 +2302,7 @@ function pkChanged(){
   $('pkSave').disabled=!pkDirty;
   pkRsSync();
 }
-// Wall sensors replace scheduled air checks; say so while air checks are on.
+// Remote sensors replace scheduled air checks; say so while air checks are on.
 function pkRsSync(){
   const n=$('pkRsNote'), p=$('pkProbe'); if(!n||!p) return;
   n.classList.toggle('hidden',!(climate.rs&&climate.rs.state&&p.checked));
@@ -2656,8 +2656,8 @@ function rsPopFill(){
   const ss=rs.sensors||[], esc=s=>String(s).replace(/[&<>"']/g,c=>'&#'+c.charCodeAt(0)+';');
   const t=v=>fmtTemp(v)+' '+unitSym();
   let h;
-  if(rs.state==='ok') h='<b>'+(rs.n_fresh>1?i18n('Using {n} wall sensors',{n:rs.n_fresh})+'</b> '+i18n('(average)'):i18n('Using a wall sensor')+'</b>');
-  else h='<b>'+i18n('Wall sensors not heard')+'</b><div style="margin-top:4px">'+i18n('Using the head\u2019s own sensor until they report again.')+'</div>';
+  if(rs.state==='ok') h='<b>'+(rs.n_fresh>1?i18n('Using {n} remote sensors',{n:rs.n_fresh})+'</b> '+i18n('(average)'):i18n('Using a remote sensor')+'</b>');
+  else h='<b>'+i18n('Remote sensors not heard')+'</b><div style="margin-top:4px">'+i18n('Using the head\u2019s own sensor until they report again.')+'</div>';
   ss.forEach(s=>{ h+='<div class="r"><span>'+esc(s.name)+'</span><span>'+(s.fresh&&s.temp!=null?t(s.temp):rsAgo(s.age_s))+'</span></div>'; });
   $('rsPop').innerHTML=h;
 }
@@ -3570,12 +3570,13 @@ function memberRow(o){
   const parts=[];
   if(o.mode) parts.push('<span class="gmstat"><b>'+gEsc(modeCap(o.mode))+'</b></span>');
   if(o.room!=null) parts.push('<span class="gmstat">Current <b>'+fmtTemp(o.room)+unitSym()+'</b>'
-    +(o.rs?'<span title="'+gEsc(i18n(o.rs==='ok'?'Room temperature from wall sensors':'Wall sensors not heard'))+'">'+RS_ICON(o.rs==='ok'?'gm-rs':'gm-rs warn')+'</span>':'')+'</span>');
+    +(o.rs?'<span title="'+gEsc(i18n(o.rs==='ok'?'Room temperature from remote sensors':'Remote sensors not heard'))+'">'+RS_ICON(o.rs==='ok'?'gm-rs':'gm-rs warn')+'</span>':'')+'</span>');
   if(o.target!=null) parts.push('<span class="gmstat">Target <b>'+fmtTemp(o.target)+unitSym()+'</b></span>');
   if(parts.length) stats='<div class="gmstats">'+parts.join('')+'</div>';
   // Tandem turn: Heating / Cooling while it has the outdoor unit, "Up next"
-  // while it waits for the other mode's turn to end.
-  const TURN={heat:'Heating',cool:'Cooling',next:'Up next'};
+  // while it waits for the other mode's turn to end, "Parked" while it has the
+  // turn but is off at its setpoint.
+  const TURN={heat:'Heating',cool:'Cooling',next:'Up next',parked:'Parked'};
   const turn=TURN[o.turn]?'<span class="gturn '+o.turn+'">'+gEsc(i18n(TURN[o.turn]))+'</span>':'';
   // A whole card is a link to that zone's own UI. Buttons live inside and are
   // handled first by the delegated listener (so a tap on ✕/Leave never
@@ -3693,13 +3694,17 @@ function tandemNow(sl){
   }
   return {s:'idle',tip:'No room needs heat or cool'};
 }
-// One head's Tandem turn: 'heat'/'cool' while it has the outdoor unit, 'next'
-// while it waits for the other mode, null when it isn't taking part.
+// One head's Tandem turn: 'heat'/'cool' while it has the outdoor unit,
+// 'parked' while it has it but is off at its setpoint, 'next' while it waits
+// for the other mode, null when it isn't taking part.
 function tandemTurn(sl,uid){
   if(!sl||!sl.enabled||!sl.active) return null;
   const m=(sl.members||[]).find(x=>x.uid===uid);
   if(!m) return null;
-  if(sl.phase==='run') return m.directive==='run'?sl.mode:(m.directive==='hold'?'next':null);
+  if(sl.phase==='run'){
+    if(m.directive==='run') return m.satisfied?'parked':sl.mode;
+    return m.directive==='hold'?'next':null;
+  }
   if(sl.phase==='changeover') return m.wants===sl.mode?'next':null;
   return null;
 }

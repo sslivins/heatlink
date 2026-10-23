@@ -73,6 +73,7 @@ struct MemberStatus {
     bool        capable = false;
     slice::Mode wants = slice::Mode::None;
     slice::Need need = slice::Need::Yes;
+    bool        satisfied = false;  ///< parked at setpoint
     slice::Directive directive = slice::Directive::Free;
 };
 
