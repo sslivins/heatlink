@@ -133,6 +133,7 @@ struct MemberObs {
     std::string room_sensor;                ///< "" none / "ok" / "stale" (wall sensors).
     std::string sub_mode;                   ///< uppercase CN105 subMode (NORMAL/DEFROST/PREHEAT/…).
     Demand      direction = Demand::Neutral;  ///< AUTO's running direction (Heat/Cool), if reported.
+    bool        managed_auto = false;       ///< display: HeatLink's Auto (Tandem) runs this head
 };
 
 /// Overall group status for the computed view.

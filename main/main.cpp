@@ -27,6 +27,7 @@
 #include "room_sensor_ctl.h"
 #include "remote_temp.h"
 #include "slice_ctl.h"
+#include "auto_ctl.h"
 #include "history_ctl.h"
 
 #include <cstdlib>
@@ -205,16 +206,23 @@ void pmic_task(void*) {
     }
 }
 
+// Publish what the user chose: the park overlay (power ON while parked) and
+// managed Auto as AUTO with its direction, never the raw unit.
+void publish_mqtt(const cn105::Settings& raw, cn105::Status st, bool settings) {
+    const cn105::Settings e = auto_ctl::present(park_ctl::overlay(raw));
+    const auto_ctl::View av = auto_ctl::view();
+    if (av.on) st.direction = autorange::dir_str(av.dir);
+    if (settings) hvac_mqtt::publish_settings(e);
+    hvac_mqtt::publish_state(e, st);
+}
+
 // --- CN105 task: pump protocol, publish changes ---
 void cn105_task(void*) {
-    // Publish the park overlay (power ON while parked), never the raw unit.
     g_hp.setSettingsChangedCallback([](const cn105::Settings& s) {
-        cn105::Settings e = park_ctl::overlay(s);
-        hvac_mqtt::publish_settings(e);
-        hvac_mqtt::publish_state(e, g_hp.getStatus());
+        publish_mqtt(s, g_hp.getStatus(), true);
     });
     g_hp.setStatusChangedCallback([](const cn105::Status& st) {
-        hvac_mqtt::publish_state(park_ctl::overlay(g_hp.getSettings()), st);
+        publish_mqtt(g_hp.getSettings(), st, false);
         // Log unit faults as they start, change and clear.
         static std::string last_err;
         if (st.errorCode != last_err) {
@@ -241,10 +249,25 @@ void cn105_task(void*) {
         if (++loops >= 10) {  // ~1 Hz
             loops = 0;
             park_ctl::tick();
+            auto_ctl::tick();
             slice_ctl::tick();
         }
         vTaskDelay(pdMS_TO_TICKS(100));
     }
+}
+
+// Apply a physical mode + setpoint as one intent (managed Auto): the slice
+// hold covers both writes, and park sees one intent change.
+void apply_physical(const std::string& mode, float temp, bool power_on) {
+    const cn105::Settings cur = park_ctl::overlay(g_hp.getSettings());
+    const bool on = power_on || cur.power == "ON";
+    slice_ctl::Command sc(on, mode);
+    const bool changed = strcasecmp(cur.mode.c_str(), mode.c_str()) != 0 ||
+                         std::fabs(cur.temperature - temp) > 0.01f;
+    if (!park_ctl::request_mode(mode)) g_hp.setModeSetting(mode.c_str());
+    g_hp.setTemperature(temp);
+    if (power_on) park_ctl::set_desired_power(true);
+    if (changed) park_ctl::notify_intent_change();
 }
 
 // Apply an inbound MQTT command to the heat pump.
@@ -274,15 +297,13 @@ void on_mqtt_command(const hvac_mqtt::Command& cmd) {
             } else {
                 const char* mode = cmd.value.c_str();
                 if (strcasecmp(mode, "fan_only") == 0) mode = "FAN";
-                // Time-slicing schedules HEAT and COOL; AUTO would pick its
-                // own direction behind the scheduler's back.
+                // In Tandem, AUTO is HeatLink's managed Auto: the unit runs
+                // HEAT or COOL at the range's matching end (auto_ctl).
                 if (strcasecmp(mode, "auto") == 0 && slice_ctl::enabled()) {
-                    ESP_LOGW(TAG, "AUTO rejected while time-slicing");
-                    cn105::Settings e = park_ctl::overlay(g_hp.getSettings());
-                    hvac_mqtt::publish_settings(e);  // let HA snap back
-                    hvac_mqtt::publish_state(e, g_hp.getStatus());
+                    auto_ctl::enter();
                     break;
                 }
+                auto_ctl::leave();
                 // Time-slicing: hold before / release after the new mode is recorded.
                 slice_ctl::Command sc(true, mode);
                 bool changed =
@@ -296,6 +317,10 @@ void on_mqtt_command(const hvac_mqtt::Command& cmd) {
         }
         case K::Temperature: {
             float t = strtof(cmd.value.c_str(), nullptr);
+            if (auto_ctl::active()) {  // moves the running end of the range
+                auto_ctl::set_active(t);
+                break;
+            }
             bool changed = std::fabs(g_hp.getSettings().temperature - t) > 0.01f;
             g_hp.setTemperature(t);
             if (changed) park_ctl::notify_intent_change();
@@ -361,13 +386,6 @@ void on_mqtt_command_external(const hvac_mqtt::Command& cmd) {
     using K = hvac_mqtt::Command::Kind;
     if (cmd.kind == K::Mode && web_ui::try_group_mode_command(cmd.value)) {
         return;  // handled as a coordinated whole-group switch (already logged)
-    }
-    if (cmd.kind == K::Mode && strcasecmp(cmd.value.c_str(), "auto") == 0 &&
-        slice_ctl::enabled()) {
-        on_mqtt_command(cmd);  // rejects and republishes
-        events::log(events::Cat::Mode, events::Actor::HomeAssistant,
-                    "AUTO rejected \xE2\x80\x94 not available in Tandem");
-        return;
     }
     on_mqtt_command(cmd);
 
@@ -562,13 +580,12 @@ extern "C" void app_main() {
     // current state so Home Assistant re-syncs after a broker drop. Retained
     // discovery alone is lost if it was queued before the link was up.
     hvac_mqtt::set_on_connected([] {
-        cn105::Settings eff = park_ctl::overlay(g_hp.getSettings());
+        cn105::Settings eff = auto_ctl::present(park_ctl::overlay(g_hp.getSettings()));
         hvac_mqtt::publish_discovery(eff);
         hvac_mqtt::publish_update_discovery();
         hvac_mqtt::publish_diag_discovery();
         hvac_mqtt::publish_group_discovery();
-        hvac_mqtt::publish_settings(eff);
-        hvac_mqtt::publish_state(eff, g_hp.getStatus());
+        publish_mqtt(g_hp.getSettings(), g_hp.getStatus(), true);
         ota::UpdateInfo u = ota::get_update_info();
         hvac_mqtt::publish_update_state(u.current_version, u.latest_version, u.release_url);
         diag::Snapshot ds = diag::get();
@@ -690,11 +707,7 @@ extern "C" void app_main() {
             return g_hp.isConnected() ? g_hp.getSettings().mode : std::string();
         };
         ph.set_mode  = [](const std::string& m) { g_hp.setModeSetting(m); };
-        ph.on_change = [] {
-            cn105::Settings e = park_ctl::overlay(g_hp.getSettings());
-            hvac_mqtt::publish_settings(e);
-            hvac_mqtt::publish_state(e, g_hp.getStatus());
-        };
+        ph.on_change = [] { publish_mqtt(g_hp.getSettings(), g_hp.getStatus(), true); };
         park_ctl::init(ph);
 
         room_sensor_ctl::Hooks rh;
@@ -716,10 +729,16 @@ extern "C" void app_main() {
         slice_ctl::Hooks sh;
         sh.settings = [] { return park_ctl::overlay(g_hp.getSettings()); };
         sh.status   = [] { return g_hp.getStatus(); };
-        sh.set_mode = [](const std::string& m) {
-            if (!park_ctl::request_mode(m)) g_hp.setModeSetting(m.c_str());
-        };
         slice_ctl::init(sh);
+
+        auto_ctl::Hooks ah;
+        ah.settings  = [] { return park_ctl::overlay(g_hp.getSettings()); };
+        ah.status    = [] { return g_hp.getStatus(); };
+        ah.connected = [] { return g_hp.isConnected(); };
+        ah.step      = [] { return g_hp.setpointStep(); };
+        ah.apply     = apply_physical;
+        ah.on_change = [] { publish_mqtt(g_hp.getSettings(), g_hp.getStatus(), true); };
+        auto_ctl::init(ah);
         hvac_mqtt::set_park_provider([] {
             park_ctl::Snapshot ps = park_ctl::snapshot();
             hvac_mqtt::ParkInfo pi;

@@ -331,6 +331,8 @@ align-items:center;justify-content:center;pointer-events:none;text-align:center}
 .dc-temp{font-size:3.1em;font-weight:300;line-height:1.05;color:var(--fg)}
 .dc-unit{font-size:.4em;color:var(--fg-3);vertical-align:super;margin-left:2px}
 .dc-room{font-size:.78em;color:var(--fg-3);margin-top:2px}
+.dc-range{font-size:.85em;color:var(--fg-2);margin-top:1px}
+.dc-range .h{color:#f0883e}.dc-range .c{color:#58a6ff}
 .rs-ic{pointer-events:auto;display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;
   margin:-7px -7px -7px 1px;border:none;background:none;padding:0;color:var(--fg-3);cursor:pointer;vertical-align:middle;
   -webkit-tap-highlight-color:transparent}
@@ -650,10 +652,12 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
         <path id="dialFill" class="dfill"></path>
         <circle id="roomDot" class="rdot" r="4" style="display:none"></circle>
         <circle id="dialKnob" class="dknob" r="9" style="display:none"></circle>
+        <circle id="dialKnob2" class="dknob" r="9" style="display:none"></circle>
       </svg>
       <div class="dial-center">
         <div class="dc-mode" id="dialMode">--</div>
         <div class="dc-temp"><span id="setTemp">--</span><span class="dc-unit" id="setUnit">°C</span></div>
+        <div class="dc-range hidden" id="dialRange"></div>
         <div class="dc-room"><span id="roomTemp">--</span>° room<button type="button" id="rsIc" class="rs-ic hidden" aria-label="Room sensors" aria-expanded="false" aria-controls="rsPop" onclick="rsPopToggle(event)"></button></div>
       </div>
       <div id="rsPop" class="rs-pop hidden" role="dialog" aria-label="Room sensors"></div>
@@ -1072,7 +1076,7 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
     <div class="sub" style="margin:-4px 0 8px;text-align:left">An outdoor unit can heat or cool, but not both,
       so a warm room and a cold room can't both get comfortable. Tandem™ fixes that by taking turns
       heating and cooling, automatically. Paused rooms are switched off
-      (settings kept) and restart on their own. Auto mode isn't available with Tandem.</div>
+      (settings kept) and restart on their own. With Tandem on, Auto keeps a room between a heat-to and a cool-to temperature.</div>
     <div class="row"><label>Outdoor unit</label><span class="v" id="slUnit">--</span></div>
     <div id="slNoGroup" class="sub hidden" style="margin:0 0 8px">Set up this head's outdoor unit
       first to use Tandem.</div>
@@ -1404,7 +1408,8 @@ const I18N = { fr: {
   "air check in":"vérification dans",
   // Time-slicing
   "Tandem":"Tandem","Tandem™":"Tandem™",
-  "An outdoor unit can heat or cool, but not both, so a warm room and a cold room can't both get comfortable. Tandem™ fixes that by taking turns heating and cooling, automatically. Paused rooms are switched off (settings kept) and restart on their own. Auto mode isn't available with Tandem.":"Une unité extérieure peut chauffer ou refroidir, mais pas les deux : une pièce trop chaude et une pièce trop froide ne peuvent pas être confortables en même temps. Tandem™ règle cela en alternant automatiquement chauffage et refroidissement. Les pièces en pause sont arrêtées (réglages conservés) et redémarrent d’elles-mêmes. Le mode Auto n’est pas disponible avec Tandem.",
+  "An outdoor unit can heat or cool, but not both, so a warm room and a cold room can't both get comfortable. Tandem™ fixes that by taking turns heating and cooling, automatically. Paused rooms are switched off (settings kept) and restart on their own. With Tandem on, Auto keeps a room between a heat-to and a cool-to temperature.":"Une unité extérieure peut chauffer ou refroidir, mais pas les deux : une pièce trop chaude et une pièce trop froide ne peuvent pas être confortables en même temps. Tandem™ règle cela en alternant automatiquement chauffage et refroidissement. Les pièces en pause sont arrêtées (réglages conservés) et redémarrent d’elles-mêmes. Avec Tandem, le mode Auto maintient une pièce entre une température de chauffage et une température de refroidissement.",
+  "Auto · heat to":"Auto · chauffer à","Auto · cool to":"Auto · refroidir à",
   "Now":"Maintenant","Minimum turn":"Tour minimal","Maximum turn":"Tour maximal",
   "Pause between modes":"Pause entre les modes","Paused while other rooms heat":"En pause pendant que les autres pièces chauffent","Paused while other rooms cool":"En pause pendant que les autres pièces refroidissent","Paused while modes switch":"En pause pendant le changement de mode","Checking if this room needs a turn":"Vérification : cette pièce a-t-elle besoin de son tour ?",
   "Switching modes":"Changement de mode",
@@ -2033,6 +2038,12 @@ async function refresh(){
       if(confirmField('power',c.power)) climate.power=(c.power==='ON');
       if(confirmField('mode',c.mode)) climate.mode=c.mode||climate.mode;
       if(c.temperature!=null&&confirmField('temperature',c.temperature)) climate.temp=c.temperature;
+      if(c.auto){
+        const a=c.auto, o=climate.auto||{};
+        climate.auto={managed:!!a.managed,available:!!a.available,dir:a.dir==='COOL'?'COOL':'HEAT',
+          heat_to:confirmField('heat_to',a.heat_to)?a.heat_to:o.heat_to,
+          cool_to:confirmField('cool_to',a.cool_to)?a.cool_to:o.cool_to};
+      } else climate.auto=null;
       climate.room=(c.roomTemperature!=null&&c.roomTemperature>0)?c.roomTemperature:null;
       climate.rs=c.roomSensor||null;
       if(climate.rs&&climate.rs.state==='ok'&&climate.rs.temp!=null) climate.room=climate.rs.temp;
@@ -2190,7 +2201,20 @@ function closeStat(){
 }
 
 // ── Climate dial ──────────────────────────────────────────────────────
-let climate={power:false,mode:'HEAT',temp:21,room:null,operating:false};
+let climate={power:false,mode:'HEAT',temp:21,room:null,operating:false,auto:null};
+// HeatLink's Auto range (Tandem on): the room is kept between heat_to and
+// cool_to. Off Tandem, AUTO is the unit's own single-setpoint Auto.
+const AUTO_GAP=2;
+function autoRange(){
+  const a=climate.auto;
+  return !!(climate.power&&climate.mode==='AUTO'&&a&&(a.managed||a.available)&&a.heat_to!=null&&a.cool_to!=null);
+}
+// Move one end of the range, pushing the other to keep the minimum gap.
+function autoSet(end,v){
+  const a=climate.auto;
+  if(end==='lo'){ a.heat_to=Math.max(U_LO,Math.min(U_HI-AUTO_GAP,v)); if(a.cool_to-a.heat_to<AUTO_GAP) a.cool_to=a.heat_to+AUTO_GAP; }
+  else { a.cool_to=Math.max(U_LO+AUTO_GAP,Math.min(U_HI,v)); if(a.cool_to-a.heat_to<AUTO_GAP) a.heat_to=a.cool_to-AUTO_GAP; }
+}
 let lastGroup=null;  // latest /api/group, shared by the Zones and Climate tabs
 const T_MIN=16,T_MAX=31,A_START=225,A_SWEEP=270,DR=80,DC=100;
 // Temperature display unit. Internal setpoint/room values are ALWAYS °C at the
@@ -2559,21 +2583,38 @@ function arc(t0,t1){
 }
 function renderClimate(){
   const t=Math.max(T_MIN,Math.min(T_MAX,climate.temp||21));
-  $('setTemp').textContent=climate.temp!=null?fmtTemp(t):'--';
+  const ar=autoRange(), a=climate.auto, k2=$('dialKnob2'), rg=$('dialRange');
+  const actC=ar?(a.dir==='COOL'?a.cool_to:a.heat_to):null;
+  $('setTemp').textContent=ar?fmtTemp(actC):(climate.temp!=null?fmtTemp(t):'--');
   $('setUnit').textContent=unitSym();
   $('roomTemp').textContent=fmtTemp(climate.room);
   rsIconRender();
   const color=climate.power?(MODE_COLOR[climate.mode]||'#9aa4ad'):getComputedStyle(document.documentElement).getPropertyValue('--dial-fill').trim();
-  $('dialFill').setAttribute('d',arc(T_MIN,t));
-  $('dialFill').style.stroke=color;
-  const kn=$('dialKnob'),kp=polar(tToAngle(t),DR);
-  kn.setAttribute('cx',kp[0]);kn.setAttribute('cy',kp[1]);
-  kn.style.display=climate.power?'':'none';
+  const kn=$('dialKnob');
+  rg.classList.toggle('hidden',!ar);
+  if(ar){
+    const lo=Math.max(T_MIN,a.heat_to), hi=Math.min(T_MAX,a.cool_to), heat=a.dir!=='COOL';
+    $('dialFill').setAttribute('d',arc(lo,hi));
+    $('dialFill').style.stroke=MODE_COLOR.AUTO;
+    const p1=polar(tToAngle(lo),DR), p2=polar(tToAngle(hi),DR);
+    kn.setAttribute('cx',p1[0]);kn.setAttribute('cy',p1[1]);kn.setAttribute('r',heat?9:7);
+    kn.style.fill=MODE_COLOR.HEAT;kn.style.display='';
+    k2.setAttribute('cx',p2[0]);k2.setAttribute('cy',p2[1]);k2.setAttribute('r',heat?7:9);
+    k2.style.fill=MODE_COLOR.COOL;k2.style.display='';
+    rg.innerHTML='<span class="h">'+fmtTemp(a.heat_to)+'</span> \u2013 <span class="c">'+fmtTemp(a.cool_to)+'</span>'+unitSym();
+  } else {
+    $('dialFill').setAttribute('d',arc(T_MIN,t));
+    $('dialFill').style.stroke=color;
+    const kp=polar(tToAngle(t),DR);
+    kn.setAttribute('cx',kp[0]);kn.setAttribute('cy',kp[1]);kn.setAttribute('r',9);kn.style.fill='';
+    kn.style.display=climate.power?'':'none';
+    k2.style.display='none';
+  }
   const rd=$('roomDot');
   if(climate.room!=null){const rp=polar(tToAngle(Math.max(T_MIN,Math.min(T_MAX,climate.room))),DR);
     rd.setAttribute('cx',rp[0]);rd.setAttribute('cy',rp[1]);rd.style.display='';}
   else rd.style.display='none';
-  $('dialMode').textContent=climate.power?climate.mode:'OFF';
+  $('dialMode').textContent=!climate.power?'OFF':ar?i18n(a.dir==='COOL'?'Auto · cool to':'Auto · heat to'):climate.mode;
   $('dialWrap').classList.toggle('off',!climate.power);
   const op=$('opState');
   let opTxt;
@@ -2593,8 +2634,10 @@ function renderClimate(){
       case 'DRY':  opTxt='Drying'; break;
       case 'FAN':  opTxt='Fan running'; break;
       case 'AUTO':
-        // Prefer the unit's reported direction; else infer from room vs setpoint.
-        if(climate.direction==='HEAT'||climate.direction==='COOL')
+        // Managed range: our direction. Else the unit's reported direction,
+        // or infer from room vs setpoint.
+        if(ar) opTxt=a.dir==='COOL'?'Cooling':'Heating';
+        else if(climate.direction==='HEAT'||climate.direction==='COOL')
           opTxt=climate.direction==='HEAT'?'Heating':'Cooling';
         else if(climate.room!=null && climate.temp!=null && Math.abs(climate.room-climate.temp)>=0.5)
           opTxt=(climate.room>climate.temp)?'Cooling':'Heating';
@@ -2620,6 +2663,7 @@ function renderClimate(){
     else if(b.t==='Starting\u2026') det=i18n('compressor starting');
     else if(b.t==='Defrost') det=i18n('heat resumes in a few minutes');
     else if(b.t==='Blocked'){ det=b.s||''; }
+    if(!det&&ar&&(b.t==='Heating'||b.t==='Cooling')) det=i18n('Auto');
     if(b.t==='Blocked') b=Object.assign({},b,{s:''});
     op.innerHTML='<div class="opb"><span class="gturn '+b.c+'">'+gEsc(i18n(b.t))+(b.s?'<small>'+gEsc(b.s)+'</small>':'')+'</span>'+
       (det?'<span>'+gEsc(det)+'</span>':'')+'</div>';
@@ -2627,9 +2671,7 @@ function renderClimate(){
   } else op.textContent=i18n(opTxt);
   op.className='op'+(climate.power&&climate.operating?' active':'');
   $('tDec').disabled=$('tInc').disabled=!climate.power;
-  const slicing=!!(pk&&pk.slicing);
   [...document.querySelectorAll('#modePills button')].forEach(b=>{
-    if(b.dataset.mode==='AUTO') b.style.display=(slicing&&!(climate.power&&climate.mode==='AUTO'))?'none':'';
     const m=b.dataset.mode, on=(m==='OFF')?!climate.power:(climate.power&&climate.mode===m);
     b.classList.toggle('on',on);
     b.style.background=on?(m==='OFF'?'#566270':(MODE_COLOR[m]||'#566270')):'';
@@ -2671,7 +2713,8 @@ async function setMode(m){
 }
 function bumpTemp(d){
   if(!climate.power)return;
-  let c=(climate.temp!=null)?climate.temp:21;
+  const ar=autoRange(), a=climate.auto, end=ar&&a.dir==='COOL'?'hi':'lo';
+  let c=ar?(end==='hi'?a.cool_to:a.heat_to):((climate.temp!=null)?climate.temp:21);
   if(isF()){
     // Step by a whole °F, then snap to the nearest supported 0.5 °C. Driving by
     // target-°F (not a fixed °C delta) keeps every press moving the display by
@@ -2680,7 +2723,15 @@ function bumpTemp(d){
   }else{
     c=snapC(c+d);
   }
-  climate.temp=c;renderClimate();commitTempDebounced(c);
+  if(ar){ autoSet(end,c); renderClimate(); commitDebounced(autoBody(end)); return; }
+  climate.temp=c;renderClimate();commitDebounced({temperature:c});
+}
+// Post the moved end of the Auto range; hold both ends as pending since the
+// other one may have been pushed to keep the gap.
+function autoBody(end){
+  const a=climate.auto;
+  setPending({heat_to:a.heat_to,cool_to:a.cool_to});
+  return end==='hi'?{cool_to:a.cool_to}:{heat_to:a.heat_to};
 }
 
 // Debounce +/- setpoint commits. While the user taps repeatedly we update the
@@ -2689,11 +2740,11 @@ function bumpTemp(d){
 // they settle on — not one per tap. Dragging the dial already commits once on
 // release; this gives the buttons the same behaviour.
 let tempCommitTimer=null;
-function commitTempDebounced(c){
+function commitDebounced(body){
   userEditing=true;                 // keep the poll off the setpoint while tapping
-  setPending({temperature:c});      // hold the shown value as pending during the wait
+  setPending(body);                 // hold the shown value as pending during the wait
   clearTimeout(tempCommitTimer);
-  tempCommitTimer=setTimeout(()=>{ tempCommitTimer=null; post({temperature:c}); }, 500);
+  tempCommitTimer=setTimeout(()=>{ tempCommitTimer=null; post(body); }, 500);
 }
 
 // Drag / tap on the dial to set the temperature.
@@ -2735,7 +2786,7 @@ function rsPopToggle(ev){
 function rsPopClose(){ $('rsPop').classList.add('hidden'); $('rsIc').setAttribute('aria-expanded','false'); }
 document.addEventListener('pointerdown',e=>{ if(!e.target.closest('#rsPop,#rsIc')) rsPopClose(); });
 document.addEventListener('keydown',e=>{ if(e.key==='Escape') rsPopClose(); });
-let dialDragging=false;
+let dialDragging=false, dialEnd_='';
 function dialTemp(ev){
   const r=$('dialSvg').getBoundingClientRect();
   const px=(ev.clientX-r.left)/r.width*200, py=(ev.clientY-r.top)/r.height*200;
@@ -2749,10 +2800,26 @@ function dialDown(ev){
   if(!climate.power)return;
   dialDragging=true;userEditing=true;
   try{$('dialSvg').setPointerCapture(ev.pointerId)}catch(e){}
-  climate.temp=dialTemp(ev);renderClimate();ev.preventDefault();
+  const v=dialTemp(ev);
+  if(autoRange()){
+    // Grab whichever thumb is nearer; a tie (both at one spot) goes by direction.
+    const a=climate.auto, dl=Math.abs(v-a.heat_to), dh=Math.abs(v-a.cool_to);
+    dialEnd_=dl<dh?'lo':dh<dl?'hi':(v>a.cool_to?'hi':v<a.heat_to?'lo':(a.dir==='COOL'?'hi':'lo'));
+    autoSet(dialEnd_,v);
+  } else { dialEnd_=''; climate.temp=v; }
+  renderClimate();ev.preventDefault();
 }
-function dialMove(ev){if(!dialDragging)return;climate.temp=dialTemp(ev);renderClimate();}
-function dialEnd(){if(!dialDragging)return;dialDragging=false;post({temperature:climate.temp});}
+function dialMove(ev){
+  if(!dialDragging)return;
+  const v=dialTemp(ev);
+  if(dialEnd_&&autoRange()) autoSet(dialEnd_,v); else climate.temp=v;
+  renderClimate();
+}
+function dialEnd(){
+  if(!dialDragging)return;dialDragging=false;
+  if(dialEnd_&&autoRange()) post(autoBody(dialEnd_)); else post({temperature:climate.temp});
+  dialEnd_='';
+}
 function initDial(){
   $('dialTrack').setAttribute('d',arc(T_MIN,T_MAX));
   const sv=$('dialSvg');
@@ -3632,7 +3699,7 @@ function memberRow(o){
   // (°F/°C) and renders '--' for a missing value (e.g. an offline peer).
   let stats='';
   const parts=[];
-  if(o.mode) parts.push('<span class="gmstat"><b>'+gEsc(modeCap(o.mode))+'</b></span>');
+  if(o.mode) parts.push('<span class="gmstat"><b>'+gEsc((o.auto&&o.mode!=='OFF'?i18n('Auto')+' \u00b7 ':'')+modeCap(o.mode))+'</b></span>');
   if(o.room!=null) parts.push('<span class="gmstat">Current <b>'+fmtTemp(o.room)+unitSym()+'</b>'
     +(o.rs?'<span title="'+gEsc(i18n(o.rs==='ok'?'Room temperature from remote sensors':'Remote sensors not heard'))+'">'+RS_ICON(o.rs==='ok'?'gm-rs':'gm-rs warn')+'</span>':'')+'</span>');
   if(o.target!=null) parts.push('<span class="gmstat">Target <b>'+fmtTemp(o.target)+unitSym()+'</b></span>');
@@ -3717,7 +3784,7 @@ function renderGroupPanel(g){
   const lockMatch=(nm,uid)=>inConflict&&g.locked_by&&(g.locked_by===nm||g.locked_by===uid);
   const heads=[{ name:self.name||self.uid, dotcls:'selfdot', tag:'This device', uid:self.uid, isPeer:false,
     known:true, mode:self.mode, room:self.roomTemp, target:self.targetTemp, rs:self.rs, url:null,
-    operating:self.operating, standby:self.standby, subMode:self.subMode, dir:self.dir }];
+    operating:self.operating, standby:self.standby, subMode:self.subMode, dir:self.dir, auto:!!self.auto }];
   (g.members||[]).forEach(m=>{
     const known=(m.state==='known');
     // An unreachable peer (no fresh signed poll within ~45s) comes back as
@@ -3727,11 +3794,11 @@ function renderGroupPanel(g){
       tag:known?'':(m.state==='incompatible'?'Incompatible':'Offline'), uid:m.uid, isPeer:true, known:known,
       offline:m.state==='unknown',
       mode:known?m.mode:null, room:known?m.roomTemp:null, target:known?m.targetTemp:null, rs:known?m.rs:null,
-      operating:!!m.operating, standby:!!m.standby, subMode:m.subMode, dir:m.dir,
+      operating:!!m.operating, standby:!!m.standby, subMode:m.subMode, dir:m.dir, auto:known&&!!m.auto,
       url:m.ip?('http://'+m.ip+'/'):null });
   });
   $('gMembers').innerHTML=heads.map(h=>memberRow({ name:h.name, dotcls:h.dotcls, tag:h.offline?'':h.tag,
-    isLock:lockMatch(h.name,h.uid), uid:null, mode:h.mode, room:h.room, target:h.target, rs:h.rs,
+    isLock:lockMatch(h.name,h.uid), uid:null, mode:h.mode, auto:h.auto, room:h.room, target:h.target, rs:h.rs,
     url:h.url, huid:h.isPeer?h.uid:null, badge:zoneBadge(g,h) })).join('');
   $('ouMembers').innerHTML=heads.map(h=>memberRow({ name:h.name, dotcls:h.dotcls, tag:h.tag,
     uid:h.uid, isPeer:h.isPeer, url:null })).join('');
@@ -3950,7 +4017,8 @@ function climateBadge(){
   const g=lg||{slice:{members:[{uid:uid,satisfied:!!pk.parked}]},
     unit:{defrost:climate.subMode==='DEFROST'}};
   return zoneBadge(g,{uid:uid,known:true,mode:climate.power?climate.mode:'OFF',
-    operating:climate.operating,standby:climate.standby,subMode:climate.subMode,dir:climate.direction});
+    operating:climate.operating,standby:climate.standby,subMode:climate.subMode,
+    dir:autoRange()?climate.auto.dir:climate.direction});
 }function modeCap(m){ return m.charAt(0)+m.slice(1).toLowerCase(); }
 // ── House view (all heads across outdoor units) ─────────────────────────
 let groupTabActive=false, houseRetry=null;

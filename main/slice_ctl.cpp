@@ -20,7 +20,6 @@ namespace {
 const char* TAG = "slice";
 constexpr const char* kNs = "slice";
 constexpr int64_t kPeerFreshUs = 45LL * 1000 * 1000;  // matches the group poller
-constexpr uint32_t kAutoFixGapS = 10;
 
 struct PeerEntry {
     PeerObs obs;
@@ -34,10 +33,7 @@ slice::Node  s_node;
 std::string  s_cfg_enc;          // last applied encoded config
 std::map<std::string, PeerEntry> s_peers;
 uint64_t     s_saved_term = 0;
-std::string  s_last_mode;        // last non-AUTO mode, restored if AUTO appears
-uint32_t     s_last_auto_fix = 0;
-bool         s_auto_fixed = false;
-bool         s_auto_logged = false;
+bool         s_configured = false;  // tick() has applied the group's config
 
 // A command recorded but not yet reflected in the unit's reported settings.
 // tick() uses it in place of the reported mode so it doesn't flap the hold.
@@ -76,7 +72,7 @@ slice::Need need_of(park::Need n) {
 }
 
 // Directive -> hold, for self. AUTO is held while slicing (it would choose its
-// own direction).
+// own direction) until auto_ctl turns it into HeatLink's managed Auto.
 bool hold_for_locked(bool power_on, const std::string& mode, uint32_t t) {
     if (!s_node.enabled()) return false;
     if (is_auto(power_on, mode)) return true;
@@ -163,8 +159,6 @@ void tick() {
     const uint32_t lead = park_ctl::config().probe_duration_s + 60;
 
     std::vector<const char*> evs;
-    std::string fix_mode;
-    bool auto_stuck = false;
     bool enabled = false, hold = false, check = false;
     uint64_t term = 0;
     {
@@ -178,6 +172,7 @@ void tick() {
                      c.enabled ? "enabled" : "disabled", (unsigned)c.min_slice_s,
                      (unsigned)c.max_slice_s, (unsigned)c.settle_s);
         }
+        s_configured = true;
         for (auto it = s_peers.begin(); it != s_peers.end();) {
             bool member = false;
             for (const auto& p : peers) member = member || p == it->first;
@@ -197,24 +192,6 @@ void tick() {
         check = s_node.have_state() && s_node.state().phase == slice::Phase::Run &&
                 s_node.state().check;
         term = s_node.max_term();
-
-        const std::string reported = upper(s.mode);
-        if (reported == "HEAT" || reported == "COOL" || reported == "DRY" || reported == "FAN")
-            s_last_mode = reported;
-        if (!is_auto(power_on, mode) || !enabled) {
-            s_auto_fixed = false;
-            s_auto_logged = false;
-        } else if (s_last_mode.empty()) {
-            // Nothing to return to: stay held until a mode is chosen.
-            auto_stuck = !s_auto_logged;
-            s_auto_logged = true;
-        } else if (!s_auto_fixed || t - s_last_auto_fix >= kAutoFixGapS) {
-            // Stays held this tick; the next tick judges the restored mode.
-            fix_mode = s_last_mode;
-            s_auto_fixed = true;
-            s_last_auto_fix = t;
-            s_pending = Intent{true, true, fix_mode, t + kPendingS};
-        }
     }
     if (term > s_saved_term) {
         save_term(term);
@@ -225,20 +202,6 @@ void tick() {
         events::log(events::Cat::Group, events::Actor::System, e);
     }
     park_ctl::set_slice(enabled, hold, check);
-    if (!fix_mode.empty() && s_hooks.set_mode) {
-        s_hooks.set_mode(fix_mode);
-        if (!s_auto_logged) {
-            s_auto_logged = true;
-            std::string msg = "AUTO isn't available in Tandem \xE2\x80\x94 restored " + fix_mode;
-            ESP_LOGW(TAG, "%s", msg.c_str());
-            events::log(events::Cat::Mode, events::Actor::System, msg.c_str());
-        }
-    }
-    if (auto_stuck) {
-        const char* msg = "AUTO isn't available in Tandem \xE2\x80\x94 held off until Heat or Cool is chosen";
-        ESP_LOGW(TAG, "%s", msg);
-        events::log(events::Cat::Mode, events::Actor::System, msg);
-    }
 }
 
 Command::Command(bool power_on, const std::string& mode) {
@@ -270,6 +233,11 @@ Command::~Command() {
 bool enabled() {
     std::lock_guard<std::mutex> lk(s_mtx);
     return s_node.enabled();
+}
+
+bool configured() {
+    std::lock_guard<std::mutex> lk(s_mtx);
+    return s_configured;
 }
 
 void observe_peer(const std::string& uid, const PeerObs& obs) {

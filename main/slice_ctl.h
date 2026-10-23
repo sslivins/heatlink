@@ -4,8 +4,9 @@
 /// Reads the replicated slice config, collects every member's slice view
 /// (self live, peers from the signed group poll), ticks the Node ~1 Hz from
 /// the CN105 task and turns the resulting directive into a park hold
-/// (park_ctl::set_slice). While slicing is on, AUTO is not allowed: a unit put
-/// into AUTO (e.g. by the IR remote) is returned to its previous mode.
+/// (park_ctl::set_slice). While slicing is on, AUTO is HeatLink's managed Auto
+/// (auto_ctl): a unit put into native AUTO (e.g. by the IR remote) is held
+/// until auto_ctl adopts it as a heat/cool range.
 
 #pragma once
 
@@ -22,7 +23,6 @@ namespace slice_ctl {
 struct Hooks {
     std::function<cn105::Settings()>              settings;  ///< desired (park overlay)
     std::function<cn105::Status()>                status;
-    std::function<void(const std::string& mode)>  set_mode;  ///< physical mode command
 };
 
 /// Load the persisted term. Call before the CN105 task.
@@ -46,6 +46,9 @@ public:
 
 /// Slicing is enabled for this head's group.
 bool enabled();
+
+/// tick() has run at least once, so enabled() reflects the group's config.
+bool configured();
 
 /// What a peer published in its signed snapshot.
 struct PeerObs {

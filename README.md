@@ -278,11 +278,33 @@ on firmware that supports it), the group instead takes turns heating and cooling
   its own). The turn clock pauses during defrost and never switches mid-defrost.
 - Off-at-setpoint is forced on for every head while Tandem is enabled. DRY
   counts as cooling; OFF and FAN heads are unaffected.
-- AUTO is not available: the UI hides it, `/api/settings` rejects it, Home
-  Assistant snaps back, and a unit put into AUTO from the IR remote is returned
-  to its previous mode. Turning a waiting head on from the IR remote re-parks it.
+- **Auto** works as a heat-to/cool-to range (see below). Turning a waiting head
+  on from the IR remote re-parks it.
 - `/api/group/resolve`, `/api/group/sync` and the "switch all zones" prompt are
   disabled; mixed modes are expected rather than a conflict.
+
+### Auto under Tandem
+
+The unit's own AUTO picks heat or cool itself, which fights the turns. Under
+Tandem, **AUTO is HeatLink's range** instead: you set a **heat-to** and a
+**cool-to** temperature (at least 2 °C apart, 16–31 °C) and the unit physically
+runs HEAT at heat-to or COOL at cool-to, so it takes part in the turns like any
+other room. The web UI shows a dial with two thumbs; `/api/settings` reports it
+under `auto` (`heat_to`, `cool_to`, `dir`) and accepts `heat_to`/`cool_to`.
+
+- **Switching.** The room temperature is read from a trusted sample: a room
+  sensor, the end of an air check, or the head running with the fan on for the
+  air-check duration. Heating switches to cooling once the room reaches cool-to
+  plus the restart threshold (and the reverse), at most once a minute. There is
+  no fixed hold time; the 2 °C gap plus the threshold is the hysteresis.
+- **Setpoint.** Changing the setpoint (UI, HA, IR remote) moves the end in use;
+  the other end moves if needed to keep the gap. Choosing HEAT/COOL/DRY/FAN
+  leaves Auto; OFF keeps it.
+- **Turning Tandem on/off.** A head in the unit's own AUTO becomes a range
+  around its setpoint (±1 °C). Turning Tandem off returns a managed head to the
+  unit's own AUTO at the middle of the range. Pressing AUTO on the IR remote
+  under Tandem also starts the range.
+- Outside Tandem, AUTO is the unit's own Auto, unchanged.
 
 ## Room sensors
 

@@ -30,6 +30,7 @@ idf_component_register(
          "factory_reset.cpp"
          "park_ctl.cpp"
          "slice_ctl.cpp"
+         "auto_ctl.cpp"
          "history_ctl.cpp"
          "room_sensor_ctl.cpp"
          "shelly_rpc.cpp"
@@ -43,7 +44,7 @@ idf_component_register(
     REQUIRES nvs_flash esp_wifi esp_netif esp_event esp_driver_i2c
              esp_timer esp_app_format esp_http_server lwip
              app_update esp_https_ota esp_http_client mbedtls spiffs
-             cn105 m5pm1 hvac_mqtt hvac_group park slice history
+             cn105 m5pm1 hvac_mqtt hvac_group park slice history autorange
              bt room_sensor tokens
 )
 

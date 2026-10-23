@@ -54,6 +54,9 @@ public:
     void setPowerSetting(const std::string& power);
     void setModeSetting(const std::string& mode);
     void setTemperature(float celsius);
+    /// Setpoint resolution: 0.5 once the unit has reported half-degree
+    /// encoding, else 1 (setTemperature snaps to whole degrees).
+    float setpointStep() const { return tempMode_ ? 0.5f : 1.0f; }
     void setFanSpeed(const std::string& fan);
     void setVaneSetting(const std::string& vane);
     void setWideVaneSetting(const std::string& wideVane);
