@@ -25,7 +25,9 @@
   --dial-btn-hover:#3a4250; --dial-btn-border:#484f58; --dial-off:#566270;
   --hist-room:#e6edf3; --hist-target:#3fb950; --hist-out:#a371f7; --hist-heat:#f0883e;
   --hist-cool:#58a6ff; --hist-dry:#2dd4bf; --hist-auto:#d29922; --hist-defrost:#9ecbff;
-  --hist-park:#8b949e;
+  /* Mode-band opacity at bottom / 70% up / top. A flat thin tint over the dark
+     background reads as muddy brown, so dark mode fades strong-to-faint. */
+  --band-a0:60%; --band-a1:10%; --band-a2:6%;
 }
 @media (prefers-color-scheme:light){
   :root{
@@ -39,7 +41,7 @@
     --dial-btn-hover:#d8dee4; --dial-btn-border:#d0d7de; --dial-off:#8c959f;
     --hist-room:#1f2328; --hist-target:#1a7f37; --hist-out:#8250df; --hist-heat:#f97316;
     --hist-cool:#3b82f6; --hist-dry:#0d9488; --hist-auto:#bf8700; --hist-defrost:#54aeff;
-    --hist-park:#6e7781;
+    --band-a0:16%; --band-a1:16%; --band-a2:16%;
   }
 }
 
@@ -239,6 +241,10 @@ cursor:pointer;user-select:none;transition:.15s}
 .hist-legend span,.hist-legend label{display:inline-flex;align-items:center;gap:6px}
 .hist-legend i{width:14px;height:3px;border-radius:2px;display:inline-block}
 .hist-legend i.band{width:11px;height:11px;border-radius:3px}
+.hist-legend i.mband{box-sizing:border-box;border-bottom:2px solid var(--band);background:linear-gradient(to top,
+  color-mix(in srgb,var(--band) var(--band-a0),transparent),
+  color-mix(in srgb,var(--band) var(--band-a1),transparent) 70%,
+  color-mix(in srgb,var(--band) var(--band-a2),transparent))}
 .hist-legend label{cursor:pointer}
 .hist-wrap{position:relative;width:100%;overflow-x:clip;min-height:240px}
 .hist-chart{width:100%;height:auto;display:block;touch-action:pan-y;user-select:none}
@@ -749,11 +755,10 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
       <span><i style="background:var(--hist-room)"></i>Room</span>
       <span><i style="background:var(--hist-target)"></i>Target</span>
       <span id="histLegOut"><i style="background:var(--hist-out)"></i>Outdoor</span>
-      <span><i class="band" style="background:var(--hist-heat);opacity:.5"></i>Heating</span>
-      <span><i class="band" style="background:var(--hist-cool);opacity:.5"></i>Cooling</span>
-      <span><i class="band" style="background:var(--hist-dry);opacity:.5"></i>Drying</span>
+      <span><i class="band mband" style="--band:var(--hist-heat)"></i>Heating</span>
+      <span><i class="band mband" style="--band:var(--hist-cool)"></i>Cooling</span>
+      <span><i class="band mband" style="--band:var(--hist-dry)"></i>Drying</span>
       <span><i class="band" style="background:var(--hist-defrost);opacity:.6"></i>Defrost</span>
-      <span><i class="band" style="background:var(--hist-park);opacity:.4"></i>Parked</span>
     </div>
     <div class="hist-range-row"><span class="hist-range" id="histRange"></span>
       <button class="hist-latest" id="histLatest" hidden onclick="histGoto(null)">Latest<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5.6 7.4 10.2 12l-4.6 4.6L7 18l6-6-6-6-1.4 1.4ZM16 6h2v12h-2V6Z"/></svg></button></div>
@@ -4373,7 +4378,7 @@ function histState(r){
 }
 function histBand(r){
   if(!(r.flags&HF.CONN)||!(r.flags&HF.POWER)) return null;
-  if(r.flags&HF.PARKED) return 'park';
+  if(r.flags&HF.PARKED) return null;
   if(r.flags&HF.OPER) return ({1:'heat',2:'cool',3:'dry',5:'auto'})[r.mode]||null;
   return null;
 }
@@ -4407,8 +4412,12 @@ function histSvg(d,W){
 
   let svg=`<svg class="hist-chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="History chart">`+
     `<defs><clipPath id="histClip"><rect x="${plotL}" y="0" width="${plotW}" height="${H}"/></clipPath>`+
-    `<pattern id="histHatch" patternUnits="userSpaceOnUse" width="8" height="8" patternTransform="rotate(45)">`+
-    `<line x1="0" y1="0" x2="0" y2="8" stroke="var(--hist-park)" stroke-width="2" opacity=".45"/></pattern></defs>`;
+    ['heat','cool','dry','auto'].map(m=>{const c=`var(--hist-${m})`;
+      return `<linearGradient id="histBand-${m}" x1="0" y1="1" x2="0" y2="0">`+
+        `<stop offset="0" style="stop-color:${c};stop-opacity:var(--band-a0)"/>`+
+        `<stop offset="0.7" style="stop-color:${c};stop-opacity:var(--band-a1)"/>`+
+        `<stop offset="1" style="stop-color:${c};stop-opacity:var(--band-a2)"/></linearGradient>`;}).join('')+
+    `</defs>`;
   const hline=(y,label)=>`<line x1="${plotL}" y1="${f1(y)}" x2="${plotR}" y2="${f1(y)}" stroke="var(--border-strong)" stroke-width="1"/>`+
     `<text x="${plotL-6}" y="${f1(y+4)}" text-anchor="end" class="hist-axis">${label}</text>`;
   for(let v=ax.lo; v<=ax.hi+1e-9; v+=ax.step) svg+=hline(mapY(v), v+'°');
@@ -4428,9 +4437,8 @@ function histSvg(d,W){
     }
   };
   runs(histBand,(k,x,w)=>{
-    svg+= k==='park'
-      ? `<rect x="${f1(x)}" y="${plotT}" width="${f1(w)}" height="${bottom-plotT}" fill="url(#histHatch)"/>`
-      : `<rect x="${f1(x)}" y="${plotT}" width="${f1(w)}" height="${bottom-plotT}" fill="${BAND[k]}" opacity=".16"/>`;
+    svg+=`<rect x="${f1(x)}" y="${plotT}" width="${f1(w)}" height="${bottom-plotT}" fill="url(#histBand-${k})"/>`+
+         `<rect x="${f1(x)}" y="${bottom-3}" width="${f1(w)}" height="3" fill="${BAND[k]}"/>`;
   });
   runs(r=>(r.flags&HF.DEFROST)?'d':null,(k,x,w)=>{
     w=Math.max(2,w);
