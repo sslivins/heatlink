@@ -396,10 +396,9 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
 .gmstats{display:flex;gap:12px;flex-wrap:wrap}
 .gmstat{font-size:.76em;color:var(--fg-3)}
 .gmstat b{color:var(--fg);font-weight:600}
-.gdot{width:9px;height:9px;border-radius:50%;background:var(--dot-off);flex:0 0 auto}
-.gdot.known{background:var(--green)}
-.gdot.unknown{background:var(--orange)}
-.gdot.selfdot{background:var(--blue)}
+/* A head that isn't answering: its name/stats are dimmed (no live data); the
+   Offline badge and any ✕ control stay at full strength. */
+.gmember.bad .gmcol{opacity:.45}
 .gname{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.92em}
 .gmode{font-size:.8em;color:var(--fg-3)}
 .glock{font-size:.66em;color:var(--orange);white-space:nowrap}
@@ -432,6 +431,7 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
 .gturn.ol.heat{color:#fdba74}.gturn.ol.cool{color:#93c5fd}
 .gturn.start{border-style:dashed;animation:upulse 1.6s ease-in-out infinite}
 .gturn.ghost{background:none;font-weight:500}
+.gturn.bad{background:transparent;color:var(--red);border:1px solid currentColor;text-align:center;opacity:.85}
 .gturn.warn{background:var(--warn-bg);color:var(--orange);border:1px solid var(--warn-border);text-align:center}
 /* Outdoor-unit strip: filled = running, outlined = set to this mode but the
    compressor is resting, pulsing = starting or switching to it, faded = not in it. */
@@ -3725,8 +3725,7 @@ function memberRow(o){
   // handled first by the delegated listener (so a tap on ✕/Leave never
   // navigates). data-* only — never interpolate names into an onclick.
   const urlAttr=o.url?(' data-gurl="'+gEsc(o.url)+'"'+(o.huid?' data-huid="'+gEsc(o.huid)+'"':'')):'';
-  return '<div class="gmember"'+urlAttr+'>'+
-    '<span class="gdot '+o.dotcls+'"></span>'+
+  return '<div class="gmember'+(o.bad?' bad':'')+'"'+urlAttr+'>'+
     '<div class="gmcol">'+
       '<div class="gmtop">'+nameHtml+lockHtml+'</div>'+
       stats+
@@ -3796,7 +3795,7 @@ function renderGroupPanel(g){
   // flickers. So gate the badge on an actual conflict.
   const inConflict=(g.status==='conflict'||g.status==='pending_conflict');
   const lockMatch=(nm,uid)=>inConflict&&g.locked_by&&(g.locked_by===nm||g.locked_by===uid);
-  const heads=[{ name:self.name||self.uid, dotcls:'selfdot', tag:'This device', uid:self.uid, isPeer:false,
+  const heads=[{ name:self.name||self.uid, tag:'This device', uid:self.uid, isPeer:false,
     known:true, mode:self.mode, room:self.roomTemp, target:self.targetTemp, rs:self.rs, url:null,
     operating:self.operating, standby:self.standby, subMode:self.subMode, dir:self.dir, auto:!!self.auto }];
   (g.members||[]).forEach(m=>{
@@ -3804,17 +3803,17 @@ function renderGroupPanel(g){
     // An unreachable peer (no fresh signed poll within ~45s) comes back as
     // state!=='known' — surface that plainly as "offline" so it's obvious a
     // zone dropped off, rather than the ambiguous "unknown".
-    heads.push({ name:m.name||m.uid, dotcls:known?'known':'unknown',
+    heads.push({ name:m.name||m.uid,
       tag:known?'':(m.state==='incompatible'?'Incompatible':'Offline'), uid:m.uid, isPeer:true, known:known,
       offline:m.state==='unknown',
       mode:known?m.mode:null, room:known?m.roomTemp:null, target:known?m.targetTemp:null, rs:known?m.rs:null,
       operating:!!m.operating, standby:!!m.standby, subMode:m.subMode, dir:m.dir, auto:known&&!!m.auto,
       url:m.ip?('http://'+m.ip+'/'):null });
   });
-  $('gMembers').innerHTML=heads.map(h=>memberRow({ name:h.name, dotcls:h.dotcls, tag:h.offline?'':h.tag,
+  $('gMembers').innerHTML=heads.map(h=>memberRow({ name:h.name, bad:h.offline, tag:h.offline?'':h.tag,
     isLock:lockMatch(h.name,h.uid), uid:null, mode:h.mode, auto:h.auto, room:h.room, target:h.target, rs:h.rs,
     url:h.url, huid:h.isPeer?h.uid:null, badge:zoneBadge(g,h) })).join('');
-  $('ouMembers').innerHTML=heads.map(h=>memberRow({ name:h.name, dotcls:h.dotcls, tag:h.tag,
+  $('ouMembers').innerHTML=heads.map(h=>memberRow({ name:h.name, bad:h.offline, tag:h.tag,
     uid:h.uid, isPeer:h.isPeer, url:null })).join('');
   wireMemberCtrls();
   // Refresh the name field unless it holds an unsaved edit.
@@ -3872,7 +3871,7 @@ function unitCaption(u,tandemShown){
 // h: {uid, known, offline, mode, operating, standby, subMode, dir}; g: /api/group.
 // "Up next" only appears when the waiting room actually needs its turn.
 function zoneBadge(g,h){
-  if(!h.known) return h.offline?{c:'',t:'Offline'}:null;
+  if(!h.known) return h.offline?{c:'bad',t:'Offline'}:null;
   const md=h.mode||'OFF';
   if(md==='OFF'||md==='FAN') return null;
   const sl=(g&&g.slice)||{}, u=(g&&g.unit)||{};
@@ -4043,7 +4042,7 @@ function houseRow(h,isSelf){
   else if(!h.summary_supported){ tag='Update firmware'; known=false; }
   else if(!h.unit_connected){ tag='No unit'; known=false; }
   const mode=known&&h.mode?((h.power==='OFF')?'OFF':h.mode):null;
-  return memberRow({ name:h.name||h.uid, dotcls:isSelf?'selfdot':(known?'known':'unknown'),
+  return memberRow({ name:h.name||h.uid, bad:!isSelf&&(!h.reachable||(h.summary_supported&&!h.unit_connected)),
     tag:tag, isLock:false, uid:null, isPeer:false, mode:mode,
     room:known&&h.roomTemp!=null?h.roomTemp:null, target:known&&h.targetTemp!=null?h.targetTemp:null, rs:known?h.rs:null,
     url:(!isSelf&&h.ip)?('http://'+h.ip+'/'):null });

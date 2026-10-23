@@ -83,7 +83,7 @@ for (const name of HOSTILE) {
     let out;
     try {
       out = memberRow({
-        name, mode: 'HEAT', dotcls: isPeer ? 'known' : 'selfdot',
+        name, mode: 'HEAT',
         tag: isPeer ? '' : 'you', isLock: false, uid: 'abcd', isPeer,
         room: 21.5, target: 22, url: isPeer ? 'http://192.168.1.9/' : null,
       });
