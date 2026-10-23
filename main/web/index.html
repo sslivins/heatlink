@@ -396,9 +396,9 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
 .gmstats{display:flex;gap:12px;flex-wrap:wrap}
 .gmstat{font-size:.76em;color:var(--fg-3)}
 .gmstat b{color:var(--fg);font-weight:600}
-/* A head that isn't answering: tinted row instead of a status dot. */
-.gmember.bad{background:var(--err-bg);border-radius:8px;padding-left:10px;padding-right:10px}
-.gmember.bad .gmode{color:var(--red)}
+/* A head that isn't answering: its name/stats are dimmed (no live data); the
+   Offline badge and any ✕ control stay at full strength. */
+.gmember.bad .gmcol{opacity:.45}
 .gname{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.92em}
 .gmode{font-size:.8em;color:var(--fg-3)}
 .glock{font-size:.66em;color:var(--orange);white-space:nowrap}
@@ -431,7 +431,7 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
 .gturn.ol.heat{color:#fdba74}.gturn.ol.cool{color:#93c5fd}
 .gturn.start{border-style:dashed;animation:upulse 1.6s ease-in-out infinite}
 .gturn.ghost{background:none;font-weight:500}
-.gturn.bad{background:transparent;color:var(--red);border:1px solid var(--red);text-align:center}
+.gturn.bad{background:transparent;color:var(--red);border:1px solid currentColor;text-align:center;opacity:.85}
 .gturn.warn{background:var(--warn-bg);color:var(--orange);border:1px solid var(--warn-border);text-align:center}
 /* Outdoor-unit strip: filled = running, outlined = set to this mode but the
    compressor is resting, pulsing = starting or switching to it, faded = not in it. */
