@@ -258,6 +258,12 @@ const char* Machine::take_event() {
     return e;
 }
 
+void Machine::add_sample(float room) {
+    if (room <= 0.0f) return;
+    sample_.room = room;
+    if (++sample_.seq == 0) sample_.seq = 1;
+}
+
 Action Machine::tick(const Inputs& in, uint32_t now_s) {
     uint32_t dt = have_tick_ ? now_s - last_tick_ : 0;
     if (dt > 5) dt = 5;  // a stalled task must not fast-forward a probe
@@ -268,6 +274,7 @@ Action Machine::tick(const Inputs& in, uint32_t now_s) {
     sensor_need_ = in.room <= 0.0f || needs_conditioning(in);
     const bool reeval = reeval_;
     reeval_ = false;
+    if (in.connected && in.room_external) add_sample(in.room);
 
     if (!cfg_.enabled) {
         // A reboot can restore a parked flag after the feature was switched
@@ -347,6 +354,15 @@ Action Machine::tick(const Inputs& in, uint32_t now_s) {
         mismatch_ = false;
     }
 
+    // Sustained airflow while running: the head's sensor reads the room.
+    if (state_ == State::Running && in.phys_on && !fan_held(in.sub_mode) &&
+        in.sub_mode != "STANDBY" && in.sub_mode != "OFF") {
+        run_airflow_s_ += dt;
+        if (run_airflow_s_ >= cfg_.probe_duration_s && !in.room_external) add_sample(in.room);
+    } else {
+        run_airflow_s_ = 0;
+    }
+
     switch (state_) {
         case State::Off:
             return Action::None;
@@ -397,6 +413,7 @@ Action Machine::tick(const Inputs& in, uint32_t now_s) {
             const bool done = probe_airflow_s_ >= cfg_.probe_duration_s ||
                               now_s - probe_start_ >= cfg_.probe_duration_s + kProbeExtraMaxS;
             if (!done) return Action::None;
+            if (probe_airflow_s_ >= cfg_.probe_duration_s && !in.room_external) add_sample(in.room);
             if (hold_) {
                 // Held air check: record the verdict and stay parked for the slice.
                 have_verdict_ = true;

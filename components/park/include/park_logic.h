@@ -156,6 +156,17 @@ public:
     /// or nullptr. Clears it.
     const char* take_event();
 
+    /// A room reading good enough to act on (managed Auto's heat/cool choice):
+    /// a fresh room sensor, the end of an air check with its full airflow, or
+    /// a head that has kept real air moving for the air-check duration. A
+    /// parked head's own sensor sits in still air and never counts. @c seq
+    /// increments with each new sample (0 = none yet).
+    struct Sample {
+        uint32_t seq = 0;
+        float    room = 0.0f;
+    };
+    Sample sample() const { return sample_; }
+
 private:
     Action enter_parked(uint32_t now_s, const char* why, const char* event);
     Action enter_probing(uint32_t now_s, const char* why, bool send);
@@ -187,6 +198,9 @@ private:
     uint32_t verdict_at_ = 0;
     bool     have_tick_ = false;
     uint32_t last_tick_ = 0;
+    uint32_t run_airflow_s_ = 0;     ///< continuous airflow while running
+    Sample   sample_{};
+    void     add_sample(float room);
     const char* reason_ = "";
     const char* event_ = nullptr;
 };

@@ -643,6 +643,48 @@ static void test_target_change_invalidates_verdict() {
     CHECK(m.start_check(done + 3) == Action::PowerOn);
 }
 
+// Trusted room samples (managed Auto): only readings taken with real airflow
+// or from a room sensor; a parked head's still-air reading never counts.
+static void test_trusted_samples() {
+    uint32_t now;
+    Machine m = running_heat(now);
+    // Running, but not yet for the air-check duration.
+    run(m, heat(19.0f, 21.0f, true, true), now, now + 100);
+    CHECK(m.sample().seq == 0);
+    // Standby (thermo-off, little or no airflow) doesn't count either.
+    run(m, heat(19.0f, 21.0f, true, false, "STANDBY"), now + 100, now + 300);
+    CHECK(m.sample().seq == 0);
+    run(m, heat(19.5f, 21.0f, true, true), now + 300, now + 425);
+    CHECK(m.sample().seq > 0);
+    CHECK(m.sample().room == 19.5f);
+
+    uint32_t p = park_it(m, now + 425);
+    const uint32_t seq = m.sample().seq;
+    // Parked: the head reads warm still air. Ignored.
+    Hit h = run(m, heat(24.0f, 21.0f, false), p + 1, p + 2000);
+    CHECK(m.sample().seq == seq);
+    CHECK(h.a == Action::PowerOn && m.state() == State::Probing);
+    // Probe with airflow: one sample at its end, with the moving-air reading.
+    h = run(m, heat(22.5f), h.at + 1, h.at + 400);
+    CHECK(h.a == Action::PowerOff);
+    CHECK(m.sample().seq == seq + 1);
+    CHECK(m.sample().room == 22.5f);
+
+    // A probe that ends on its cap without airflow gives no sample.
+    h = run(m, heat(21.0f, 21.0f, false), h.at + 1, h.at + 2000);
+    CHECK(m.state() == State::Probing);
+    run(m, heat(30.0f, 21.0f, true, false, "DEFROST"), h.at + 1, h.at + 2000);
+    CHECK(m.parked());
+    CHECK(m.sample().seq == seq + 1);
+
+    // A room sensor is trusted on every tick, parked or not.
+    Inputs rs = heat(23.0f, 21.0f, false);
+    rs.room_external = true;
+    m.tick(rs, h.at + 2001);
+    CHECK(m.sample().seq == seq + 2);
+    CHECK(m.sample().room == 23.0f);
+}
+
 int main() {
     test_sanitize();
     test_disabled_is_passthrough();
@@ -680,6 +722,7 @@ int main() {
     test_release_mid_check_runs();
     test_check_not_started_when_unneeded();
     test_target_change_invalidates_verdict();
+    test_trusted_samples();
     if (g_failures) {
         std::printf("%d park_logic test(s) FAILED\n", g_failures);
         return 1;
