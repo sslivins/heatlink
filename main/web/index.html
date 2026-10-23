@@ -440,7 +440,6 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
 @keyframes upulse{0%,100%{opacity:1}50%{opacity:.4}}
 @media (prefers-reduced-motion:reduce){.upill.pulse,.gturn.start{animation:none}.upill.pulse{border-style:dashed}}
 .ucap{font-size:.84em;color:var(--fg-3);margin:0 0 6px}
-#opState .ustrip{justify-content:center;margin:10px 0 2px}
 #opState .opb{display:flex;align-items:center;justify-content:center;gap:8px;flex-wrap:wrap}
 #opState .gturn{font-size:.95em}
 .gempty{text-align:center;padding:22px 8px 8px;color:var(--fg-3)}
@@ -1420,6 +1419,9 @@ const I18N = { fr: {
   "Offline":"Hors ligne","No demand":"Aucun besoin","Blocked":"Bloquée",
   "unit is heating":"l’unité chauffe","unit is cooling":"l’unité refroidit",
   "heat resumes in a few minutes":"le chauffage reprend dans quelques minutes",
+  "at temperature":"température atteinte","compressor starting":"le compresseur démarre",
+  "other rooms are heating":"les autres pièces chauffent","other rooms are cooling":"les autres pièces refroidissent",
+  "modes are switching":"changement de mode en cours",
   "All rooms are off":"Toutes les pièces sont arrêtées","Compressor resting":"Compresseur au repos",
   "A room is offline":"Une pièce est hors ligne","Outdoor unit":"Unité extérieure",
   // Room sensor (#142)
@@ -2602,22 +2604,27 @@ function renderClimate(){
     }
   }
   op.dataset.txt=i18n(opTxt);
-  // Same room badge and outdoor-unit strip as the Zones tab, with a short
-  // detail line; plain text when no badge applies (Off, Idle, Fan running).
+  // What this room is doing: one badge (shared with the Zones tab) plus a
+  // short reason. The outdoor unit is only mentioned when it's why we wait.
   let b=climate.power?climateBadge():null;
   if(!b&&climate.power&&pk&&pk.state==='probing'&&!climate.operating&&!pk.held) b={c:'ghost',t:'Checking room'};
   if(b){
     let det='';
+    const others=pk&&pk.tandem==='heat'?'other rooms are heating':
+                 pk&&pk.tandem==='cool'?'other rooms are cooling':'modes are switching';
     if(b.t==='Parked'&&pk&&pk.next_probe_s!=null&&!pk.room_sensor)
-      det=i18n('air check in')+' '+Math.max(1,Math.ceil(pk.next_probe_s/60))+' min';
-    else if(pk&&pk.held&&(b.t==='Up next'||b.t==='No demand'||b.t==='Checking room')){ det=tandemPaused(pk); b=Object.assign({},b,{s:''}); }
+      det=i18n('at temperature')+' \u00b7 '+i18n('air check in')+' '+Math.max(1,Math.ceil(pk.next_probe_s/60))+' min';
+    else if(b.t==='Parked') det=i18n('at temperature');
+    else if(b.t==='Up next') det=i18n(others);
+    else if(b.t==='No demand'&&pk&&pk.held) det=i18n(others);
+    else if(b.t==='Starting\u2026') det=i18n('compressor starting');
     else if(b.t==='Defrost') det=i18n('heat resumes in a few minutes');
+    else if(b.t==='Blocked'){ det=b.s||''; }
+    if(b.t==='Blocked') b=Object.assign({},b,{s:''});
     op.innerHTML='<div class="opb"><span class="gturn '+b.c+'">'+gEsc(i18n(b.t))+(b.s?'<small>'+gEsc(b.s)+'</small>':'')+'</span>'+
       (det?'<span>'+gEsc(det)+'</span>':'')+'</div>';
-    op.dataset.txt=i18n(b.t)+(det?' \u00b7 '+det:'');
+    op.dataset.txt=i18n(b.t)+(b.s?' '+b.s:'')+(det?' \u00b7 '+det:'');
   } else op.textContent=i18n(opTxt);
-  const lg=(lastGroup&&lastGroup.in_group)?lastGroup:null;
-  if(lg&&lg.unit) op.insertAdjacentHTML('beforeend',unitStrip(lg.unit));
   op.className='op'+(climate.power&&climate.operating?' active':'');
   $('tDec').disabled=$('tInc').disabled=!climate.power;
   const slicing=!!(pk&&pk.slicing);
