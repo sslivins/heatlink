@@ -75,13 +75,31 @@ static_assert(sizeof(pw_rec_t) == AUTH_ADMIN_REC_LEN, "verifier record layout");
 #define AUTH_MAX_FAILS 10
 #define AUTH_LOCKOUT_SEC 30
 
+// Sessions persist in NVS so a reboot or OTA doesn't sign everyone out. Only a
+// SHA-256 of each token is kept (in RAM and flash), so reading the flash
+// doesn't yield a usable cookie.
+static const char* NVS_KEY_SESSIONS = "sessions";
+#define SESS_REC_VER 1
+static constexpr time_t kClockValidAfter = 1700000000;
+
 typedef struct {
     bool active;
-    char token[AUTH_SESSION_TOKEN_LEN + 1];
+    uint8_t token_hash[32];
     auth_role_t role;
-    time_t created_at;
-    time_t last_used;
+    time_t created_at;    // monotonic
+    time_t last_used;     // monotonic
+    int64_t created_wall; // wall-clock creation time; 0 = not yet known
 } session_t;
+
+// On-flash form of one session slot.
+typedef struct {
+    uint8_t active;
+    uint8_t role;
+    uint8_t rsv[6];
+    int64_t created_wall;
+    uint8_t token_hash[32];
+} sess_rec_t;
+static_assert(sizeof(sess_rec_t) == 48, "session record layout");
 
 static struct {
     bool initialized;
@@ -317,10 +335,68 @@ static esp_err_t save_to_nvs(void) {
     return e;
 }
 
-static session_t* find_session(const char* token) {
-    if (token == NULL || token[0] == '\0') return NULL;
+static time_t wall_now(void) {
+    time_t now = time(NULL);
+    return now > kClockValidAfter ? now : 0;
+}
+
+static void save_sessions(void) {
+    uint8_t blob[1 + AUTH_MAX_SESSIONS * sizeof(sess_rec_t)] = {SESS_REC_VER};
     for (int i = 0; i < AUTH_MAX_SESSIONS; i++) {
-        if (state.sessions[i].active && strcmp(state.sessions[i].token, token) == 0)
+        const session_t& s = state.sessions[i];
+        sess_rec_t r = {};
+        if (s.active) {
+            r.active = 1;
+            r.role = (uint8_t)s.role;
+            r.created_wall = s.created_wall;
+            memcpy(r.token_hash, s.token_hash, 32);
+        }
+        memcpy(blob + 1 + i * sizeof(r), &r, sizeof(r));
+    }
+    nvs_handle_t nvs;
+    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs);
+    if (err == ESP_OK) {
+        err = nvs_set_blob(nvs, NVS_KEY_SESSIONS, blob, sizeof(blob));
+        if (err == ESP_OK) err = nvs_commit(nvs);
+        nvs_close(nvs);
+    }
+    if (err != ESP_OK) ESP_LOGW(TAG, "session save failed: %s", esp_err_to_name(err));
+}
+
+// Restored sessions start their monotonic clock at boot; their age is judged
+// by created_wall once SNTP has set the clock.
+static void load_sessions(void) {
+    nvs_handle_t nvs;
+    if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvs) != ESP_OK) return;
+    uint8_t blob[1 + AUTH_MAX_SESSIONS * sizeof(sess_rec_t)] = {};
+    size_t len = sizeof(blob);
+    esp_err_t err = nvs_get_blob(nvs, NVS_KEY_SESSIONS, blob, &len);
+    nvs_close(nvs);
+    if (err != ESP_OK || len != sizeof(blob) || blob[0] != SESS_REC_VER) return;
+    const time_t now = monotonic_now();
+    int n = 0;
+    for (int i = 0; i < AUTH_MAX_SESSIONS; i++) {
+        sess_rec_t r;
+        memcpy(&r, blob + 1 + i * sizeof(r), sizeof(r));
+        if (!r.active || (r.role != AUTH_ROLE_USER && r.role != AUTH_ROLE_ADMIN)) continue;
+        session_t& s = state.sessions[i];
+        s.active = true;
+        s.role = (auth_role_t)r.role;
+        s.created_at = now;
+        s.last_used = now;
+        s.created_wall = r.created_wall;
+        memcpy(s.token_hash, r.token_hash, 32);
+        n++;
+    }
+    if (n) ESP_LOGI(TAG, "restored %d session(s)", n);
+}
+
+static session_t* find_session(const char* token) {
+    if (token == NULL || strlen(token) != AUTH_SESSION_TOKEN_LEN) return NULL;
+    uint8_t h[32];
+    sha256_password(token, h);
+    for (int i = 0; i < AUTH_MAX_SESSIONS; i++) {
+        if (state.sessions[i].active && ct_equal(state.sessions[i].token_hash, h, 32))
             return &state.sessions[i];
     }
     return NULL;
@@ -353,17 +429,27 @@ static session_t* find_free_session(auth_role_t new_role) {
 static bool create_session(auth_role_t role, char* session_token) {
     session_t* session = find_free_session(role);
     if (session == NULL) return false;
+    char token[AUTH_SESSION_TOKEN_LEN + 1];
+    generate_random_hex(token, AUTH_SESSION_TOKEN_LEN);
     session->active = true;
     session->role = role;
-    generate_random_hex(session->token, AUTH_SESSION_TOKEN_LEN);
+    sha256_password(token, session->token_hash);
     session->created_at = monotonic_now();
     session->last_used = session->created_at;
-    if (session_token != NULL) strcpy(session_token, session->token);
+    session->created_wall = wall_now();
+    if (session_token != NULL) strcpy(session_token, token);
+    save_sessions();
     return true;
 }
 
+// Age by the wall clock when both it and the creation time are known (that's
+// what survives a reboot); otherwise by time since boot, which can't be fooled
+// by the SNTP jump just after boot.
 static bool is_session_expired(const session_t* session) {
     if (session == NULL || !session->active) return true;
+    const time_t wall = wall_now();
+    if (wall && session->created_wall)
+        return (wall - session->created_wall) > AUTH_SESSION_LIFETIME_SEC;
     return (monotonic_now() - session->created_at) > AUTH_SESSION_LIFETIME_SEC;
 }
 
@@ -411,6 +497,7 @@ void auth_mgr_init(void) {
     }
 
     if (dirty) save_to_nvs();
+    load_sessions();
     state.initialized = true;
     ESP_LOGI(TAG, "auth ready — state=%s api_auth=%s",
              password_set() ? "claimed" : state.claim_required ? "unclaimed" : "legacy",
@@ -472,6 +559,7 @@ bool auth_mgr_set_user_password(const char* password) {
     for (int i = 0; i < AUTH_MAX_SESSIONS; i++)
         if (state.sessions[i].active && state.sessions[i].role == AUTH_ROLE_USER)
             state.sessions[i].active = false;
+    save_sessions();
     return true;
 }
 
@@ -537,9 +625,17 @@ auth_role_t auth_mgr_session_role(const char* token) {
     if (session == NULL) return AUTH_ROLE_NONE;
     if (is_session_expired(session)) {
         session->active = false;
+        save_sessions();
         return AUTH_ROLE_NONE;
     }
     session->last_used = monotonic_now();
+    // Created before the clock was set: fix its wall-clock birth now, so its
+    // age still counts across the next reboot.
+    const time_t wall = wall_now();
+    if (!session->created_wall && wall) {
+        session->created_wall = wall - (session->last_used - session->created_at);
+        save_sessions();
+    }
     return session->role;
 }
 
@@ -550,12 +646,16 @@ bool auth_mgr_validate_session(const char* token) {
 void auth_mgr_logout(const char* token) {
     AUTH_LOCK();
     session_t* session = find_session(token);
-    if (session != NULL) session->active = false;
+    if (session != NULL) {
+        session->active = false;
+        save_sessions();
+    }
 }
 
 void auth_mgr_logout_all(void) {
     AUTH_LOCK();
     for (int i = 0; i < AUTH_MAX_SESSIONS; i++) state.sessions[i].active = false;
+    save_sessions();
 }
 
 // ── Claim / recovery ─────────────────────────────────────────────────────
