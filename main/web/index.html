@@ -1422,7 +1422,12 @@ const I18N = { fr: {
   "Now":"Maintenant","Minimum turn":"Tour minimal","Maximum turn":"Tour maximal",
   "Pause between modes":"Pause entre les modes","Paused while other rooms heat":"En pause pendant que les autres pièces chauffent","Paused while other rooms cool":"En pause pendant que les autres pièces refroidissent","Paused while modes switch":"En pause pendant le changement de mode","Checking if this room needs a turn":"Vérification : cette pièce a-t-elle besoin de son tour ?",
   "Switching modes":"Changement de mode",
-  "No room needs heat or cool":"Aucune pièce n’a besoin de chauffage ou de refroidissement",
+  "No room needs heat or cool right now":"Aucune pièce n’a besoin de chauffage ou de refroidissement pour l’instant",
+  "waiting for demand":"en attente d’une demande","checking rooms…":"vérification des pièces…",
+  "checking rooms that want heating…":"vérification des pièces à chauffer…","checking rooms that want cooling…":"vérification des pièces à refroidir…",
+  "heating next":"chauffage ensuite","cooling next":"refroidissement ensuite","rooms at setpoint":"pièces à la consigne",
+  "Paused · Tandem is idle, waiting for a room to need heat or cool":"En pause · Tandem au repos, en attente qu’une pièce ait besoin de chauffage ou de refroidissement",
+  "Tandem is idle":"Tandem au repos","Waiting":"En attente",
   "heating":"chauffage","cooling":"refroidissement","starting…":"démarrage…",
   "switching to heating…":"passage au chauffage…","switching to cooling…":"passage au refroidissement…",
   "heating within {n} min":"chauffage d’ici {n} min","cooling within {n} min":"refroidissement d’ici {n} min",
@@ -2322,6 +2327,7 @@ const pkMin=v=>(v%60?(v/60).toFixed(1):(v/60))+' min';
 // Tandem hold reason for a paused head: what the other rooms are doing.
 function tandemPaused(st){
   if(st.checking) return i18n('Checking if this room needs a turn');
+  if(st.tandem==='idle') return i18n('Paused · Tandem is idle, waiting for a room to need heat or cool');
   const why=i18n(st.tandem==='heat'?'Paused while other rooms heat':
               st.tandem==='cool'?'Paused while other rooms cool':'Paused while modes switch');
   if(st.tandem_eta_s==null||!st.tandem_next) return why;
@@ -2696,12 +2702,13 @@ function renderClimate(){
   if(b){
     let det='';
     const others=pk&&pk.tandem==='heat'?'other rooms are heating':
-                 pk&&pk.tandem==='cool'?'other rooms are cooling':'modes are switching';
+                 pk&&pk.tandem==='cool'?'other rooms are cooling':
+                 pk&&pk.tandem==='idle'?'Tandem is idle':'modes are switching';
     if(b.t==='Parked'&&pk&&pk.next_probe_s!=null&&!pk.room_sensor)
       det=i18n('at temperature')+' \u00b7 '+i18n('air check in')+' '+Math.max(1,Math.ceil(pk.next_probe_s/60))+' min';
     else if(b.t==='Parked') det=i18n('at temperature');
     else if(b.t==='Up next') det=i18n(others);
-    else if(b.t==='No demand'&&pk&&pk.held) det=i18n(others);
+    else if((b.t==='No demand'||b.t==='Waiting')&&pk&&pk.held) det=i18n(others);
     else if(b.t==='Starting\u2026') det=i18n('compressor starting');
     else if(b.t==='Defrost') det=i18n('heat resumes in a few minutes');
     else if(b.t==='Blocked'){ det=b.s||''; }
@@ -3809,7 +3816,7 @@ function renderGroupPanel(g){
   st.textContent=groupStatusText(g.status);
   st.className='pill '+(g.status==='ok'?'':(g.status==='indeterminate'?'limited':'full'));
   const sl=g.slice||{};
-  const tn=tandemNow(sl), tl=$('gTandem');
+  const tn=tandemNow(sl,g.unit), tl=$('gTandem');
   tl.classList.toggle('hidden',!tn);
   if(tn){
     tl.innerHTML=TANDEM_ICON+'<span>Tandem: <b>'+gEsc(i18n(tn.s))+(tn.next?' \u00b7 '+gEsc(tn.next):'')+'</b></span>';
@@ -3856,22 +3863,32 @@ function renderGroupPanel(g){
 const TANDEM_ICON='<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '+
   'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 7h11l-3-3M17 17H6l3 3"/></svg>';
 // Tandem summary for this outdoor unit, or null while Tandem is off. While a
-// room waits for the other mode, `next` gives the latest the switch can come:
-// the maximum turn. It can come sooner once every room on the current turn
-// reaches its target. The turn clock stops during defrost.
-function tandemNow(sl){
+// room waiting for the other mode needs its turn, `next` gives the latest the
+// switch can come: the end of the turn. It can come sooner once every room on
+// the current turn reaches its target. The turn clock stops during defrost, so
+// no countdown then. Idle: nobody's turn until a room needs heat or cool.
+function tandemNow(sl,u){
   if(!sl||!sl.enabled) return null;
   if(!sl.active) return {s:'starting…'};
   if(sl.phase==='changeover') return {s:sl.mode==='heat'?'switching to heating…':'switching to cooling…'};
+  const ms=sl.members||[];
   if(sl.phase==='run'){
-    const r={s:sl.mode==='heat'?'heating':'cooling'};
-    if((sl.members||[]).some(m=>m.directive==='hold')){
-      const n=Math.max(1,Math.ceil(((sl.decide_s||sl.max_slice_s||0)-(sl.elapsed_s||0))/60));
-      r.next=i18n(sl.mode==='heat'?'cooling within {n} min':'heating within {n} min',{n:n});
+    const r={s:sl.mode==='heat'?'heating':'cooling'}, opp=sl.mode==='heat'?'cool':'heat';
+    const waiting=ms.filter(m=>m.directive==='hold'&&m.wants===opp), turn=ms.filter(m=>m.wants===sl.mode);
+    if(u&&u.defrost) return r;
+    if(waiting.some(m=>m.need==='yes')){
+      const left=(sl.decide_s||sl.max_slice_s||0)-(sl.elapsed_s||0);
+      r.next=left>0?i18n(opp==='cool'?'cooling within {n} min':'heating within {n} min',{n:Math.ceil(left/60)})
+                   :i18n(opp==='cool'?'cooling next':'heating next');
+    } else if(waiting.some(m=>m.checking)){
+      r.next=i18n(opp==='cool'?'checking rooms that want cooling…':'checking rooms that want heating…');
+    } else if(turn.length&&turn.every(m=>m.satisfied)){
+      r.next=i18n('rooms at setpoint');
     }
     return r;
   }
-  return {s:'idle',tip:'No room needs heat or cool'};
+  return {s:'idle',next:i18n(ms.some(m=>m.checking)?'checking rooms…':'waiting for demand'),
+    tip:'No room needs heat or cool right now'};
 }
 // Outdoor-unit strip from /api/group's `unit`: filled = running, outlined =
 // set to this mode but the compressor is resting, pulsing = starting or
@@ -3929,15 +3946,16 @@ function zoneBadge(g,h){
       return null;
     }
     if(held){
-      if(sm.need==='checking') return {c:'ghost',t:'Checking room'};
-      if(sm.need!=='yes') return {c:'',t:'No demand'};
+      if(sm.checking) return {c:'ghost',t:'Checking room'};
+      if(sm.need==='no') return {c:'',t:'No demand'};
+      if(sm.need!=='yes') return {c:'',t:'Waiting'};
       const w=(sm.wants==='heat'||sm.wants==='cool')?sm.wants:dir;
       // The latest the running turn can end, plus the pause between modes. It
       // can come sooner, and defrost stops the clock, hence "~".
       let s='';
-      if(sl.phase==='run'){
+      if(sl.phase==='run'&&!u.defrost){
         const eta=(sl.decide_s||sl.max_slice_s||0)-el+settle;
-        s='~'+Math.max(1,Math.ceil(eta/60))+' min';
+        if(eta>0) s='~'+Math.ceil(eta/60)+' min';
       }
       return {c:'ol '+(w||''),t:'Up next',s:s};
     }
@@ -3995,8 +4013,8 @@ async function redeemHandoff(){
   }catch(e){}
 }
 let slDirty=false;
-function sliceNowText(sl){
-  const t=tandemNow(sl);
+function sliceNowText(sl,u){
+  const t=tandemNow(sl,u);
   if(!t) return i18n('Off');
   const s=i18n(t.s);
   return s.charAt(0).toUpperCase()+s.slice(1)+(t.next?' \u00b7 '+t.next:'');
@@ -4006,7 +4024,7 @@ function sliceNowText(sl){
 function renderSlice(g){
   const inG=!!(g&&g.in_group), sl=(inG&&g.slice)||{};
   slLastG=g||null; slInG=inG; renderSetList();
-  $('slNow').textContent=inG?sliceNowText(sl):i18n('Off');
+  $('slNow').textContent=inG?sliceNowText(sl,g.unit):i18n('Off');
   $('slUnit').textContent=inG?(g.group_label||i18n('(unnamed group)')):i18n('Not set up');
   $('slNoGroup').classList.toggle('hidden',inG);
   $('slShared').classList.toggle('hidden',!inG);

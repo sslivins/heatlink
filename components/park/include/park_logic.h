@@ -106,13 +106,15 @@ public:
 
     /// The user changed mode or setpoint. While parked this starts a probe so
     /// the new target is evaluated with real airflow; with a room sensor the new
-    /// target is evaluated against its reading on the next tick instead.
+    /// target is evaluated against its reading on the next tick instead. While
+    /// held (Tandem) the room claims its turn (need Yes) instead.
     Action notify_intent_change(uint32_t now_s);
 
     /// Time-sliced heat/cool (#133): while held, a head whose desired power is
     /// ON is kept parked (reason "waiting_for_slice") with no drift wakes or
     /// scheduled probes (only start_check() air checks), and a remote turn-on is
-    /// re-parked. Releasing a held head powers it
+    /// re-parked. A head held while parked at setpoint starts with need No; a
+    /// user turn-on while held claims the turn (need Yes). Releasing a held head powers it
     /// back on (normal parking then applies). Held/released transitions log no
     /// activity event (the slice coordinator logs slice changes).
     Action set_hold(bool hold, uint32_t now_s);
@@ -120,8 +122,10 @@ public:
 
     /// While held: whether this room needs its slice. With a room sensor this
     /// is live; otherwise it is the verdict of the last held air check (valid
-    /// kNeedValidS), else Checking while an air check can still tell (so the
-    /// coordinator doesn't hand over before it runs), else Yes.
+    /// kNeedValidS; seeded No when held at setpoint, Yes when held mid-run or
+    /// turned on by the user), else Checking while an air check can still tell
+    /// (so the coordinator doesn't hand over before it runs), else Yes. Parked
+    /// at setpoint on its turn (not held): No.
     Need need(uint32_t now_s) const;
     /// Start a held air check unless a valid verdict exists (or a room sensor
     /// makes it unnecessary, or air checks are disabled). The glue runs the
@@ -193,7 +197,8 @@ private:
     bool     external_ = false;      ///< last tick's room came from a room sensor
     bool     reeval_ = false;        ///< target changed while parked with a sensor
     bool     sensor_need_ = true;    ///< held with a room sensor: room needs its slice
-    bool     have_verdict_ = false;  ///< a held air check finished
+    void     set_verdict(bool need, uint32_t now_s);
+    bool     have_verdict_ = false;  ///< a held air check finished (or seeded)
     bool     verdict_need_ = true;
     uint32_t verdict_at_ = 0;
     bool     have_tick_ = false;

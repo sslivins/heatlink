@@ -1730,7 +1730,7 @@ components:
         unit_on: { type: boolean, description: Physical unit power (false while parked even though power reports ON) }
         satisfied: { type: boolean, description: Parked because the room reached its setpoint }
         held: { type: boolean, description: 'Held off waiting for its time slice (reason "waiting_for_slice")' }
-        tandem: { type: string, enum: [heat, cool, switch], description: 'Only when held: what the other rooms are doing (switch = changing modes)' }
+        tandem: { type: string, enum: [heat, cool, switch, idle], description: 'Only when held: what the other rooms are doing (switch = changing modes, idle = no room needs heat or cool yet)' }
         tandem_eta_s: { type: integer, nullable: true, description: 'Only when held: estimated seconds until this room''s turn starts (rest of the pause between modes, or the latest the running turn can end plus that pause); null when unknown' }
         tandem_next: { type: string, enum: [heat, cool], description: 'Only when tandem_eta_s is set: the mode this room''s turn will run' }
         need: { type: string, enum: ['yes', 'no', checking], description: 'Only when held: does this room need its Tandem turn (checking until its air check reports; yes when checks are off)' }
@@ -2140,6 +2140,7 @@ components:
         phase: { type: string, nullable: true, enum: [idle, run, changeover, null] }
         elapsed_s: { type: integer, nullable: true, description: Seconds in the current phase }
         decide_s: { type: integer, nullable: true, description: 'Run: elapsed seconds at which the turn is next reconsidered (the max turn, pushed out while waiting rooms don''t need theirs)' }
+        check: { type: boolean, description: 'Waiting rooms are asked to air-check now (always while idle)' }
         coordinator: { type: string, description: Elected coordinator uid (empty if none) }
         is_coordinator: { type: boolean }
         members:
@@ -2152,6 +2153,8 @@ components:
               capable: { type: boolean }
               wants: { type: string, enum: [none, heat, cool] }
               need: { type: string, enum: ['yes', 'no', checking], description: 'While waiting: does its room need a turn (checking until its air check reports; yes when checks are off or older firmware)' }
+              satisfied: { type: boolean, description: Parked at setpoint on its turn }
+              checking: { type: boolean, description: A held air check is running now }
               directive: { type: string, enum: [free, run, hold] }
     GroupJoinResult:
       type: object

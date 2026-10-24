@@ -424,8 +424,9 @@ cJSON* park_status_json() {
         // "cool", or "switch" (changeover / waiting for a schedule).
         const slice_ctl::Status ss = slice_ctl::status();
         cJSON_AddStringToObject(o, "tandem",
-            ss.have_state && ss.state.phase == slice::Phase::Run
-                ? slice::mode_str(ss.state.mode) : "switch");
+            !ss.have_state || ss.state.phase == slice::Phase::Changeover ? "switch"
+            : ss.state.phase == slice::Phase::Idle ? "idle"
+                                                   : slice::mode_str(ss.state.mode));
         // Seconds until this room's turn starts: the rest of the pause between
         // modes, or (while it needs a turn) the latest the running turn can
         // end plus that pause. Null when unknown.
@@ -1546,6 +1547,7 @@ esp_err_t handle_group_state(httpd_req_t* req) {
         cJSON_AddNumberToObject(root, "slice_v", slice::kSliceVersion);
         cJSON_AddBoolToObject(root, "sat", sp.satisfied);
         cJSON_AddStringToObject(root, "need", slice::need_str(sp.need));
+        if (sp.checking) cJSON_AddBoolToObject(root, "chk", true);
         if (sp.has_state) {
             cJSON* js = cJSON_CreateObject();
             cJSON_AddNumberToObject(js, "t", (double)sp.state.term);
@@ -1769,6 +1771,7 @@ bool poll_peer(const std::string& uid, hvac_group::MemberObs& out, bool& incompa
                         so.satisfied = cJSON_IsTrue(cJSON_GetObjectItem(j, "sat"));
                         const cJSON* jneed = cJSON_GetObjectItem(j, "need");
                         if (cJSON_IsString(jneed)) so.need = slice::parse_need(jneed->valuestring);
+                        so.checking = cJSON_IsTrue(cJSON_GetObjectItem(j, "chk"));
                         so.power    = (jpwr  && cJSON_IsString(jpwr))  ? jpwr->valuestring  : "";
                         so.mode     = (jmode && cJSON_IsString(jmode)) ? jmode->valuestring : "";
                         so.sub_mode = (jsub  && cJSON_IsString(jsub))  ? jsub->valuestring  : "";
@@ -2190,11 +2193,14 @@ cJSON* slice_status_json() {
         // When the running turn is next reconsidered (elapsed seconds).
         cJSON_AddNumberToObject(o, "decide_s",
             ss.state.decide_s ? ss.state.decide_s : ss.cfg.max_slice_s);
+        // Waiting rooms are asked to air-check now.
+        cJSON_AddBoolToObject(o, "check", ss.state.check);
     } else {
         cJSON_AddNullToObject(o, "mode");
         cJSON_AddNullToObject(o, "phase");
         cJSON_AddNullToObject(o, "elapsed_s");
         cJSON_AddNullToObject(o, "decide_s");
+        cJSON_AddFalseToObject(o, "check");
     }
     cJSON_AddStringToObject(o, "coordinator", ss.coordinator.c_str());
     cJSON_AddBoolToObject(o, "is_coordinator", ss.is_coordinator);
@@ -2207,6 +2213,7 @@ cJSON* slice_status_json() {
         cJSON_AddStringToObject(e, "wants", slice::mode_str(m.wants));
         cJSON_AddStringToObject(e, "need", slice::need_str(m.need));
         cJSON_AddBoolToObject(e, "satisfied", m.satisfied);
+        cJSON_AddBoolToObject(e, "checking", m.checking);
         cJSON_AddStringToObject(e, "directive", ss.cfg.enabled ? slice::directive_str(m.directive)
                                                               : "free");
         cJSON_AddItemToArray(jm, e);

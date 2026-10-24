@@ -57,6 +57,7 @@ struct PeerObs {
     slice::State state;
     bool         satisfied = false;
     slice::Need  need = slice::Need::Yes;  ///< absent (older firmware): Yes
+    bool         checking = false;         ///< a held air check is running
     std::string  power, mode, sub_mode;
 };
 void observe_peer(const std::string& uid, const PeerObs& obs);
@@ -67,6 +68,7 @@ struct Publish {
     slice::State state;
     bool         satisfied = false;
     slice::Need  need = slice::Need::Yes;
+    bool         checking = false;  ///< a held air check is running
 };
 Publish publish();
 
@@ -77,6 +79,7 @@ struct MemberStatus {
     slice::Mode wants = slice::Mode::None;
     slice::Need need = slice::Need::Yes;
     bool        satisfied = false;  ///< parked at setpoint
+    bool        checking = false;   ///< a held air check is running now
     slice::Directive directive = slice::Directive::Free;
 };
 

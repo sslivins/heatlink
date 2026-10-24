@@ -61,6 +61,11 @@ void save_term(uint64_t t) {
     nvs_close(h);
 }
 
+// A held air check is running on this head.
+bool self_checking(const park_ctl::Snapshot& ps) {
+    return ps.held && ps.state == park::State::Probing;
+}
+
 bool is_auto(bool power_on, const std::string& mode) { return power_on && mode == "AUTO"; }
 
 slice::Need need_of(park::Need n) {
@@ -189,7 +194,7 @@ void tick() {
         while (const char* e = s_node.take_event()) evs.push_back(e);
         enabled = s_node.enabled();
         hold = hold_for_locked(power_on, mode, t);
-        check = s_node.have_state() && s_node.state().phase == slice::Phase::Run &&
+        check = s_node.have_state() && s_node.state().phase != slice::Phase::Changeover &&
                 s_node.state().check;
         term = s_node.max_term();
     }
@@ -254,6 +259,7 @@ Publish publish() {
     p.state.elapsed_s = s_node.elapsed_now(now_s());
     p.satisfied = ps.satisfied;
     p.need = need_of(ps.need);
+    p.checking = self_checking(ps);
     return p;
 }
 
@@ -286,6 +292,12 @@ Status status() {
         ms.need = m.need;
         ms.satisfied = m.satisfied;
         ms.directive = s_node.directive(m.wants, t);
+        if (out.members.empty()) {
+            ms.checking = self_checking(ps);
+        } else {
+            auto it = s_peers.find(m.uid);
+            ms.checking = m.fresh && it != s_peers.end() && it->second.obs.checking;
+        }
         if (!m.fresh || !m.capable) out.all_capable = false;
         out.members.push_back(ms);
     }
