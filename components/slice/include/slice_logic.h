@@ -12,7 +12,9 @@
 /// rooms are all satisfied and the min slice has passed). It is handed over
 /// only if a waiting room needs it (Member::need: a room sensor, or a short
 /// FAN-mode air check by the waiting head); otherwise the turn is extended by
-/// another max slice.
+/// another max slice. Once the turn's rooms are satisfied and no waiting room
+/// needs its turn, the group goes Idle: every room is held and keeps checking,
+/// and the first room that needs its turn gets it (lowest uid on a tie).
 ///
 /// Every head runs a Node. The coordinator (lowest reachable uid) runs the
 /// scheduler and publishes its State in the signed group snapshot; the other
@@ -101,8 +103,8 @@ struct State {
     /// turn). Pushed out by a max turn each time the waiting rooms turn out
     /// not to need theirs.
     uint32_t    decide_s = 0;
-    /// Run: waiting heads should air-check their rooms now (a decision is
-    /// near, or the turn's rooms are all satisfied).
+    /// Waiting heads should air-check their rooms now (Run: a decision is
+    /// near, or the turn's rooms are all satisfied; Idle: always).
     bool        check = false;
 };
 

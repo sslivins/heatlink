@@ -562,8 +562,10 @@ static void test_room_sensor_setpoint_change() {
 
 // #133 need check: a held head air-checks its room in FAN (glue) and reports
 // whether it needs its turn.
+// Held at thermo-off (not mid-run), so its need starts unknown.
 static Machine held_heat(uint32_t& now) {
     Machine m = running_heat(now);
+    m.tick(heat(21.0f), now);
     m.set_hold(true, now);
     m.tick(heat(20.8f, 21.0f, false), now + 1);
     now += 2;
@@ -631,7 +633,8 @@ static void test_check_not_started_when_unneeded() {
     CHECK(d.need(3) == Need::Yes);
 }
 
-static void test_target_change_invalidates_verdict() {
+// A user change while held claims the turn: no air check first.
+static void test_target_change_claims_turn() {
     uint32_t now;
     Machine m = held_heat(now);
     m.start_check(now);
@@ -639,8 +642,43 @@ static void test_target_change_invalidates_verdict() {
     const uint32_t done = static_cast<uint32_t>(h.at);
     CHECK(m.need(done + 1) == Need::No);
     CHECK(m.notify_intent_change(done + 2) == Action::None);
-    CHECK(m.need(done + 3) == Need::Checking);
-    CHECK(m.start_check(done + 3) == Action::PowerOn);
+    CHECK(m.need(done + 3) == Need::Yes);
+    CHECK(m.start_check(done + 3) == Action::None);
+    CHECK(m.need(done + 2 + kNeedValidS) == Need::Checking);  // then checks again
+}
+
+// Verdicts seeded when a head is held: at setpoint -> No (no needless air
+// check when Tandem goes idle), cut off mid-run -> Yes, turned on -> Yes.
+static void test_hold_seeds_need() {
+    uint32_t now;
+    Machine p = running_heat(now);
+    Hit h = run(p, heat(21.0f, 21.0f, true, false), now, now + 600);
+    CHECK(p.state() == State::Parked);
+    const uint32_t t = static_cast<uint32_t>(h.at) + 1;
+    CHECK(p.need(t) == Need::No);              // parked at setpoint on its turn
+    p.set_hold(true, t);
+    CHECK(p.need(t + 1) == Need::No);
+    CHECK(p.start_check(t + 1) == Action::None);
+    CHECK(p.need(t + kNeedValidS) == Need::Checking);
+
+    Machine r = running_heat(now);
+    r.tick(heat(19.0f, 21.0f, true, true), now + 1);
+    CHECK(r.set_hold(true, now + 2) == Action::PowerOff);
+    CHECK(r.need(now + 3) == Need::Yes);
+
+    Machine o = running_heat(now);
+    o.set_desired_power(false, now + 1);
+    o.set_hold(true, now + 2);
+    o.set_desired_power(true, now + 3);
+    CHECK(o.state() == State::Parked);
+    CHECK(o.need(now + 4) == Need::Yes);
+
+    // Tandem enabled while the unit runs: held on the first tick, claims a turn.
+    Machine e;
+    e.set_hold(true, 0);
+    e.configure(enabled_cfg(), 0);
+    CHECK(e.tick(heat(19.0f, 21.0f, true, true), 1) == Action::PowerOff);
+    CHECK(e.need(2) == Need::Yes);
 }
 
 // Trusted room samples (managed Auto): only readings taken with real airflow
@@ -721,7 +759,8 @@ int main() {
     test_held_check_verdict();
     test_release_mid_check_runs();
     test_check_not_started_when_unneeded();
-    test_target_change_invalidates_verdict();
+    test_target_change_claims_turn();
+    test_hold_seeds_need();
     test_trusted_samples();
     if (g_failures) {
         std::printf("%d park_logic test(s) FAILED\n", g_failures);

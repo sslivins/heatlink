@@ -98,6 +98,7 @@ Need Machine::need(uint32_t now_s) const {
     if (!cfg_.enabled) return Need::Yes;
     if (hold_ && state_ == State::Probing) return Need::Checking;
     if (external_) return sensor_need_ ? Need::Yes : Need::No;
+    if (!hold_ && state_ == State::Parked) return Need::No;  // at setpoint on its turn
     if (have_verdict_ && now_s - verdict_at_ < kNeedValidS)
         return verdict_need_ ? Need::Yes : Need::No;
     // Unknown, but an air check can tell: don't claim the turn before it runs.
@@ -111,6 +112,12 @@ Action Machine::start_check(uint32_t now_s) {
     if (have_verdict_ && now_s - verdict_at_ < kNeedValidS) return Action::None;
     Action a = enter_probing(now_s, kWaitingForSlice, true);
     return a;
+}
+
+void Machine::set_verdict(bool need, uint32_t now_s) {
+    have_verdict_ = true;
+    verdict_need_ = need;
+    verdict_at_ = now_s;
 }
 
 bool Machine::satisfied(const Inputs& in) const {
@@ -169,9 +176,14 @@ Action Machine::set_hold(bool hold, uint32_t now_s) {
     if (hold) {
         switch (state_) {
             case State::Running:
+                // Cut off while still conditioning the room: it needs a turn.
+                if (!sat_) set_verdict(true, now_s);
+                return enter_parked(now_s, kWaitingForSlice, nullptr);
             case State::Probing:
                 return enter_parked(now_s, kWaitingForSlice, nullptr);
             case State::Parked:
+                // Parked at setpoint: no air check needed for a while.
+                set_verdict(false, now_s);
                 reason_ = kWaitingForSlice;
                 return Action::None;
             case State::Off:
@@ -224,6 +236,8 @@ Action Machine::set_desired_power(bool on, uint32_t now_s) {
     if (state_ == State::Parked) return Action::None;  // already wants ON
     if (hold_) {
         // Wants ON but it isn't this head's slice: desired ON, unit held off.
+        // The user just asked for it, so the room claims its turn.
+        set_verdict(true, now_s);
         state_ = State::Parked;
         parked_at_ = now_s;
         probe_ref_ = now_s;
@@ -236,7 +250,9 @@ Action Machine::set_desired_power(bool on, uint32_t now_s) {
 }
 
 Action Machine::notify_intent_change(uint32_t now_s) {
-    if (hold_) have_verdict_ = false;  // new target: the last air check no longer applies
+    // New target: the user wants the room conditioned, so it claims its turn
+    // (the last air check no longer applies).
+    if (hold_) set_verdict(true, now_s);
     if (!cfg_.enabled || state_ != State::Parked || hold_) return Action::None;
     if (external_) {
         reeval_ = true;  // the room sensor already knows the room: no air needed
@@ -317,7 +333,11 @@ Action Machine::tick(const Inputs& in, uint32_t now_s) {
         }
         state_ = in.phys_on ? State::Running : State::Off;
         reason_ = "";
-        if (hold_ && in.phys_on) return enter_parked(now_s, kWaitingForSlice, nullptr);
+        if (hold_ && in.phys_on) {
+            // Running when Tandem took over: it claims a turn without an air check.
+            set_verdict(true, now_s);
+            return enter_parked(now_s, kWaitingForSlice, nullptr);
+        }
         return Action::None;
     }
 
@@ -336,7 +356,10 @@ Action Machine::tick(const Inputs& in, uint32_t now_s) {
             if (in.phys_on) {
                 // Not this head's slice: a remote turn-on is adopted as desired
                 // ON but the unit is held off until its slice comes up.
-                if (hold_) return enter_parked(now_s, kWaitingForSlice, nullptr);
+                if (hold_) {
+                    set_verdict(true, now_s);
+                    return enter_parked(now_s, kWaitingForSlice, nullptr);
+                }
                 // A remote press while parked re-evaluates via a probe; while
                 // off it is a plain turn-on.
                 if (state_ == State::Parked) return enter_probing(now_s, "remote", false);

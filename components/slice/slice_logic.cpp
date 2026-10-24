@@ -180,7 +180,7 @@ void Node::enter(Phase p, Mode m) {
         push(m == Mode::Heat ? "Tandem: changing over to heating"
                                  : "Tandem: changing over to cooling");
     } else {
-        push("Tandem: idle (no heat/cool demand)");
+        push("Tandem: idle \xE2\x80\x94 waiting for a room to need heat or cool");
     }
 }
 
@@ -309,10 +309,21 @@ void Node::schedule(const std::vector<Member>& members, uint32_t dt) {
     const Mode cur = state_.mode;
     switch (state_.phase) {
         case Phase::Idle: {
+            // Nobody's turn: every room is held and checks its room (sensor or
+            // air check); the first that needs its turn gets it, whichever
+            // mode the unit last ran.
             state_.elapsed_s += dt;
-            if (!want_heat && !want_cool) return;
-            Mode next = (cur != Mode::None && demand(cur)) ? cur
-                        : (want_heat ? Mode::Heat : Mode::Cool);
+            state_.check = want_heat || want_cool;
+            const Member* first = nullptr;
+            for (const auto& m : members) {
+                // A room still reported parked at setpoint (a stale view from
+                // before it was held) doesn't need a turn.
+                if (!m.fresh || m.wants == Mode::None || m.need != Need::Yes || m.satisfied)
+                    continue;
+                if (!first || m.uid < first->uid) first = &m;
+            }
+            if (!first) return;
+            const Mode next = first->wants;
             // The unit only just stopped running the other way: let it settle.
             if (cur != Mode::None && next != cur && state_.elapsed_s < cfg_.settle_s) {
                 enter(Phase::Changeover, next);
@@ -324,8 +335,21 @@ void Node::schedule(const std::vector<Member>& members, uint32_t dt) {
         case Phase::Run: {
             if (!defrost) state_.elapsed_s += dt;
             const Mode opp = other(cur);
-            if (!demand(cur) && !demand(opp)) {
+            if (!defrost && !demand(cur) && !demand(opp)) {
                 enter(Phase::Idle, cur);
+                return;
+            }
+            bool opp_yes = false;
+            for (const auto& m : members) {
+                if (m.fresh && m.wants == opp && m.need == Need::Yes) opp_yes = true;
+            }
+            // The turn's rooms are done (after the minimum turn) or switched
+            // off, and no waiting room needs its turn: the unit rests until
+            // some room does.
+            if (!defrost && !opp_yes &&
+                (!demand(cur) || (state_.elapsed_s >= cfg_.min_slice_s && all_satisfied(cur)))) {
+                enter(Phase::Idle, cur);
+                state_.check = true;
                 return;
             }
             if (!demand(opp)) {

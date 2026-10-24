@@ -457,12 +457,96 @@ static void test_satisfied_needs_waiting_demand() {
     run(n, ms, now, now + 590);
     CHECK(!n.state().check);
     run(n, ms, now + 590, now + 1000);
-    CHECK(n.state().phase == Phase::Run);      // nobody waiting needs it
+    CHECK(n.state().phase == Phase::Idle);     // nobody waiting needs it: rest
     CHECK(n.state().mode == Mode::Heat);
     CHECK(n.state().check);                    // keep the waiting rooms checked
+    CHECK(n.directive(Mode::Heat, now + 1000) == Directive::Hold);
     ms[1].need = Need::Yes;
     run(n, ms, now + 1000, now + 1002);
+    CHECK(n.state().phase == Phase::Run);      // the unit stopped long ago
+    CHECK(n.state().mode == Mode::Cool);
+}
+
+// #133 idle: once the turn's rooms are done and nobody waiting needs a turn,
+// it's nobody's turn; the first room that needs one gets it.
+static void test_idle_until_demand() {
+    uint32_t now;
+    Node n = coordinator(Mode::None, Mode::Heat, now);
+    CHECK(n.state().mode == Mode::Heat);
+    drain(n);
+    std::vector<Member> ms = {needing(mem("a", Mode::Cool), Need::No),
+                              mem("b", Mode::Heat, /*satisfied=*/true),
+                              mem("c", Mode::None)};
+    run(n, ms, now, now + 590);
+    CHECK(n.state().phase == Phase::Run);      // minimum turn first
+    run(n, ms, now + 590, now + 610);
+    CHECK(n.state().phase == Phase::Idle);
+    CHECK(n.state().check);
+    CHECK(std::string(n.take_event()) ==
+          "Tandem: idle \xE2\x80\x94 waiting for a room to need heat or cool");
+    // Held rooms report: nobody needs anything, so it stays idle.
+    ms[1] = needing(mem("b", Mode::Heat), Need::No);
+    ms[0].need = Need::Checking;               // unknown is not demand
+    run(n, ms, now + 610, now + 2000);
+    CHECK(n.state().phase == Phase::Idle);
+    CHECK(n.state().check);
+    // The cooling room needs it: no preference for the last mode.
+    ms[0].need = Need::Yes;
+    run(n, ms, now + 2000, now + 2002);
+    CHECK(n.state().phase == Phase::Run);
+    CHECK(n.state().mode == Mode::Cool);
+    CHECK(!n.state().check);
+}
+
+static void test_idle_settles_and_breaks_ties() {
+    uint32_t now;
+    Node n = coordinator(Mode::Heat, Mode::Cool, now);
+    std::vector<Member> ms = {mem("a", Mode::Heat, true), needing(mem("b", Mode::Cool), Need::No)};
+    run(n, ms, now, now + 610);
+    CHECK(n.state().phase == Phase::Idle);
+    // Both need it at once: the lowest uid wins; the unit only just stopped
+    // heating, so cooling settles first.
+    std::vector<Member> both = {needing(mem("a", Mode::Heat), Need::Yes),
+                                needing(mem("b", Mode::Cool), Need::Yes)};
+    Node m = n;
+    run(m, both, now + 610, now + 612);
+    CHECK(m.state().phase == Phase::Run);
+    CHECK(m.state().mode == Mode::Heat);
+    std::vector<Member> cool = {needing(mem("a", Mode::Heat), Need::No),
+                                needing(mem("b", Mode::Cool), Need::Yes)};
+    run(n, cool, now + 610, now + 612);
     CHECK(n.state().phase == Phase::Changeover);
+    CHECK(n.state().mode == Mode::Cool);
+}
+
+// Never idles mid-defrost, nor while a waiting room needs its turn, nor while
+// the turn's rooms are still conditioning.
+static void test_idle_guards() {
+    uint32_t now;
+    Node d = coordinator(Mode::Heat, Mode::Cool, now);
+    std::vector<Member> ms = {mem("a", Mode::Heat, true, /*defrost=*/true),
+                              needing(mem("b", Mode::Cool), Need::No)};
+    d.tick(ms, now);
+    run(d, ms, now, now + 2000);
+    CHECK(d.state().phase == Phase::Run);
+    ms = {mem("a", Mode::None, false, /*defrost=*/true), mem("b", Mode::None)};
+    run(d, ms, now + 2000, now + 2100);
+    CHECK(d.state().phase == Phase::Run);      // nobody wants anything, still defrosting
+    Node w = coordinator(Mode::Heat, Mode::Cool, now);
+    ms = {mem("a", Mode::Heat), needing(mem("b", Mode::Cool), Need::No)};
+    run(w, ms, now, now + 1000);
+    CHECK(w.state().phase == Phase::Run);      // heat room still conditioning
+}
+
+// The turn's rooms are switched off while the waiting room doesn't need its
+// turn: rest instead of changing over.
+static void test_leaving_mode_idles_without_need() {
+    uint32_t now;
+    Node n = coordinator(Mode::Heat, Mode::Cool, now);
+    std::vector<Member> ms = {mem("a", Mode::None), needing(mem("b", Mode::Cool), Need::Checking)};
+    run(n, ms, now, now + 2);
+    CHECK(n.state().phase == Phase::Idle);
+    CHECK(n.state().check);
 }
 
 // A room that starts waiting after the max turn still gets its check: the
@@ -526,6 +610,10 @@ int main() {
     test_max_extends_when_not_needed();
     test_waits_for_running_check();
     test_satisfied_needs_waiting_demand();
+    test_idle_until_demand();
+    test_idle_settles_and_breaks_ties();
+    test_idle_guards();
+    test_leaving_mode_idles_without_need();
     test_late_waiting_room_gets_check();
     test_follower_gets_check();
     if (g_failures) {
