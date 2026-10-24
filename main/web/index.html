@@ -334,11 +334,15 @@ display:flex;align-items:center;justify-content:center}
 .dial-center{position:absolute;inset:0;display:flex;flex-direction:column;
 align-items:center;justify-content:center;pointer-events:none;text-align:center}
 .dc-mode{font-size:.78em;letter-spacing:.08em;color:var(--fg-3);text-transform:uppercase}
-.dc-temp{font-size:3.1em;font-weight:300;line-height:1.05;color:var(--fg)}
-.dc-unit{font-size:.4em;color:var(--fg-3);vertical-align:super;margin-left:2px}
-.dc-room{font-size:.78em;color:var(--fg-3);margin-top:2px}
-.dc-range{font-size:.85em;color:var(--fg-2);margin-top:1px}
-.dc-range .h{color:#f0883e}.dc-range .c{color:#58a6ff}
+.dc-temp{font-size:3.1em;font-weight:300;line-height:1.05;color:var(--fg);display:inline-flex;align-items:flex-start}
+.dc-unit{font-size:.4em;color:var(--fg-3);margin:6px 0 0 2px}
+.dc-temp .rs-ic{margin:4px -8px 0 0}
+.dc-sub{font-size:.85em;color:var(--fg-3);margin-top:2px;display:flex;gap:6px;justify-content:center;align-items:center;min-height:1.3em}
+.dc-sub b{color:var(--fg);font-weight:600}
+.dc-sub .ds-v{pointer-events:auto;border:none;background:none;padding:2px 3px;font:inherit;cursor:pointer;opacity:.55;
+  -webkit-tap-highlight-color:transparent}
+.dc-sub .ds-v.sel{opacity:1;font-weight:700}
+.dc-sub .h{color:#f0883e}.dc-sub .c{color:#58a6ff}
 .rs-ic{pointer-events:auto;display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;
   margin:-7px -7px -7px 1px;border:none;background:none;padding:0;color:var(--fg-3);cursor:pointer;vertical-align:middle;
   -webkit-tap-highlight-color:transparent}
@@ -663,9 +667,8 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
       </svg>
       <div class="dial-center">
         <div class="dc-mode" id="dialMode">--</div>
-        <div class="dc-temp"><span id="setTemp">--</span><span class="dc-unit" id="setUnit">°C</span></div>
-        <div class="dc-range hidden" id="dialRange"></div>
-        <div class="dc-room"><span id="roomTemp">--</span>° room<button type="button" id="rsIc" class="rs-ic hidden" aria-label="Room sensors" aria-expanded="false" aria-controls="rsPop" onclick="rsPopToggle(event)"></button></div>
+        <div class="dc-temp"><span id="bigTemp">--</span><span class="dc-unit" id="setUnit">°C</span><button type="button" id="rsIc" class="rs-ic hidden" aria-label="Room sensors" aria-expanded="false" aria-controls="rsPop" onclick="rsPopToggle(event)"></button></div>
+        <div class="dc-sub" id="dialSub"></div>
       </div>
       <div id="rsPop" class="rs-pop hidden" role="dialog" aria-label="Room sensors"></div>
       <button class="dial-btn dec" id="tDec" onclick="bumpTemp(-0.5)" aria-label="Lower setpoint">−</button>
@@ -1335,7 +1338,7 @@ const I18N = { fr: {
   "Applying settings and restarting…":"Application des réglages et redémarrage…",
   "Done":"Terminé",
   // Climate card
-  "° room":"° pièce","idle":"au repos",
+  "idle":"au repos",
   "Off":"Arrêt","Heat":"Chaud","Cool":"Froid","Auto":"Auto","Dry":"Sec","Fan":"Ventilo",
   "Idle":"Ralenti","Heating":"Chauffage","Cooling":"Refroidissement",
   "Drying":"Déshumidification","Fan running":"Ventilation active","Active":"Actif",
@@ -2587,17 +2590,42 @@ function arc(t0,t1){
     d+=(i?'L':'M')+q[0].toFixed(1)+' '+q[1].toFixed(1)+' ';}
   return d.trim();
 }
+// Dial centre, like HA's thermostat card: the room temperature is the big
+// number; the setpoint (or Auto range) sits under it. While a setpoint is being
+// changed it takes over the big number, until ~2 s after the last change.
+let dialAdj=null, dialAdjTimer=null, autoSel=null;
+function dialAdjusting(end){
+  dialAdj=end; clearTimeout(dialAdjTimer);
+  dialAdjTimer=setTimeout(()=>{ dialAdj=null; renderClimate(); },2000);
+}
+// The Auto end that +/- moves: the one picked last, else the side Auto works.
+function autoEnd(){ return autoSel||(climate.auto&&climate.auto.dir==='COOL'?'hi':'lo'); }
+function autoPick(end,ev){ if(ev) ev.stopPropagation(); autoSel=end; renderClimate(); }
 function renderClimate(){
   const t=Math.max(T_MIN,Math.min(T_MAX,climate.temp||21));
-  const ar=autoRange(), a=climate.auto, k2=$('dialKnob2'), f2=$('dialFill2'), rg=$('dialRange');
-  const actC=ar?(a.dir==='COOL'?a.cool_to:a.heat_to):null;
-  $('setTemp').textContent=ar?fmtTemp(actC):(climate.temp!=null?fmtTemp(t):'--');
+  const ar=autoRange(), a=climate.auto, k2=$('dialKnob2'), f2=$('dialFill2');
+  if(!ar) autoSel=null;
+  const adj=!climate.power?null:dialDragging?(dialEnd_||'t'):dialAdj;
+  const adjAuto=ar&&adj&&adj!=='t';
+  const adjC=adjAuto?(adj==='hi'?a.cool_to:a.heat_to):(climate.temp!=null?t:null);
+  const big=$('bigTemp');
+  if(adj){
+    big.textContent=fmtTemp(adjC);
+    big.style.color=adjAuto?(adj==='hi'?MODE_COLOR.COOL:MODE_COLOR.HEAT):(MODE_COLOR[climate.mode]||'');
+  } else { big.textContent=fmtTemp(climate.room); big.style.color=''; }
   $('setUnit').textContent=unitSym();
-  $('roomTemp').textContent=fmtTemp(climate.room);
   rsIconRender();
+  if(adj) $('rsIc').classList.add('hidden');
+  const sub=$('dialSub'), lab=s=>'<span>'+gEsc(i18n(s))+'</span>';
+  if(!climate.power) sub.innerHTML='';
+  else if(adj) sub.innerHTML=lab('Room')+'<b>'+fmtTemp(climate.room)+'°</b>';
+  else if(ar){
+    const e=autoEnd();
+    sub.innerHTML='<button type="button" class="ds-v h'+(e==='lo'?' sel':'')+'" onclick="autoPick(\'lo\',event)">'+fmtTemp(a.heat_to)+'</button>'+
+      '<span>\u00b7</span><button type="button" class="ds-v c'+(e==='hi'?' sel':'')+'" onclick="autoPick(\'hi\',event)">'+fmtTemp(a.cool_to)+'</button>';
+  } else sub.innerHTML=lab('Target')+'<b>'+(climate.temp!=null?fmtTemp(t):'--')+'°</b>';
   const color=climate.power?(MODE_COLOR[climate.mode]||'#9aa4ad'):getComputedStyle(document.documentElement).getPropertyValue('--dial-fill').trim();
   const kn=$('dialKnob');
-  rg.classList.toggle('hidden',!ar);
   if(ar){
     // Like HA's thermostat card: heat fills up to heat_to, cool fills down
     // from cool_to, and the gap between (where nothing runs) stays bare track.
@@ -2611,9 +2639,9 @@ function renderClimate(){
     kn.style.fill=MODE_COLOR.HEAT;kn.style.display='';
     k2.setAttribute('cx',p2[0]);k2.setAttribute('cy',p2[1]);k2.setAttribute('r',9);
     k2.style.fill=MODE_COLOR.COOL;k2.style.display='';
-    rg.innerHTML='<span class="h">'+fmtTemp(a.heat_to)+'</span> \u2013 <span class="c">'+fmtTemp(a.cool_to)+'</span>'+unitSym();
   } else {
-    $('dialFill').setAttribute('d',arc(T_MIN,t));
+    // Cool fills down from the top to its setpoint, like the cool side of Auto.
+    $('dialFill').setAttribute('d',climate.power&&climate.mode==='COOL'?arc(t,T_MAX):arc(T_MIN,t));
     $('dialFill').style.stroke=color;
     f2.style.display='none';
     const kp=polar(tToAngle(t),DR);
@@ -2625,9 +2653,9 @@ function renderClimate(){
   if(climate.room!=null){const rp=polar(tToAngle(Math.max(T_MIN,Math.min(T_MAX,climate.room))),DR);
     rd.setAttribute('cx',rp[0]);rd.setAttribute('cy',rp[1]);rd.style.display='';}
   else rd.style.display='none';
-  // Name a direction only when the room is outside the range and so actually
-  // being driven toward one end; inside it there is nothing to heat or cool to.
-  const arDir=!ar||climate.room==null?null:climate.room<a.heat_to?'heat':climate.room>a.cool_to?'cool':null;
+  // Name a direction only when one end is being adjusted or the room is outside
+  // the range and so actually driven toward one end.
+  const arDir=!ar?null:adjAuto?(adj==='hi'?'cool':'heat'):climate.room==null?null:climate.room<a.heat_to?'heat':climate.room>a.cool_to?'cool':null;
   $('dialMode').textContent=!climate.power?'OFF':ar?i18n(arDir==='cool'?'Auto · cool to':arDir==='heat'?'Auto · heat to':'Auto'):climate.mode;
   $('dialWrap').classList.toggle('off',!climate.power);
   const op=$('opState');
@@ -2727,7 +2755,8 @@ async function setMode(m){
 }
 function bumpTemp(d){
   if(!climate.power)return;
-  const ar=autoRange(), a=climate.auto, end=ar&&a.dir==='COOL'?'hi':'lo';
+  const ar=autoRange(), a=climate.auto, end=ar?autoEnd():'t';
+  dialAdjusting(end);
   let c=ar?(end==='hi'?a.cool_to:a.heat_to):((climate.temp!=null)?climate.temp:21);
   if(isF()){
     // Step by a whole °F, then snap to the nearest supported 0.5 °C. Driving by
@@ -2819,6 +2848,7 @@ function dialDown(ev){
     // Grab whichever thumb is nearer; a tie (both at one spot) goes by direction.
     const a=climate.auto, dl=Math.abs(v-a.heat_to), dh=Math.abs(v-a.cool_to);
     dialEnd_=dl<dh?'lo':dh<dl?'hi':(v>a.cool_to?'hi':v<a.heat_to?'lo':(a.dir==='COOL'?'hi':'lo'));
+    autoSel=dialEnd_;
     autoSet(dialEnd_,v);
   } else { dialEnd_=''; climate.temp=v; }
   renderClimate();ev.preventDefault();
@@ -2832,6 +2862,7 @@ function dialMove(ev){
 function dialEnd(){
   if(!dialDragging)return;dialDragging=false;
   if(dialEnd_&&autoRange()) post(autoBody(dialEnd_)); else post({temperature:climate.temp});
+  dialAdjusting(dialEnd_||'t');
   dialEnd_='';
 }
 function initDial(){
