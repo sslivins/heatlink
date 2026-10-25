@@ -197,6 +197,11 @@ const char* status_str(GroupStatus s);
 /// an otherwise-Ok view to Indeterminate (never masks a detected conflict).
 GroupView evaluate_group(const std::vector<MemberObs>& members);
 
+/// Tandem (time-slicing) runs HEAT and COOL in turns, so mixed demands aren't a
+/// conflict: clear one, leaving Ok, or Indeterminate if a peer is unreachable,
+/// incompatible or unreadable (AUTO) — a cleared conflict must not hide those.
+void allow_mixed_demands(GroupView& v);
+
 // ── Outdoor-unit view (Zones / Climate unit strip) ──────────────────────────
 
 /// What the shared outdoor unit is doing, as far as its heads can tell.
