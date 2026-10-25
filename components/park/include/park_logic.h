@@ -124,7 +124,8 @@ public:
     /// is live; otherwise it is the verdict of the last held air check (valid
     /// kNeedValidS; seeded No when held at setpoint, Yes when held mid-run or
     /// turned on by the user), else Checking while an air check can still tell
-    /// (so the coordinator doesn't hand over before it runs), else Yes. Parked
+    /// (so the coordinator doesn't hand over before it runs), else (air checks
+    /// off) the head's own reading against setpoint ± delta. Parked
     /// at setpoint on its turn (not held): No.
     Need need(uint32_t now_s) const;
     /// Start a held air check unless a valid verdict exists (or a room sensor

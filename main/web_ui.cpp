@@ -28,6 +28,7 @@
 #include <cctype>
 #include <strings.h>
 #include <map>
+#include <mutex>
 #include <new>
 #include <string>
 #include <vector>
@@ -1678,21 +1679,51 @@ void note_peer_admin(const std::string& uid, const cJSON* ja) {
     }
 }
 
-bool poll_peer(const std::string& uid, hvac_group::MemberObs& out, bool& incompatible) {
-    incompatible = false;
-    hvac_group::GroupConfig g = hvac_group::get();
-    if (g.group_id.empty()) return false;
-    const std::string self = hvac_group::self_uid();
+// Peers are found by mDNS (multicast), then reached directly. Each address is
+// remembered so a network that stops passing multicast (e.g. an AP fault) doesn't
+// cut the group apart: mDNS is only needed when an address is unknown or stale.
+std::mutex s_peer_ip_mu;
+std::map<std::string, std::string> s_peer_ip;
 
-    // Resolve the peer's A record from its derived mDNS hostname.
+std::string cached_peer_ip(const std::string& uid) {
+    std::lock_guard<std::mutex> lk(s_peer_ip_mu);
+    auto it = s_peer_ip.find(uid);
+    return it == s_peer_ip.end() ? std::string() : it->second;
+}
+
+bool mdns_peer_ip(const std::string& uid, std::string& ip) {
     std::string host = std::string(CONFIG_MDNS_HOSTNAME) + "-" + uid;
     esp_ip4_addr_t addr = {};
     if (mdns_query_a(host.c_str(), 2000, &addr) != ESP_OK) return false;
     uint32_t a = addr.addr;  // network byte order: LSB = first octet
-    char ip[16];
-    snprintf(ip, sizeof(ip), "%u.%u.%u.%u",
+    char buf[16];
+    snprintf(buf, sizeof(buf), "%u.%u.%u.%u",
              (unsigned)(a & 0xff), (unsigned)((a >> 8) & 0xff),
              (unsigned)((a >> 16) & 0xff), (unsigned)((a >> 24) & 0xff));
+    ip = buf;
+    return true;
+}
+
+// Runs @p attempt against the remembered address, then against a fresh mDNS
+// lookup if that fails. @p attempt returns true once the peer answered and
+// proved who it is (signed reply), so an address now used by another device
+// falls through to mDNS.
+template <typename F>
+bool with_peer_ip(const std::string& uid, F attempt) {
+    const std::string known = cached_peer_ip(uid);
+    if (!known.empty() && attempt(known)) return true;
+    std::string fresh;
+    if (!mdns_peer_ip(uid, fresh) || fresh == known) return false;
+    if (!attempt(fresh)) return false;
+    std::lock_guard<std::mutex> lk(s_peer_ip_mu);
+    s_peer_ip[uid] = fresh;
+    return true;
+}
+
+bool poll_peer_at(const std::string& uid, const std::string& ip,
+                  hvac_group::MemberObs& out, bool& incompatible) {
+    hvac_group::GroupConfig g = hvac_group::get();
+    const std::string self = hvac_group::self_uid();
 
     std::string nonce = hvac_group::generate_nonce();
     std::string sig   = hvac_group::hmac_hex(
@@ -1826,6 +1857,14 @@ bool poll_peer(const std::string& uid, hvac_group::MemberObs& out, bool& incompa
     }
     esp_http_client_cleanup(cli);
     return ok;
+}
+
+bool poll_peer(const std::string& uid, hvac_group::MemberObs& out, bool& incompatible) {
+    incompatible = false;
+    if (hvac_group::get().group_id.empty()) return false;
+    return with_peer_ip(uid, [&](const std::string& ip) {
+        return poll_peer_at(uid, ip, out, incompatible);
+    });
 }
 
 // Background task: poll every enrolled peer on a fixed cadence into the cache.
@@ -2101,20 +2140,12 @@ bool apply_self_command(hvac_group::Demand target, std::string& out_reason) {
 // POST /api/group/sync. @p reqbody is the exact JSON that was signed. Returns a
 // machine token: the peer's own reason (applied/aligned/stale/dwell) on a
 // verified 200, else a transport token (unreachable / http / badsig / error).
-std::string sync_peer(const std::string& uid, const std::string& reqbody) {
+// @p verified is set when the reply was signed by the peer.
+std::string sync_peer_at(const std::string& uid, const std::string& ip,
+                         const std::string& reqbody, bool& verified) {
+    verified = false;
     hvac_group::GroupConfig g = hvac_group::get();
-    if (g.group_id.empty()) return "error";
     const std::string self = hvac_group::self_uid();
-
-    // Resolve the peer's A record from its derived mDNS hostname.
-    std::string host = std::string(CONFIG_MDNS_HOSTNAME) + "-" + uid;
-    esp_ip4_addr_t addr = {};
-    if (mdns_query_a(host.c_str(), 2000, &addr) != ESP_OK) return "unreachable";
-    uint32_t a = addr.addr;
-    char ip[16];
-    snprintf(ip, sizeof(ip), "%u.%u.%u.%u",
-             (unsigned)(a & 0xff), (unsigned)((a >> 8) & 0xff),
-             (unsigned)((a >> 16) & 0xff), (unsigned)((a >> 24) & 0xff));
 
     std::string nonce = hvac_group::generate_nonce();
     std::string sig   = hvac_group::hmac_hex(
@@ -2144,6 +2175,7 @@ std::string sync_peer(const std::string& uid, const std::string& reqbody) {
         if (status == 200 && !ctx.sig.empty() &&
             hvac_group::hmac_verify(
                 hvac_group::signing_string(uid, self, g.group_id, nonce, ctx.body), ctx.sig)) {
+            verified = true;
             cJSON* j = cJSON_Parse(ctx.body.c_str());
             if (j) {
                 const cJSON* jr = cJSON_GetObjectItem(j, "reason");
@@ -2161,6 +2193,17 @@ std::string sync_peer(const std::string& uid, const std::string& reqbody) {
         result = "unreachable";
     }
     esp_http_client_cleanup(cli);
+    return result;
+}
+
+std::string sync_peer(const std::string& uid, const std::string& reqbody) {
+    if (hvac_group::get().group_id.empty()) return "error";
+    std::string result = "unreachable";
+    with_peer_ip(uid, [&](const std::string& ip) {
+        bool verified = false;
+        result = sync_peer_at(uid, ip, reqbody, verified);
+        return verified;
+    });
     return result;
 }
 
