@@ -631,6 +631,11 @@ static void test_check_not_started_when_unneeded() {
     d.tick(heat(20.8f, 21.0f, false), 2);
     CHECK(d.start_check(3) == Action::None);
     CHECK(d.need(3) == Need::Yes);
+    // Once the verdict expires it goes by the head's own reading.
+    d.tick(heat(20.8f, 21.0f, false), 2 + kNeedValidS);
+    CHECK(d.need(2 + kNeedValidS) == Need::No);
+    d.tick(heat(20.4f, 21.0f, false), 3 + kNeedValidS);
+    CHECK(d.need(3 + kNeedValidS) == Need::Yes);
 }
 
 // A user change while held claims the turn: no air check first.

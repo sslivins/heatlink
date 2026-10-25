@@ -103,7 +103,8 @@ Need Machine::need(uint32_t now_s) const {
         return verdict_need_ ? Need::Yes : Need::No;
     // Unknown, but an air check can tell: don't claim the turn before it runs.
     if (cfg_.probe_enabled && !mismatch_) return Need::Checking;
-    return Need::Yes;
+    // No air check: go by the head's own reading, as an unheld parked head does.
+    return sensor_need_ ? Need::Yes : Need::No;
 }
 
 Action Machine::start_check(uint32_t now_s) {
