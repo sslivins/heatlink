@@ -326,6 +326,16 @@ GroupView evaluate_group(const std::vector<MemberObs>& members) {
     return v;
 }
 
+void allow_mixed_demands(GroupView& v) {
+    if (v.status != GroupStatus::Conflict && v.status != GroupStatus::PendingConflict) return;
+    v.status = (v.unknown_members.empty() && v.warnings.empty()) ? GroupStatus::Ok
+                                                                 : GroupStatus::Indeterminate;
+    v.locked_mode = Demand::Neutral;
+    v.locked_by.clear();
+    v.locked_by_uid.clear();
+    v.conflicts.clear();
+}
+
 Demand parse_direction(const std::string& dir) {
     const std::string d = upper(dir);
     if (d == "HEAT") return Demand::Heat;

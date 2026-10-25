@@ -1968,14 +1968,7 @@ hvac_group::GroupView compute_group_view(std::vector<hvac_group::MemberObs>* out
     hvac_group::GroupView view = hvac_group::evaluate_group(members);
     // Time-slicing (#133) schedules HEAT and COOL in turns, so mixed demands
     // are expected rather than a conflict to resolve.
-    if (slice_ctl::enabled() &&
-        (view.status == hvac_group::GroupStatus::Conflict ||
-         view.status == hvac_group::GroupStatus::PendingConflict)) {
-        view.status = hvac_group::GroupStatus::Ok;
-        view.locked_mode = hvac_group::Demand::Neutral;
-        view.locked_by.clear();
-        view.conflicts.clear();
-    }
+    if (slice_ctl::enabled()) hvac_group::allow_mixed_demands(view);
     if (out) *out = std::move(members);
     return view;
 }

@@ -253,6 +253,24 @@ static void test_group_indeterminate_unknown() {
     CHECK_EQ(v.unknown_members[0], "peer");
 }
 
+// Tandem clears a mixed-demand conflict, but not the unreachable peer behind it.
+static void test_group_mixed_demands_keep_unknown() {
+    std::vector<MemberObs> ms = {
+        mk("self", MemberState::SelfKnown, true, Demand::Heat, false, false),
+        mk("peer", MemberState::Known,     true, Demand::Cool, false, false),
+        mk("gone", MemberState::Unknown,   false, Demand::Neutral, false, false)};
+    GroupView v = evaluate_group(ms);
+    CHECK_EQ(status_str(v.status), "pending_conflict");
+    allow_mixed_demands(v);
+    CHECK_EQ(status_str(v.status), "indeterminate");
+    CHECK_TRUE(v.conflicts.empty());
+    CHECK_TRUE(v.unknown_members.size() == 1);
+    ms.pop_back();
+    v = evaluate_group(ms);
+    allow_mixed_demands(v);
+    CHECK_EQ(status_str(v.status), "ok");
+}
+
 static void test_group_self_blocked_peer_unknown() {
     // Authoritative STANDBY: self blocked in HEAT while the opposing owner is an
     // unreachable peer. We must still report a conflict and infer COOL is locked.
@@ -620,6 +638,7 @@ int main() {
     test_group_conflict_active();
     test_group_pending_conflict();
     test_group_indeterminate_unknown();
+    test_group_mixed_demands_keep_unknown();
     test_group_self_blocked_peer_unknown();
     test_group_auto_blind_spot();
     test_lww_ordering();
