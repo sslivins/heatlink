@@ -396,7 +396,7 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
 .gmcol{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}
 .gmtop{display:flex;align-items:center;gap:8px;min-width:0}
 .gmtop .gname{flex:0 1 auto}
-.gmtop .glock{margin-left:auto}
+.gmtop .gturn{margin-left:auto}
 .gmstats{display:flex;gap:12px;flex-wrap:wrap}
 .gmstat{font-size:.76em;color:var(--fg-3)}
 .gmstat b{color:var(--fg);font-weight:600}
@@ -405,7 +405,7 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
 .gmember.bad .gmcol{opacity:.45}
 .gname{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.92em}
 .gmode{font-size:.8em;color:var(--fg-3)}
-.glock{font-size:.66em;color:var(--orange);white-space:nowrap}
+.glock{font-size:.72em;font-weight:600;color:var(--orange);white-space:nowrap;cursor:help}
 .gmctl{display:flex;gap:4px;flex:0 0 auto}
 .gmbtn{display:inline-flex;align-items:center;justify-content:center;min-width:40px;min-height:40px;background:none;border:1px solid var(--border);color:var(--fg-3);border-radius:8px;cursor:pointer;font-family:inherit;font-size:1.05em;line-height:1;padding:0 10px}
 .gmbtn:hover{color:var(--fg);border-color:var(--fg-3)}
@@ -430,6 +430,7 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
 /* Zone badges beyond heat/cool: outlined (Up next / Starting…), defrost,
    blocked, and a quiet text-only one (Checking room). */
 .gturn small{display:block;font-weight:500;font-size:.86em;opacity:.85;text-align:center}
+.gmtop .gturn small{display:inline;margin-left:5px}
 .gturn.defrost{background:rgba(84,174,255,.2);color:#9cd2ff}
 .gturn.ol{background:transparent;border:1.5px solid currentColor;padding:3px 9px;text-align:center}
 .gturn.ol.heat{color:#fdba74}.gturn.ol.cool{color:#93c5fd}
@@ -1437,6 +1438,8 @@ const I18N = { fr: {
   // Outdoor-unit strip + zone badges
   "Offline":"Hors ligne","No demand":"Aucun besoin","Blocked":"Bloquée",
   "unit is heating":"l’unité chauffe","unit is cooling":"l’unité refroidit",
+  "Outdoor unit locked to heating for this room; rooms wanting cooling wait until it’s done.":"Unité extérieure verrouillée en chauffage pour cette pièce ; les pièces qui veulent refroidir attendent qu’elle ait fini.",
+  "Outdoor unit locked to cooling for this room; rooms wanting heating wait until it’s done.":"Unité extérieure verrouillée en refroidissement pour cette pièce ; les pièces qui veulent chauffer attendent qu’elle ait fini.",
   "heat resumes in a few minutes":"le chauffage reprend dans quelques minutes",
   "at temperature":"température atteinte","compressor starting":"le compresseur démarre",
   "other rooms are heating":"les autres pièces chauffent","other rooms are cooling":"les autres pièces refroidissent",
@@ -3746,7 +3749,15 @@ function memberRow(o){
       'title="Leave this outdoor unit" aria-label="Leave this outdoor unit">Leave</button></span>';
   }
   const nameHtml='<span class="gname">'+gEsc(o.name)+(o.tag?' <span class="gmode">('+gEsc(o.tag)+')</span>':'')+'</span>';
-  const lockHtml=o.isLock?'<span class="glock">holds unit</span>':'';
+  // The room whose mode the outdoor unit is locked to (conflict, Tandem off).
+  // While it's running in that mode the lock rides on its badge ("🔒 Cooling");
+  // otherwise it gets its own label so the lock is still visible.
+  const lk=o.lockMode==='HEAT'?'heat':(o.lockMode==='COOL'?'cool':null);
+  const zb=o.badge;
+  const lockOnBadge=!!(lk&&zb&&zb.c===lk);
+  const lockTip=lk?' title="'+gEsc(i18n('Outdoor unit locked to '+lk+'ing for this room; rooms wanting '+
+    (lk==='heat'?'cooling':'heating')+' wait until it\u2019s done.'))+'"':'';
+  const lockHtml=lk&&!lockOnBadge?'<span class="glock"'+lockTip+'>\u{1F512} '+gEsc(i18n(lk==='heat'?'Heating':'Cooling'))+'</span>':'';
   // Stats line: mode + current room temp + target. fmtTemp is unit-aware
   // (°F/°C) and renders '--' for a missing value (e.g. an offline peer).
   let stats='';
@@ -3757,18 +3768,16 @@ function memberRow(o){
   if(o.target!=null) parts.push('<span class="gmstat">Target <b>'+fmtTemp(o.target)+unitSym()+'</b></span>');
   if(parts.length) stats='<div class="gmstats">'+parts.join('')+'</div>';
   // One badge per room saying what it is doing now (see zoneBadge).
-  const zb=o.badge;
-  const turn=zb?'<span class="gturn '+zb.c+'">'+gEsc(i18n(zb.t))+(zb.s?'<small>'+gEsc(zb.s)+'</small>':'')+'</span>':'';
+  const turn=zb?'<span class="gturn '+zb.c+'"'+(lockOnBadge?lockTip:'')+'>'+(lockOnBadge?'\u{1F512} ':'')+gEsc(i18n(zb.t))+(zb.s?'<small>'+gEsc(zb.s)+'</small>':'')+'</span>':'';
   // A whole card is a link to that zone's own UI. Buttons live inside and are
   // handled first by the delegated listener (so a tap on ✕/Leave never
   // navigates). data-* only — never interpolate names into an onclick.
   const urlAttr=o.url?(' data-gurl="'+gEsc(o.url)+'"'+(o.huid?' data-huid="'+gEsc(o.huid)+'"':'')):'';
   return '<div class="gmember'+(o.bad?' bad':'')+'"'+urlAttr+'>'+
     '<div class="gmcol">'+
-      '<div class="gmtop">'+nameHtml+lockHtml+'</div>'+
+      '<div class="gmtop">'+nameHtml+lockHtml+turn+'</div>'+
       stats+
     '</div>'+
-    turn+
     ctrls+
   '</div>';
 }
@@ -3826,7 +3835,7 @@ function renderGroupPanel(g){
   $('gUnit').innerHTML=unitStrip(g.unit);
   const cap=unitCaption(g.unit,!!tn), uc=$('gUnitCap');
   uc.textContent=cap; uc.classList.toggle('hidden',!cap);
-  // The "holds unit" badge only makes sense during a conflict: it names the head
+  // The "🔒 Heating/Cooling" lock label only makes sense during a conflict: it names the head
   // whose mode won the shared compressor while blocking someone. When everyone
   // agrees (ok) the compressor is simply running and nobody is being held out —
   // and since active_now cycles with the compressor, showing it then just
@@ -3849,7 +3858,7 @@ function renderGroupPanel(g){
       url:m.ip?('http://'+m.ip+'/'):null });
   });
   $('gMembers').innerHTML=heads.map(h=>memberRow({ name:h.name, bad:h.offline, tag:h.offline?'':h.tag,
-    isLock:lockMatch(h.name,h.uid), uid:null, mode:h.mode, auto:h.auto, room:h.room, target:h.target, rs:h.rs,
+    lockMode:lockMatch(h.name,h.uid)?g.locked_mode:null, uid:null, mode:h.mode, auto:h.auto, room:h.room, target:h.target, rs:h.rs,
     url:h.url, huid:h.isPeer?h.uid:null, badge:zoneBadge(g,h) })).join('');
   $('ouMembers').innerHTML=heads.map(h=>memberRow({ name:h.name, bad:h.offline, tag:h.tag,
     uid:h.uid, isPeer:h.isPeer, url:null })).join('');
@@ -4092,7 +4101,7 @@ function houseRow(h,isSelf){
   else if(!h.unit_connected){ tag='No unit'; known=false; }
   const mode=known&&h.mode?((h.power==='OFF')?'OFF':h.mode):null;
   return memberRow({ name:h.name||h.uid, bad:!isSelf&&(!h.reachable||(h.summary_supported&&!h.unit_connected)),
-    tag:tag, isLock:false, uid:null, isPeer:false, mode:mode,
+    tag:tag, uid:null, isPeer:false, mode:mode,
     room:known&&h.roomTemp!=null?h.roomTemp:null, target:known&&h.targetTemp!=null?h.targetTemp:null, rs:known?h.rs:null,
     url:(!isSelf&&h.ip)?('http://'+h.ip+'/'):null });
 }
