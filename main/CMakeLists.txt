@@ -34,6 +34,7 @@ idf_component_register(
          "history_ctl.cpp"
          "room_sensor_ctl.cpp"
          "shelly_rpc.cpp"
+         "csi_probe.cpp"
     INCLUDE_DIRS "."
     EMBED_FILES "web/index.html.gz"
                 "web/portal.html.gz"
