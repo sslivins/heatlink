@@ -29,6 +29,7 @@
 #include "slice_ctl.h"
 #include "auto_ctl.h"
 #include "history_ctl.h"
+#include "csi_probe.h"
 
 #include <cstdlib>
 #include <cstdio>
@@ -771,6 +772,36 @@ extern "C" void app_main() {
             r.fan  = history::fan_code(s.fan);
         };
         history_ctl::init(hh);
+    }
+
+    // Experimental passive CSI occupancy probe (off unless enabled per head).
+    {
+        csi_probe::Hooks ch;
+        ch.unit = [] {
+            csi_probe::UnitSnap u;
+            if (!g_hp.isConnected()) return u;
+            auto idx = [](const std::string& v, const char* const* map, int n) -> uint8_t {
+                for (int i = 0; i < n; i++) if (v == map[i]) return static_cast<uint8_t>(i);
+                return 255;
+            };
+            static const char* const kVane[]  = {"AUTO", "1", "2", "3", "4", "5", "SWING"};
+            static const char* const kWide[]  = {"<<", "<", "|", ">", ">>", "<>", "SWING"};
+            static const char* const kStage[] = {"IDLE", "LOW", "GENTLE", "MEDIUM", "MODERATE", "HIGH", "DIFFUSE"};
+            cn105::Settings s = g_hp.getSettings();
+            cn105::Status st = g_hp.getStatus();
+            u.connected = true;
+            u.power     = s.power == "ON";
+            u.operating = st.operating;
+            u.mode      = history::mode_code(s.mode);
+            u.fan       = history::fan_code(s.fan);
+            u.stage     = idx(st.stage, kStage, 7);
+            u.vane      = idx(s.vane, kVane, 7);
+            u.wide_vane = idx(s.wideVane, kWide, 7);
+            const int f = st.compressorFrequency;
+            u.freq = static_cast<uint8_t>(f < 0 ? 0 : f > 255 ? 255 : f);
+            return u;
+        };
+        csi_probe::init(ch);
     }
 
     // Heat pump protocol.

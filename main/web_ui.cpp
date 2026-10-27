@@ -17,6 +17,7 @@
 #include "devlog.h"
 #include "events.h"
 #include "history_ctl.h"
+#include "csi_probe.h"
 #include "capability.h"
 #include "factory_reset.h"
 #include "diag.h"
@@ -3789,6 +3790,90 @@ esp_err_t handle_logs_clear(httpd_req_t* req) {
     return ESP_OK;
 }
 
+// ── GET /api/diag/csi (admin) ──────────────────────────────────────────
+// Experimental CSI occupancy probe: status plus 5 s feature records newer
+// than since=<seq> (oldest first, at most limit=<n>, default/max 240). Each
+// record is a fixed array (see `fields`); the spectrum is hex, one byte per
+// subcarrier.
+esp_err_t handle_csi_get(httpd_req_t* req) {
+    set_cors(req);
+    REQUIRE_ADMIN(req);
+    uint32_t since = 0, limit = 240;
+    size_t qlen = httpd_req_get_url_query_len(req);
+    if (qlen > 0 && qlen < 64) {
+        char q[64];
+        if (httpd_req_get_url_query_str(req, q, sizeof(q)) == ESP_OK) {
+            char val[16];
+            if (httpd_query_key_value(q, "since", val, sizeof(val)) == ESP_OK)
+                since = (uint32_t)strtoul(val, nullptr, 10);
+            if (httpd_query_key_value(q, "limit", val, sizeof(val)) == ESP_OK)
+                limit = (uint32_t)strtoul(val, nullptr, 10);
+        }
+    }
+    if (limit == 0 || limit > 240) limit = 240;
+    const csi_probe::Stats st = csi_probe::stats();
+    const auto recs = csi_probe::records_since(since, limit);
+    char buf[160];
+    std::string out;
+    out.reserve(256 + recs.size() * 200);
+    snprintf(buf, sizeof(buf),
+             "{\"enabled\":%s,\"bssid\":\"%02x:%02x:%02x:%02x:%02x:%02x\",\"rx\":%lu,"
+             "\"dropped\":%lu,\"seq\":%lu,",
+             st.enabled ? "true" : "false", st.bssid[0], st.bssid[1], st.bssid[2],
+             st.bssid[3], st.bssid[4], st.bssid[5], (unsigned long)st.rx,
+             (unsigned long)st.dropped, (unsigned long)st.last_seq);
+    out += buf;
+    out += "\"fields\":[\"seq\",\"t\",\"n\",\"rssi\",\"rssi_sd\",\"change\",\"jitter\",\"wander\","
+           "\"bssid_changed\",\"connected\",\"power\",\"operating\",\"mode\",\"fan\",\"stage\","
+           "\"vane\",\"wide_vane\",\"freq\",\"spectrum\"],\"records\":[";
+    static const char kHex[] = "0123456789abcdef";
+    for (size_t i = 0; i < recs.size(); i++) {
+        const auto& r = recs[i];
+        snprintf(buf, sizeof(buf), "%s[%lu,%lu,%u,%d,%u,%u,%u,%u,%d,%d,%d,%d,%u,%u,%u,%u,%u,%u,\"",
+                 i ? "," : "", (unsigned long)r.seq, (unsigned long)r.t, r.n, r.rssi,
+                 r.rssi_sd, r.change, r.jitter, r.wander, r.bssid_changed ? 1 : 0,
+                 r.unit.connected ? 1 : 0, r.unit.power ? 1 : 0, r.unit.operating ? 1 : 0,
+                 r.unit.mode, r.unit.fan, r.unit.stage, r.unit.vane, r.unit.wide_vane,
+                 r.unit.freq);
+        out += buf;
+        for (uint8_t b : r.spectrum) { out += kHex[b >> 4]; out += kHex[b & 15]; }
+        out += "\"]";
+    }
+    out += "]}";
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    httpd_resp_send(req, out.data(), out.size());
+    return ESP_OK;
+}
+
+// ── POST /api/diag/csi (admin) — {"enabled": bool}, persisted ──────────
+esp_err_t handle_csi_post(httpd_req_t* req) {
+    set_cors(req);
+    REQUIRE_ADMIN(req);
+    char* body = recv_body(req);
+    if (!body) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Empty or oversized body");
+        return ESP_FAIL;
+    }
+    cJSON* json = cJSON_Parse(body);
+    free(body);
+    const cJSON* v = json ? cJSON_GetObjectItem(json, "enabled") : nullptr;
+    if (!v || !cJSON_IsBool(v)) {
+        if (json) cJSON_Delete(json);
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Expected {\"enabled\": bool}");
+        return ESP_FAIL;
+    }
+    const bool on = cJSON_IsTrue(v);
+    cJSON_Delete(json);
+    csi_probe::set_enabled(on);
+    events::log(events::Cat::System, events::Actor::WebUI,
+                on ? "CSI probe enabled" : "CSI probe disabled",
+                web_actor_name(req), peer_ipv4(req));
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, on ? "{\"enabled\":true}" : "{\"enabled\":false}");
+    return ESP_OK;
+}
+
 // ── DELETE /api/events (admin) ─────────────────────────────────────────
 esp_err_t handle_events_clear(httpd_req_t* req) {
     set_cors(req);
@@ -4494,6 +4579,8 @@ esp_err_t init(const Hooks& hooks) {
         {"/api/diag/reset-brownout", HTTP_POST,    handle_diag_reset_brownout, nullptr},
         {"/api/diag/reset-wifi-drops", HTTP_POST,  handle_diag_reset_wifi_drops, nullptr},
         {"/api/diag/reset-vin-min",  HTTP_POST,    handle_diag_reset_vin_min, nullptr},
+        {"/api/diag/csi",            HTTP_GET,     handle_csi_get,        nullptr},
+        {"/api/diag/csi",            HTTP_POST,    handle_csi_post,       nullptr},
         {"/api/mqtt",                HTTP_GET,      handle_mqtt_get,       nullptr},
         {"/api/mqtt",                HTTP_POST,     handle_mqtt_post,      nullptr},
         {"/api/device",              HTTP_POST,     handle_device_post,    nullptr},

@@ -278,6 +278,64 @@ paths:
                 type: object
                 properties:
                   status: { type: string, example: ok }
+  /api/diag/csi:
+    get:
+      tags: [Diagnostics]
+      summary: Experimental passive Wi-Fi CSI occupancy probe records
+      description: >-
+        Admin only. Status of the probe plus 5 s feature records newer than
+        `since`, oldest first (RAM ring, last hour). Each record is an array in
+        the order given by `fields`; `spectrum` is hex, one byte per LLTF
+        subcarrier (window-mean normalised amplitude x64). The probe only
+        listens to legacy-rate frames from the connected AP, so it adds no
+        transmit traffic.
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+        - SessionCookie: []
+      parameters:
+        - { name: since, in: query, schema: { type: integer, default: 0 } }
+        - { name: limit, in: query, schema: { type: integer, default: 240, maximum: 240 } }
+      responses:
+        '200':
+          description: Probe status and records
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  enabled: { type: boolean }
+                  bssid: { type: string }
+                  rx: { type: integer, description: CSI packets accepted }
+                  dropped: { type: integer, description: packets lost to queue overflow }
+                  seq: { type: integer, description: newest record sequence }
+                  fields: { type: array, items: { type: string } }
+                  records: { type: array, items: { type: array, items: {} } }
+    post:
+      tags: [Diagnostics]
+      summary: Enable or disable the CSI probe (persisted; default off)
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+        - SessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [enabled]
+              properties:
+                enabled: { type: boolean }
+      responses:
+        '200':
+          description: New state
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  enabled: { type: boolean }
   /api/ota:
     post:
       tags: [Firmware]

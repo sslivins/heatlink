@@ -506,6 +506,8 @@ true while the unit reports an error code.
 |--------|------|---------|
 | `POST` | `/api/diag/reset-brownout` | reset the persisted brownout counter |
 | `POST` | `/api/diag/reset-wifi-drops` | reset the WiFi-drop counter |
+| `GET`  | `/api/diag/csi` | experimental passive Wi-Fi CSI occupancy probe: status + 5 s feature records (`?since=<seq>`, admin) |
+| `POST` | `/api/diag/csi` | `{"enabled": bool}` — turn the CSI probe on/off (persisted, default off, admin) |
 
 ### Provisioning & configuration
 

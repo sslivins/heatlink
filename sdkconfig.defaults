@@ -67,6 +67,10 @@ CONFIG_ESP_WIFI_ROAMING_BACKOFF_TIME=60
 CONFIG_ESP_WIFI_ROAMING_LEGACY_ROAMING=y
 CONFIG_ESP_WIFI_ROAMING_NETWORK_ASSISTED_ROAM=y
 
+# Channel state information for the experimental passive occupancy probe
+# (csi_probe; off at runtime unless enabled per head).
+CONFIG_ESP_WIFI_CSI_ENABLED=y
+
 # Bluetooth LE (NimBLE), observer only: passive scanning for wireless room
 # sensors (Shelly BLU H&T / BTHome, #142). The stack starts only once a sensor
 # is paired or pairing begins. No connections, advertising or pairing/bonding.
