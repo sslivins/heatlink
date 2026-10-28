@@ -67,6 +67,12 @@ with no UI of its own. HeatLink is different:
   **GitHub self-update**, all with A/B partitions and automatic rollback.
 - 📡 **Self-provisioning & self-discovery.** Captive-portal WiFi setup on first
   boot, mDNS hostname, and DNS-SD advertisement so tools can find every unit.
+- 📶 **Careful multi-AP roaming.** On a mesh / multi-AP network a head only
+  roams when its link has averaged below −70 dBm for a minute *and* two scans
+  20 s apart both show another AP at least 8 dB stronger than the current one.
+  After any AP change it compares the new link with the old; if the new AP is
+  worse it goes back and avoids that AP for an hour. Roams are recorded in the
+  activity log. AP-steered (802.11v) transitions are still honoured.
 
 > **Status: working.** Architecture, threading, WiFi (incl. captive-portal
 > provisioning + mDNS), the on-device web UI / REST API, the MQTT client +

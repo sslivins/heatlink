@@ -15,6 +15,7 @@ on:
       - 'components/history/**'
       - 'components/room_sensor/**'
       - 'components/tokens/**'
+      - 'components/roam/**'
       - 'test/host/**'
       - 'test/ui/**'
       - 'test/api/**'
@@ -124,6 +125,16 @@ jobs:
             test/host/test_token_logic.cpp \
             -o token_tests
           ./token_tests
+
+      - name: Build and run host roaming-policy tests
+        shell: bash
+        run: |
+          g++ -std=c++17 -Wall -Wextra -fsanitize=address,undefined \
+            -I components/roam/include \
+            components/roam/roam_logic.cpp \
+            test/host/test_roam_logic.cpp \
+            -o roam_tests
+          ./roam_tests
 
       - name: Run Node host tests (web UI + API contract)
         shell: bash
