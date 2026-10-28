@@ -5,6 +5,7 @@
 #include "auth_manager.h"
 #include "dns_server.h"
 #include "group_proto.h"
+#include "roam_ctl.h"
 
 #include <cstring>
 #include <cstdio>
@@ -208,6 +209,8 @@ void on_event(void*, esp_event_base_t base, int32_t id, void* data) {
         // In provisioning (APSTA) the STA side is only used for scanning; don't
         // start a reconnect loop against credentials that just failed.
         if (s_mode != Mode::PROVISIONING) esp_wifi_connect();
+    } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_CONNECTED) {
+        if (s_mode != Mode::PROVISIONING) roam_ctl::on_sta_connected();
     } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
         if (s_mode == Mode::PROVISIONING) return;
         uint32_t expected = 0;
@@ -217,6 +220,10 @@ void on_event(void*, esp_event_base_t base, int32_t id, void* data) {
         // it is neither an outage nor a failed attempt.
         if (d && d->reason == WIFI_REASON_ROAMING) {
             ESP_LOGI(TAG, "roaming to another AP");
+            return;
+        }
+        if (roam_ctl::on_sta_disconnected()) {
+            ESP_LOGI(TAG, "leaving AP for a directed roam");
             return;
         }
         // Count a genuine outage only on the established->lost transition, not
@@ -748,6 +755,7 @@ esp_err_t init() {
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &sta));
     ESP_ERROR_CHECK(esp_wifi_start());
     apply_tx_power_cap();
+    roam_ctl::disable_app_triggers();
 
     ESP_LOGI(TAG, "connecting to '%s'…", ssid);
     EventBits_t bits = xEventGroupWaitBits(
@@ -762,6 +770,7 @@ esp_err_t init() {
         wd.callback = &link_watchdog_cb;
         wd.name = "wifi_wd";
         if (esp_timer_create(&wd, &s_link_wd) == ESP_OK) esp_timer_start_periodic(s_link_wd, kLinkWdPeriodUs);
+        roam_ctl::start();
         return ESP_OK;
     }
 

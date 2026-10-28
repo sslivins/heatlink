@@ -50,17 +50,22 @@ CONFIG_HTTPD_MAX_REQ_HDR_LEN=2048
 # httpd pool plus MQTT, mDNS and the OTA HTTPS check all fit. 16 is the max.
 CONFIG_LWIP_MAX_SOCKETS=16
 
-# Wi-Fi roaming (ESP-IDF roaming app). Only acts when the link is weak:
-# below -70 dBm, rescan at most every 4 min and move to an AP that is at
-# least 8 dB stronger. 802.11k/v lets the AP list neighbours / steer us.
+# Wi-Fi roaming. The ESP-IDF roaming app handles reconnects and 802.11v
+# (AP-steered) transitions, but its own triggers roam on a single momentary
+# RSSI dip, so both are switched off at runtime (roam_ctl::disable_app_triggers)
+# and their thresholds floored here as a backstop. (Compiling the low-RSSI
+# trigger out doesn't build on IDF 6.1, and the app needs a trigger compiled in
+# to start at all.) When to roam is decided by components/roam
+# (main/roam_ctl.cpp): sustained weak link, a candidate at least 8 dB stronger
+# in two scans, and a roll-back if the new AP turns out worse.
 CONFIG_ESP_WIFI_11KV_SUPPORT=y
 CONFIG_ESP_WIFI_RRM_SUPPORT=y
 CONFIG_ESP_WIFI_WNM_SUPPORT=y
 CONFIG_ESP_WIFI_ENABLE_ROAMING_APP=y
 CONFIG_ESP_WIFI_ROAMING_LOW_RSSI_ROAMING=y
-CONFIG_ESP_WIFI_ROAMING_LOW_RSSI_THRESHOLD=-70
+CONFIG_ESP_WIFI_ROAMING_LOW_RSSI_THRESHOLD=-99
 CONFIG_ESP_WIFI_ROAMING_PERIODIC_SCAN_MONITOR=y
-CONFIG_ESP_WIFI_ROAMING_PERIODIC_SCAN_THRESHOLD=-70
+CONFIG_ESP_WIFI_ROAMING_PERIODIC_SCAN_THRESHOLD=-99
 CONFIG_ESP_WIFI_ROAMING_SCAN_MONITOR_INTERVAL=240
 CONFIG_ESP_WIFI_ROAMING_SCAN_ROAM_RSSI_DIFF=8
 CONFIG_ESP_WIFI_ROAMING_BACKOFF_TIME=60
