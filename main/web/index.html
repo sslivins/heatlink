@@ -247,7 +247,7 @@ cursor:pointer;user-select:none;transition:.15s}
   color-mix(in srgb,var(--band) var(--band-a2),transparent))}
 .hist-legend label{cursor:pointer}
 .hist-wrap{position:relative;width:100%;overflow-x:clip;min-height:240px}
-.hist-chart{width:100%;height:auto;display:block;touch-action:pan-y;user-select:none}
+.hist-chart{width:100%;height:auto;display:block;touch-action:pan-y;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}
 .hist-chart.dragging{cursor:grabbing}
 .hist-hint-touch{display:none}
 @media (hover:none){.hist-hint-mouse{display:none}.hist-hint-touch{display:block}}
@@ -773,7 +773,7 @@ border-radius:20px;background:var(--chip);color:var(--fg-3);border:1px solid var
       <button class="btn" id="histNext" onclick="histStep(1)">Later ›</button>
     </div>
     <p class="hint hist-hint-mouse" style="text-align:center;margin-top:10px">Double-click the chart to centre it on that moment, or drag it sideways.</p>
-    <p class="hint hist-hint-touch" style="text-align:center;margin-top:10px">Touch the chart and slide your finger to read values. Use Earlier / Later to move in time.</p>
+    <p class="hint hist-hint-touch" style="text-align:center;margin-top:10px">Swipe the chart sideways to move in time. Touch and hold, then slide, to read values.</p>
   </div>
   </div><!-- /panel-history -->
 
@@ -1667,7 +1667,7 @@ const I18N = { fr: {
   "Defrost":"Dégivrage","Quiet":"Silencieux","Room sensor":"Capteur de pièce",
   "‹ Earlier":"‹ Plus tôt","Later ›":"Plus tard ›","Latest":"Actuel",
   "Double-click the chart to centre it on that moment, or drag it sideways.":"Double-cliquez sur le graphique pour le centrer sur ce moment, ou faites-le glisser latéralement.",
-  "Touch the chart and slide your finger to read values. Use Earlier / Later to move in time.":"Touchez le graphique et faites glisser le doigt pour lire les valeurs. Utilisez Plus tôt / Plus tard pour vous déplacer dans le temps.",
+  "Swipe the chart sideways to move in time. Touch and hold, then slide, to read values.":"Balayez le graphique latéralement pour vous déplacer dans le temps. Touchez longuement puis faites glisser pour lire les valeurs.",
   "Could not load history.":"Impossible de charger l’historique.",
   "Waiting for the clock to be set…":"En attente de la mise à l’heure…",
   "Nothing recorded for this period yet. A sample is taken every 30 seconds.":"Rien d’enregistré pour cette période. Un relevé est pris toutes les 30 secondes.",
@@ -4686,44 +4686,64 @@ function histPanPreview(svg,dx){
     else{ g.removeAttribute('transform'); g.removeAttribute('clip-path'); }
   });
 }
-// Mouse drag pans; touch keeps its drag for the hover readout.
+// Drag pans the window. On touch, a quick sideways drag pans; press-and-hold
+// first, then drag, scrubs the readout.
+const HIST_HOLD_MS=400;
 function histWire(){
   if(histWired) return;
   const wrap=$('histWrap'); if(!wrap) return;
   histWired=true;
   wrap.addEventListener('pointermove',ev=>{
     if(histDrag){
+      if(!ev.isPrimary) return;
+      if(histDrag.scrub){ histHover(ev); return; }
       histDrag.dx=ev.clientX-histDrag.x0;
-      if(!histDrag.moved && Math.abs(histDrag.dx)<5) return;
+      if(!histDrag.moved && Math.abs(histDrag.dx)<(histDrag.touch?10:5)) return;
       if(!histDrag.moved){ histDrag.moved=true; histDrag.svg.classList.add('dragging'); histHide(); }
       histPanPreview(histDrag.svg,histDrag.dx);
       return;
     }
     histHover(ev);
   });
-  // Touch: a tap or finger slide shows the readout, which stays after lifting
-  // until the user touches somewhere else.
+  // Touch: a tap or hold-and-slide shows the readout, which stays after
+  // lifting until the user touches somewhere else.
   wrap.addEventListener('pointerleave',ev=>{ if(!histDrag && ev.pointerType==='mouse') histHide(); });
   document.addEventListener('pointerdown',ev=>{
     if(ev.pointerType!=='mouse' && !(ev.target.closest&&ev.target.closest('#histWrap .hist-chart'))) histHide();
   });
   wrap.addEventListener('pointerdown',ev=>{
     const svg=ev.target.closest&&ev.target.closest('.hist-chart');
-    if(svg && ev.pointerType!=='mouse'){ histHover(ev); return; }
-    if(!svg||ev.button!==0||!histGeom) return;
-    histDrag={svg,x0:ev.clientX,dx:0,moved:false};
+    if(!svg||!histGeom||!ev.isPrimary) return;
+    const touch=ev.pointerType!=='mouse';
+    if(!touch&&ev.button!==0) return;
+    const drag={svg,x0:ev.clientX,dx:0,moved:false,touch,scrub:false,hold:0};
+    histDrag=drag;
+    if(touch){
+      histHover(ev);
+      drag.hold=setTimeout(()=>{ if(!drag.moved) drag.scrub=true; },HIST_HOLD_MS);
+    }
   });
-  window.addEventListener('pointerup',()=>{
+  // Holding a finger on the chart scrubs; don't pop the long-press menu.
+  wrap.addEventListener('contextmenu',ev=>{
+    if(histDrag&&histDrag.touch&&ev.target.closest&&ev.target.closest('.hist-chart')) ev.preventDefault();
+  });
+  const dragEnd=ev=>{
     const drag=histDrag, d=hist.data, g=histGeom;
+    if(!drag||!ev.isPrimary) return;
     histDrag=null;
-    if(!drag||!drag.moved||!d||!g) return;
+    clearTimeout(drag.hold);
+    if(!drag.moved||!d||!g) return;
+    // The browser took the gesture (e.g. a page scroll): put the chart back.
+    if(ev.type==='pointercancel'){ histPanPreview(drag.svg,0); drag.svg.classList.remove('dragging'); return; }
     const rect=drag.svg.getBoundingClientRect();
     const plotPx=rect.width*(g.plotR-g.plotL)/g.W;
     const snap=HIST_SNAP[hist.window]||900;
     const target=Math.round((d.end-drag.dx/plotPx*(g.end-g.start))/snap)*snap;
     if(target===d.end || Math.abs(target-d.end)<snap/2){ histPanPreview(drag.svg,0); drag.svg.classList.remove('dragging'); return; }
     histGoto(target);
-  });
+  };
+  window.addEventListener('pointerup',dragEnd);
+  window.addEventListener('pointercancel',dragEnd);
   wrap.addEventListener('dblclick',ev=>{
     const svg=ev.target.closest&&ev.target.closest('.hist-chart');
     if(!svg||!histGeom) return;
