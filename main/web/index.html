@@ -255,6 +255,8 @@ cursor:pointer;user-select:none;transition:.15s}
    Keep in sync with histNarrowMQ. */
 @media (max-width:640px){#histSeg button[data-w="604800"]{display:none}}
 .hist-axis{fill:var(--fg-3);font-size:11px;font-family:inherit}
+.hist-edge{fill:var(--fg-2);font-size:11px;font-weight:600;font-family:inherit;paint-order:stroke;stroke:var(--surface);stroke-width:3px}
+.hist-spin{position:absolute;width:26px;height:26px;margin:-13px 0 0 -13px;box-sizing:border-box;border:3px solid var(--border-strong);border-top-color:var(--fg-2);border-radius:50%;animation:wzspin .8s linear infinite;pointer-events:none}
 .hist-tip{display:none;position:absolute;top:8px;pointer-events:none;background:var(--surface);border:1px solid var(--border-strong);
   border-radius:8px;padding:7px 10px;font-size:.78em;line-height:1.6;white-space:nowrap;box-shadow:0 4px 14px rgba(0,0,0,.3);z-index:2}
 .hist-tip i{width:10px;height:3px;border-radius:2px;display:inline-block;margin-right:6px;vertical-align:middle}
@@ -1671,6 +1673,7 @@ const I18N = { fr: {
   "Could not load history.":"Impossible de charger l’historique.",
   "Waiting for the clock to be set…":"En attente de la mise à l’heure…",
   "Nothing recorded for this period yet. A sample is taken every 30 seconds.":"Rien d’enregistré pour cette période. Un relevé est pris toutes les 30 secondes.",
+  "Start of history":"Début de l’historique",
   // Common dynamic toasts (parameterised with {n})
   "Applied {n} dBm":"{n} dBm appliqué",
 }
@@ -4407,10 +4410,14 @@ function histFitWindow(){
 histNarrowMQ.addEventListener('change',()=>{ if(histFitWindow()&&histTabActive) histLoad(); });
 
 async function histLoad(){
-  if(hist.loading) return;
+  const spin=hist.spin; hist.spin=null;
+  // A newer request while one is in flight is picked up when it finishes.
+  if(hist.loading){ if(spin!=null) hist.spin=spin; return; }
   histFitWindow();
   hist.loading=true;
-  const win=hist.window;
+  const win=hist.window, end=hist.end;
+  // Spinner over the part of the plot that's loading, if it's not quick.
+  const spinTimer=spin==null?0:setTimeout(()=>histShowSpin(spin),200);
   try{
     const r=await jget('/api/history?window='+hist.window+(hist.end?'&end='+hist.end:''));
     if(r.ok){
@@ -4422,8 +4429,20 @@ async function histLoad(){
   }catch(e){ hist.error='Could not load history.'; }
   hist.loadedAt=Date.now();
   hist.loading=false;
-  if(hist.window!==win){ histLoad(); return; }
+  clearTimeout(spinTimer);
+  if(hist.window!==win||hist.end!==end){ histLoad(); return; }
   histRender();
+}
+// frac: where across the plot (0 = left edge, 1 = right) the new data lands.
+function histShowSpin(frac){
+  const wrap=$('histWrap'), svg=wrap&&wrap.querySelector('.hist-chart'), g=histGeom;
+  if(!svg||!g||!hist.loading) return;
+  const wr=wrap.getBoundingClientRect(), r=svg.getBoundingClientRect(), k=r.width/g.W;
+  let el=wrap.querySelector('.hist-spin');
+  if(!el){ el=document.createElement('div'); el.className='hist-spin'; wrap.appendChild(el); }
+  const x=g.plotL+Math.min(1,Math.max(0,frac))*(g.plotR-g.plotL);
+  el.style.left=(r.left-wr.left+x*k)+'px';
+  el.style.top=(r.top-wr.top+(g.plotT+g.bottom)/2*k)+'px';
 }
 function histDateLocale(){ return LANG==='fr'?'fr':[]; }
 function histFmt(ts,withDate){
@@ -4483,10 +4502,28 @@ function histSvg(d,W){
         `<stop offset="0" style="stop-color:${c};stop-opacity:var(--band-a0)"/>`+
         `<stop offset="0.7" style="stop-color:${c};stop-opacity:var(--band-a1)"/>`+
         `<stop offset="1" style="stop-color:${c};stop-opacity:var(--band-a2)"/></linearGradient>`;}).join('')+
+    `<pattern id="histHatch" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">`+
+    `<line x1="0" y1="0" x2="0" y2="8" stroke="var(--border-strong)" stroke-width="2"/></pattern>`+
     `</defs>`;
   const hline=(y,label)=>`<line x1="${plotL}" y1="${f1(y)}" x2="${plotR}" y2="${f1(y)}" stroke="var(--border-strong)" stroke-width="1"/>`+
     `<text x="${plotL-6}" y="${f1(y+4)}" text-anchor="end" class="hist-axis">${label}</text>`;
   for(let v=ax.lo; v<=ax.hi+1e-9; v+=ax.step) svg+=hline(mapY(v), v+'°');
+
+  // Hatch where there's nothing to show: before the oldest record and after
+  // now. It pans with the data (so a drag past either end shows it) but is
+  // always clipped to the plot.
+  const xAt=t=>plotL+(t-start)/span*plotW, far=plotW*4;
+  // Labels run down the boundary inside the hatch so a thin strip still fits.
+  const edge=(x1,x2,x,label,side)=>{
+    const lx=side>0?x+5:x-15, ly=plotT+6;
+    return `<rect x="${f1(x1)}" y="${plotT}" width="${f1(x2-x1)}" height="${bottom-plotT}" fill="url(#histHatch)"/>`+
+      `<line x1="${f1(x)}" y1="${plotT}" x2="${f1(x)}" y2="${bottom}" stroke="var(--fg-3)" stroke-width="1.5"/>`+
+      `<text x="${f1(lx)}" y="${ly}" transform="rotate(90 ${f1(lx)} ${ly})" class="hist-edge">${i18n(label)}</text>`;
+  };
+  let edges='';
+  if(d.earliest){ const x=xAt(d.earliest); if(x>plotL-far) edges+=edge(x-far,x,x,'Start of history',-1); }
+  if(d.latest_end){ const x=xAt(d.latest_end); if(x<plotR+far) edges+=edge(x,x+far,x,'Now',1); }
+  if(edges) svg+=`<g clip-path="url(#histClip)"><g class="hist-pan" data-fixed-clip="1">${edges}</g></g>`;
 
   // Everything time-dependent pans together while dragging.
   svg+=`<g class="hist-pan">`;
@@ -4582,7 +4619,7 @@ function histSvg(d,W){
     `<line class="hist-hover-line" y1="${plotT}" y2="${bottom}" stroke="var(--fg-3)" stroke-width="1" stroke-dasharray="4 3"/>`+
     `<circle data-key="room" r="4" fill="var(--hist-room)"/><circle data-key="target" r="4" fill="var(--hist-target)"/>`+
     `<circle data-key="out" r="4" fill="var(--hist-out)"/><circle data-key="sensor" r="4" fill="var(--hist-room)"/></g></svg>`;
-  histGeom={W,plotL,plotR,mapX,midX,mapY:v=>mapY(disp(v)),rows,ser,start,end};
+  histGeom={W,H,plotL,plotR,plotT,bottom,mapX,midX,mapY:v=>mapY(disp(v)),rows,ser,start,end};
   return svg;
 }
 function histRender(){
@@ -4616,8 +4653,9 @@ function histRender(){
 }
 // Show the window ending at `end` (unix s), kept within the stored range; null
 // (or the newest window) is the live view.
-function histGoto(end){
+function histGoto(end,spin=0.5){
   const d=hist.data;
+  hist.spin=spin;
   if(end==null||!d){ hist.end=null; }
   else{
     const lo=(d.earliest||d.start)+hist.window;
@@ -4626,7 +4664,7 @@ function histGoto(end){
   }
   histLoad();
 }
-function histStep(dir){ if(hist.data) histGoto(hist.data.end+dir*hist.window/2); }
+function histStep(dir){ if(hist.data) histGoto(hist.data.end+dir*hist.window/2,dir<0?0.25:0.75); }
 function histSetWindow(w){
   const d=hist.data;
   hist.window=w;
@@ -4682,9 +4720,37 @@ function histHover(ev){
 function histPanPreview(svg,dx){
   const units=dx*histGeom.W/svg.getBoundingClientRect().width;
   svg.querySelectorAll('.hist-pan').forEach(g=>{
-    if(dx){ g.setAttribute('transform',`translate(${units.toFixed(1)} 0)`); g.setAttribute('clip-path','url(#histClip)'); }
-    else{ g.removeAttribute('transform'); g.removeAttribute('clip-path'); }
+    const clip=!g.dataset.fixedClip;
+    if(dx){ g.setAttribute('transform',`translate(${units.toFixed(1)} 0)`); if(clip) g.setAttribute('clip-path','url(#histClip)'); }
+    else{ g.removeAttribute('transform'); if(clip) g.removeAttribute('clip-path'); }
   });
+}
+// How far (px) the chart can be dragged: forward to now, back to the oldest
+// record.
+function histPanLimits(svg){
+  const d=hist.data, g=histGeom;
+  const pxPerS=svg.getBoundingClientRect().width*(g.plotR-g.plotL)/g.W/(g.end-g.start);
+  const fwd=Math.max(0,d.latest_end-d.end);
+  const back=d.earliest?Math.max(0,d.start-d.earliest):0;
+  return {min:-fwd*pxPerS, max:back*pxPerS};
+}
+// Past either end the chart follows the finger at a third of the speed.
+function histRubber(dx,lim){
+  if(dx>lim.max) return lim.max+(dx-lim.max)/3;
+  if(dx<lim.min) return lim.min+(dx-lim.min)/3;
+  return dx;
+}
+function histSpringBack(svg,from){
+  const t0=performance.now(), ms=180;
+  const step=now=>{
+    if(!svg.isConnected||histDrag) return;
+    const k=Math.min(1,(now-t0)/ms);
+    const dx=from*(1-k)*(1-k);
+    histPanPreview(svg,k<1?dx:0);
+    if(k<1) requestAnimationFrame(step);
+    else svg.classList.remove('dragging');
+  };
+  requestAnimationFrame(step);
 }
 // Drag pans the window. On touch, a quick sideways drag pans; press-and-hold
 // first, then drag, scrubs the readout.
@@ -4700,7 +4766,9 @@ function histWire(){
       histDrag.dx=ev.clientX-histDrag.x0;
       if(!histDrag.moved && Math.abs(histDrag.dx)<(histDrag.touch?10:5)) return;
       if(!histDrag.moved){ histDrag.moved=true; histDrag.svg.classList.add('dragging'); histHide(); }
-      histPanPreview(histDrag.svg,histDrag.dx);
+      if(!histDrag.lim&&hist.data) histDrag.lim=histPanLimits(histDrag.svg);
+      histDrag.eff=histDrag.lim?histRubber(histDrag.dx,histDrag.lim):histDrag.dx;
+      histPanPreview(histDrag.svg,histDrag.eff);
       return;
     }
     histHover(ev);
@@ -4737,10 +4805,14 @@ function histWire(){
     if(ev.type==='pointercancel'){ histPanPreview(drag.svg,0); drag.svg.classList.remove('dragging'); return; }
     const rect=drag.svg.getBoundingClientRect();
     const plotPx=rect.width*(g.plotR-g.plotL)/g.W;
+    const lim=drag.lim||histPanLimits(drag.svg);
+    const dx=Math.max(lim.min,Math.min(lim.max,drag.dx));
     const snap=HIST_SNAP[hist.window]||900;
-    const target=Math.round((d.end-drag.dx/plotPx*(g.end-g.start))/snap)*snap;
-    if(target===d.end || Math.abs(target-d.end)<snap/2){ histPanPreview(drag.svg,0); drag.svg.classList.remove('dragging'); return; }
-    histGoto(target);
+    const target=Math.round((d.end-dx/plotPx*(g.end-g.start))/snap)*snap;
+    if(target===d.end || Math.abs(target-d.end)<snap/2){ histSpringBack(drag.svg,drag.eff||0); return; }
+    // Settle back inside the limits and spin over the strip being revealed.
+    histPanPreview(drag.svg,dx);
+    histGoto(target,dx>0?dx/2/plotPx:1+dx/2/plotPx);
   };
   window.addEventListener('pointerup',dragEnd);
   window.addEventListener('pointercancel',dragEnd);
