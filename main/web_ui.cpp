@@ -39,6 +39,7 @@
 #include "esp_http_client.h"
 #include "esp_app_desc.h"
 #include "esp_system.h"
+#include "esp_heap_caps.h"
 #include "esp_timer.h"
 #include "cJSON.h"
 #include "mdns.h"
@@ -364,6 +365,13 @@ esp_err_t handle_status(httpd_req_t* req) {
                           !hvac_mqtt::get_settings().host.empty());
     cJSON_AddNumberToObject(root, "uptime_s", (double)(esp_timer_get_time() / 1000000));
     cJSON_AddNumberToObject(root, "free_heap", (double)esp_get_free_heap_size());
+    // free_heap includes PSRAM; internal SRAM is what Wi-Fi, BLE and DMA need.
+    cJSON_AddNumberToObject(root, "free_internal",
+                            (double)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
+    cJSON_AddNumberToObject(root, "largest_internal",
+                            (double)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
+    cJSON_AddNumberToObject(root, "min_free_internal",
+                            (double)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL));
 
     cJSON* p = cJSON_CreateObject();
     cJSON_AddBoolToObject(p, "present", pwr.present);

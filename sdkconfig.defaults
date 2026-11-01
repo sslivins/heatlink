@@ -34,6 +34,12 @@ CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
 # TLS cert bundle (optional MQTT-over-TLS + HTTPS OTA from GitHub)
 CONFIG_MBEDTLS_CERTIFICATE_BUNDLE=y
 CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_FULL=y
+# mbedTLS allocates with plain malloc instead of internal SRAM only, so large
+# buffers go to PSRAM and small ones fall back to it. Internal-only allocation
+# ran out during the GitHub release download: the redirect to the CDN host failed
+# certificate verification with PSA_ERROR_INSUFFICIENT_MEMORY (-141).
+# (Not EXTERNAL: SPIRAM_IGNORE_NOTFOUND lets boards without PSRAM boot.)
+CONFIG_MBEDTLS_DEFAULT_MEM_ALLOC=y
 
 # Misc
 CONFIG_FREERTOS_HZ=1000
